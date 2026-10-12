@@ -95,6 +95,8 @@ export function VehicleMap({ vehicles }: { vehicles: VehicleLocation[] }) {
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapLoading, setMapLoading] = useState(true);
+  const [useLeaflet, setUseLeaflet] = useState(false);
+  const [leafletLoaded, setLeafletLoaded] = useState(false);
   const [distances, setDistances] = useState<Record<number, DistanceInfo>>({});
   const [homeCoords, setHomeCoords] = useState<{ lat: number; lng: number }>({
     lat: DEFAULT_HOME_LAT,

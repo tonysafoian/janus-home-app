@@ -18,6 +18,16 @@ const router = Router();
 const TESLA_API_BASE = "https://fleet-api.prd.na.vn.cloud.tesla.com";
 const TESLA_AUTH_BASE = "https://fleet-auth.prd.vn.cloud.tesla.com";
 
+interface TeslaTokenRow {
+  id?: string;
+  user_id: string;
+  access_token: string;
+  refresh_token: string;
+  token_expires_at: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 async function refreshTokenIfNeeded(
   userId: string,
   tokenRow: Pick<TeslaTokenRow, 'access_token' | 'refresh_token' | 'token_expires_at'>

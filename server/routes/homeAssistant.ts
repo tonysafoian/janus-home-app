@@ -387,7 +387,8 @@ router.get('/cameras', async (req: AuthenticatedRequest, res: Response) => {
 });
 
 router.get('/camera_proxy/:entityId', async (req: AuthenticatedRequest, res: Response) => {
-  const entityId = req.params.entityId;
+  const rawEntityId = req.params.entityId;
+  const entityId = Array.isArray(rawEntityId) ? rawEntityId[0] : rawEntityId;
   if (!entityId || !entityId.startsWith('camera.')) {
     res.status(400).json({ error: 'Valid camera entityId required' });
     return;
@@ -426,7 +427,8 @@ router.get('/camera_proxy/:entityId', async (req: AuthenticatedRequest, res: Res
 });
 
 router.get('/camera_stream/:entityId', async (req: AuthenticatedRequest, res: Response) => {
-  const entityId = req.params.entityId;
+  const rawEntityId = req.params.entityId;
+  const entityId = Array.isArray(rawEntityId) ? rawEntityId[0] : rawEntityId;
   if (!entityId || !entityId.startsWith('camera.')) {
     res.status(400).json({ error: 'Valid camera entityId required' });
     return;
@@ -1259,7 +1261,7 @@ router.post('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =
           entity_id: speakers, volume_level: volumeLevelGH,
         }),
         callHA(HA_URL, HA_TOKEN, 'POST', '/api/services/media_player/play_media', {
-          entity_id: displayDevices,
+          entity_id: displays,
           media_content_id: JANUS_LOGO_URL,
           media_content_type: 'image/png',
         }),
