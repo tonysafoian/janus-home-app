@@ -1,7 +1,7 @@
 {
   "name": "household-os",
   "private": true,
-  "version": "1.0.15",
+  "version": "1.0.17",
   "type": "module",
   "scripts": {
     "dev": "tsx server/index.ts",

@@ -2447,6 +2447,20 @@ function clearAuthCookie(res) {
   });
 }
 function getAuthUser(req) {
+  const haUserId = req.headers["x-remote-user-id"] || req.headers["x-ingress-user-id"];
+  if (haUserId) {
+    const haUserName = req.headers["x-remote-user-name"] || req.headers["x-remote-user-display-name"] || "HA User";
+    const haAdminHeader = req.headers["x-remote-user-is-admin"];
+    const isAdmin2 = String(haAdminHeader).toLowerCase() === "true" || haAdminHeader === "1";
+    return {
+      userId: `ha:${haUserId}`,
+      email: `${haUserName.toLowerCase().replace(/[^a-z0-9]/g, ".")}@homeassistant.local`,
+      displayName: req.headers["x-remote-user-display-name"] || haUserName,
+      avatarUrl: null,
+      roles: isAdmin2 ? ["admin"] : ["member"],
+      approvalStatus: "approved"
+    };
+  }
   const cookieToken = req.cookies?.auth_token;
   if (cookieToken) {
     const user = verifyToken(cookieToken);
@@ -3634,7 +3648,7 @@ async function getAlertPhoneNumber() {
     }
   } catch (_) {
   }
-  _alertPhone = "           ";
+  _alertPhone = process.env.ALERT_PHONE_NUMBER || "";
   return _alertPhone;
 }
 async function sendWhatsApp(message) {
@@ -3642,6 +3656,7 @@ async function sendWhatsApp(message) {
   const token = process.env.WATI_ACCESS_TOKEN;
   if (!endpoint || !token) return;
   const phone = await getAlertPhoneNumber();
+  if (!phone) return;
   const serverRoot = endpoint.replace(/\/$/, "").replace(/\/api\/ext\/v3\/?$/, "").replace(/\/api\/ext\/?$/, "");
   try {
     await fetchT(
@@ -4181,19 +4196,19 @@ async function executePerplexitySearch(query3, deep = false) {
     return `Perplexity search error: ${errMsg}`;
   }
 }
-async function fetchSituationalAwareness(location = "Local Area   , CA") {
+async function fetchSituationalAwareness(location = process.env.HOME_LOCATION || "Local Area") {
   try {
     const apiKey = process.env.PERPLEXITY_API_KEY;
     if (!apiKey) return "";
     const now = /* @__PURE__ */ new Date();
     const dateStr = now.toLocaleDateString("en-US", {
-      timeZone: "America/Los_Angeles",
+      timeZone: process.env.TZ || process.env.TIME_ZONE || "UTC",
       weekday: "long",
       month: "long",
       day: "numeric",
       year: "numeric"
     });
-    const query3 = `What are the most important things happening right now in ${location} and Los Angeles area today (${dateStr})? Include: breaking news, weather advisories, traffic disruptions, notable local events, and any safety alerts. Be extremely concise \u2014 3 to 5 bullet points max, one line each.`;
+    const query3 = `What are the most important things happening right now in ${location} today (${dateStr})? Include: breaking news, weather advisories, traffic disruptions, notable local events, and any safety alerts. Be extremely concise \u2014 3 to 5 bullet points max, one line each.`;
     const result = await perplexitySearch(query3);
     if (!result.answer || result.answer.length < 20) return "";
     const lines = result.answer.split("\n").filter((l) => l.trim().length > 0).slice(0, 5);
@@ -4216,7 +4231,7 @@ async function fetchTravelIntelligence(destination, departureDate, returnDate) {
     return "";
   }
 }
-async function fetchTroubleshootingAdvice(system, issue, location = "Local Area   , CA") {
+async function fetchTroubleshootingAdvice(system, issue, location = process.env.HOME_LOCATION || "Local Area") {
   try {
     const apiKey = process.env.PERPLEXITY_API_KEY;
     if (!apiKey) return "";
@@ -4782,6 +4797,7 @@ async function sendAutomationFailureAlert(functionName, errorSummary) {
   if (_alertCooldowns[functionName] && now - _alertCooldowns[functionName] < ALERT_COOLDOWN_MS) return;
   _alertCooldowns[functionName] = now;
   const alertPhone = await getAlertPhoneNumber2();
+  if (!alertPhone) return;
   const msg = `\u26A0\uFE0F ${functionName} failed: ${errorSummary.slice(0, 200)}`;
   try {
     const baseUrl = `http://localhost:${process.env.PORT || 5e3}`;
@@ -5731,7 +5747,7 @@ var init_janus_tools = __esm({
       "metadata",
       "actionable"
     ]);
-    FALLBACK_ALERT_PHONE = "           ";
+    FALLBACK_ALERT_PHONE = process.env.ALERT_PHONE_NUMBER || "";
     _cachedAlertPhone = null;
     _alertPhoneFetchedAt = 0;
     ALERT_PHONE_CACHE_TTL = 10 * 6e4;
@@ -8731,8 +8747,7 @@ router.get("/api/auth/me", (req, res) => {
   res.json({ user });
 });
 router.post("/api/auth/demo", async (req, res) => {
-  const isDev = process.env.NODE_ENV !== "production";
-  const allowDemo = isDev || process.env.ENABLE_DEMO_LOGIN === "true" || !process.env.GOOGLE_CLIENT_SECRET;
+  const allowDemo = process.env.ENABLE_DEMO_LOGIN === "true";
   if (!allowDemo) {
     res.status(403).json({ error: "Demo login is disabled in this environment." });
     return;
@@ -8768,7 +8783,7 @@ router.post("/api/auth/demo", async (req, res) => {
 router.get("/api/auth/config", (_req, res) => {
   const googleConfigured = Boolean(process.env.GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID);
   const appleConfigured = Boolean(process.env.APPLE_CLIENT_ID || process.env.VITE_APPLE_CLIENT_ID);
-  const demoEnabled = process.env.ENABLE_DEMO_LOGIN !== "false";
+  const demoEnabled = process.env.ENABLE_DEMO_LOGIN === "true";
   res.json({ googleConfigured, appleConfigured, demoEnabled });
 });
 router.get("/api/auth/google", (req, res) => {
@@ -10207,7 +10222,8 @@ async function executeSearchPlaces(query3, near, type) {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) return "Google Maps API key not configured.";
   try {
-    const searchQuery = `${query3} near ${near || "Local Area   , CA"}`;
+    const nearLocation = near || process.env.HOME_LOCATION || "";
+    const searchQuery = nearLocation ? `${query3} near ${nearLocation}` : query3;
     const params = new URLSearchParams({ query: searchQuery, key: apiKey });
     if (type) params.set("type", type);
     const res = await fetch(`https://maps.googleapis.com/maps/api/place/textsearch/json?${params}`);
@@ -12983,7 +12999,7 @@ var OUTSIDER_BLOCKED_TOOLS = /* @__PURE__ */ new Set([
 ]);
 var ALL_TOOLS = [
   { type: "function", function: { name: "send_email", description: "Send an email from assistant@example.com. Use for longer or more formal communications. ADMIN ONLY. CRITICAL: Any URLs in the body MUST be copied EXACTLY from web_search or scrape_website results \u2014 never guess or reconstruct a URL.", parameters: { type: "object", properties: { to: { type: "string" }, subject: { type: "string" }, body: { type: "string" } }, required: ["to", "subject", "body"], additionalProperties: false } } },
-  { type: "function", function: { name: "gmail_search", description: "Search Tony's Gmail inbox using Gmail search syntax. ADMIN ONLY.", parameters: { type: "object", properties: { query: { type: "string" }, max_results: { type: "number" } }, required: ["query"], additionalProperties: false } } },
+  { type: "function", function: { name: "gmail_search", description: "Search admin Gmail inbox using Gmail search syntax. ADMIN ONLY.", parameters: { type: "object", properties: { query: { type: "string" }, max_results: { type: "number" } }, required: ["query"], additionalProperties: false } } },
   { type: "function", function: { name: "send_whatsapp", description: "Send a WhatsApp message via WATI.", parameters: { type: "object", properties: { to: { type: "string" }, message: { type: "string" } }, required: ["to", "message"], additionalProperties: false } } },
   { type: "function", function: { name: "query_notion_database", description: "Query a Notion database.", parameters: { type: "object", properties: { database_id: { type: "string" }, filter: { type: "object" } }, required: ["database_id"], additionalProperties: false } } },
   { type: "function", function: { name: "update_notion_page", description: "Update properties on a Notion page.", parameters: { type: "object", properties: { page_id: { type: "string" }, properties: { type: "object" } }, required: ["page_id", "properties"], additionalProperties: false } } },
@@ -12991,7 +13007,7 @@ var ALL_TOOLS = [
   { type: "function", function: { name: "create_notion_page", description: 'Create a new page in a Notion database. Pass simple key-value properties \u2014 the system auto-fetches the database schema and converts values to the correct Notion format. Use get_notion_database first if you need to discover property names. Example: {"Name": "My Project", "Status": "In Progress", "Due Date": "2025-04-01"}.', parameters: { type: "object", properties: { database_id: { type: "string" }, properties: { type: "object" } }, required: ["database_id", "properties"], additionalProperties: false } } },
   { type: "function", function: { name: "get_notion_database", description: "Get a Notion database schema.", parameters: { type: "object", properties: { database_id: { type: "string" } }, required: ["database_id"], additionalProperties: false } } },
   { type: "function", function: { name: "perplexity_search", description: "Search the web using Perplexity AI for synthesized, cited answers to knowledge questions. PREFERRED over web_search for: factual questions (what is, how does, why did, current status of), research topics, explanations, comparisons, and any question that benefits from a synthesized answer with citations. Use web_search instead ONLY for finding specific websites/URLs or when you need raw links to share.", parameters: { type: "object", properties: { query: { type: "string", description: "The search query \u2014 ask a clear, specific question for best results" }, deep: { type: "boolean", description: "Use deep search (sonar-pro) for complex research questions. Default false." } }, required: ["query"], additionalProperties: false } } },
-  { type: "function", function: { name: "home_troubleshoot", description: "Get troubleshooting advice for home system issues (HVAC, plumbing, electrical, pool, security, appliances, etc.). Provides likely causes, immediate steps, when to call a pro, and local service provider recommendations near Local Area   .", parameters: { type: "object", properties: { system: { type: "string", description: "The home system (e.g. 'HVAC', 'pool heater', 'electrical', 'plumbing', 'garage door')" }, issue: { type: "string", description: "Description of the issue or symptoms" } }, required: ["system", "issue"], additionalProperties: false } } },
+  { type: "function", function: { name: "home_troubleshoot", description: "Get troubleshooting advice for home system issues (HVAC, plumbing, electrical, pool, security, appliances, etc.). Provides likely causes, immediate steps, when to call a pro, and local service provider recommendations.", parameters: { type: "object", properties: { system: { type: "string", description: "The home system (e.g. 'HVAC', 'pool heater', 'electrical', 'plumbing', 'garage door')" }, issue: { type: "string", description: "Description of the issue or symptoms" } }, required: ["system", "issue"], additionalProperties: false } } },
   { type: "function", function: { name: "web_search", description: "Search the web for links, products, URLs, and raw search results via Firecrawl. Use for finding specific websites, product links, or when you need raw URLs to share. For factual/knowledge questions, prefer perplexity_search instead.", parameters: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" } }, required: ["query"], additionalProperties: false } } },
   { type: "function", function: { name: "scrape_website", description: "Scrape a webpage and extract content as markdown.", parameters: { type: "object", properties: { url: { type: "string" } }, required: ["url"], additionalProperties: false } } },
   { type: "function", function: { name: "browse_website", description: "Open a real browser to interact with a website.", parameters: { type: "object", properties: { url: { type: "string" }, instruction: { type: "string" }, steps: { type: "array", items: { type: "object", properties: { action: { type: "string", enum: ["navigate", "act", "extract"] }, value: { type: "string" } }, required: ["action", "value"] } } }, required: ["url", "instruction"], additionalProperties: false } } },
@@ -13035,7 +13051,7 @@ var ALL_TOOLS = [
   { type: "function", function: { name: "wifi_who_is_online", description: "Return the currently-online wireless clients grouped by person/role (Primary, family, staff, IoT, Unknown). Joins live client data with the labeled network_devices inventory so the answer uses friendly device names instead of MAC addresses.", parameters: { type: "object", properties: { filter: { type: "string", enum: ["family", "staff", "guest", "iot", "unknown"], description: "Optional role filter \u2014 restrict output to one of family/staff/guest/iot/unknown" } }, additionalProperties: false } } },
   { type: "function", function: { name: "wifi_label_device", description: "Label a device in the network_devices inventory by MAC. Use when the user tells you which person owns a device or what to call it. ADMIN ONLY.", parameters: { type: "object", properties: { mac: { type: "string", description: "MAC address of the device to label" }, label: { type: "string", description: 'Friendly label, e.g. "Work iPhone 16 Pro"' }, owner_person_id: { type: "string", description: "Owner person id from household_members or role bucket" }, owner_role: { type: "string", enum: ["family", "staff", "guest", "iot", "unknown"], description: "Role bucket" }, device_type: { type: "string", description: "phone / tablet / laptop / tv / speaker / camera / iot / unknown" }, expected_ssid: { type: "string", description: "Which SSID this device should normally be on (alert when it appears elsewhere)" }, trusted: { type: "boolean", description: "Explicit trust flag" }, notes: { type: "string", description: "Free-form notes" } }, required: ["mac"], additionalProperties: false } } },
   { type: "function", function: { name: "wifi_unknown_devices", description: "Return the recently-seen devices that have not been labeled yet (no owner, no label, not trusted). Includes inferred vendor + hostname hints. Use this when asked 'what new devices are on the network'. ADMIN ONLY.", parameters: { type: "object", properties: { window_hours: { type: "number", description: "How far back to look. Default 24 hours; max 720." } }, additionalProperties: false } } },
-  { type: "function", function: { name: "search_system_events", description: "Search Janus's central app-activity log \u2014 almost EVERYTHING the app does is recorded here: home/IoT device actions, network & internet health, the Ball guest/RSVP system, security & access, scheduled automations, your own chat/email/WhatsApp actions, system health, config changes, logins, media generation, and vehicle events. Use for ANY question about what is happening or has happened in the app ('what's going on', 'anything new', 'catch me up', 'what happened with X', 'why did Y stop'). Set summary=true FIRST for a counts-by-area overview, then drill into one area with category. Always ground answers in the returned rows and timestamps \u2014 never fabricate.", parameters: { type: "object", properties: { summary: { type: "boolean", description: "Return a counts-by-area overview instead of individual rows. Use this FIRST for broad 'what's going on' questions." }, hours: { type: "number", description: "How many hours back to look. Default 24, max 720 (30 days)." }, category: { type: "string", description: "Area filter, e.g. home, network, ball, security, automation, automations, janus, system, config, auth, media, vehicle" }, severity: { type: "string", description: "info, warn, warning, error, or critical" }, status: { type: "string", description: "success, error, skipped, warning, or logged" }, actor: { type: "string", description: "Person or system that caused the event, e.g. 'Janus', 'Tony', or a monitor name (substring match)" }, source: { type: "string", description: "Originating job/function, e.g. 'cron-trigger', 'ball-rsvp' (substring match)" }, search: { type: "string", description: "Keyword to match in summary, event type, source, or actor" } }, additionalProperties: false } } },
+  { type: "function", function: { name: "search_system_events", description: "Search Janus's central app-activity log \u2014 almost EVERYTHING the app does is recorded here: home/IoT device actions, network & internet health, the Ball guest/RSVP system, security & access, scheduled automations, your own chat/email/WhatsApp actions, system health, config changes, logins, media generation, and vehicle events. Use for ANY question about what is happening or has happened in the app ('what's going on', 'anything new', 'catch me up', 'what happened with X', 'why did Y stop'). Set summary=true FIRST for a counts-by-area overview, then drill into one area with category. Always ground answers in the returned rows and timestamps \u2014 never fabricate.", parameters: { type: "object", properties: { summary: { type: "boolean", description: "Return a counts-by-area overview instead of individual rows. Use this FIRST for broad 'what's going on' questions." }, hours: { type: "number", description: "How many hours back to look. Default 24, max 720 (30 days)." }, category: { type: "string", description: "Area filter, e.g. home, network, ball, security, automation, automations, janus, system, config, auth, media, vehicle" }, severity: { type: "string", description: "info, warn, warning, error, or critical" }, status: { type: "string", description: "success, error, skipped, warning, or logged" }, actor: { type: "string", description: "Person or system that caused the event, e.g. 'Janus', 'Admin', or a monitor name (substring match)" }, source: { type: "string", description: "Originating job/function, e.g. 'cron-trigger', 'ball-rsvp' (substring match)" }, search: { type: "string", description: "Keyword to match in summary, event type, source, or actor" } }, additionalProperties: false } } },
   { type: "function", function: { name: "get_network_history", description: "Get network health history snapshots (FortiGate CPU, memory, sessions, WAN status, threat count) over the last N hours. Use to diagnose internet outages, slowdowns, or network performance issues.", parameters: { type: "object", properties: { hours: { type: "number", description: "How many hours of history to fetch. Default 6, max 48." } }, additionalProperties: false } } },
   LOAD_SKILL_TOOL
 ];
@@ -13062,7 +13078,7 @@ For ANY "what's going on / what's been happening / anything new / catch me up" q
 function getRoleSystemPromptAddendum(role) {
   if (role === "admin") return `
 
-The current user is the ADMIN (Tony). You have full access to all tools and data. No restrictions.
+The current user is the ADMIN. You have full access to all tools and data. No restrictions.
 CRITICAL: The Notion database IDs are listed in your system prompt above. NEVER call recall_facts to look up a database ID \u2014 use the exact ID from your knowledge.${DIAGNOSTIC_GUIDANCE}`;
   if (role === "outsider") return `
 
@@ -14905,7 +14921,10 @@ async function handleEmailPoll(req, res) {
   const svc = getServiceClient();
   try {
     const saKeyRaw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
-    if (!saKeyRaw) throw new Error("GOOGLE_SERVICE_ACCOUNT_KEY is not configured");
+    if (!saKeyRaw) {
+      res.json({ ok: true, skipped: true, reason: "GOOGLE_SERVICE_ACCOUNT_KEY is not configured" });
+      return;
+    }
     const saKey = JSON.parse(saKeyRaw);
     let accessToken;
     try {
@@ -14918,12 +14937,13 @@ async function handleEmailPoll(req, res) {
         try {
           const watiEndpoint = process.env.WATI_API_ENDPOINT;
           const watiToken = process.env.WATI_ACCESS_TOKEN;
-          if (watiEndpoint && watiToken) {
+          const alertPhone = await getAlertPhoneNumber2();
+          if (watiEndpoint && watiToken && alertPhone) {
             const serverRoot = watiEndpoint.replace(/\/$/, "").replace(/\/api\/ext\/v3\/?$/, "").replace(/\/api\/ext\/?$/, "");
             await fetch(`${serverRoot}/api/ext/v3/conversations/messages/text`, {
               method: "POST",
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${watiToken.replace(/^Bearer\s+/i, "")}` },
-              body: JSON.stringify({ target: "           ", text: "\u{1F6A8} *Janus Email Alert*: Gmail auth failed for assistant@example.com (401). Domain-wide delegation may have been revoked." })
+              body: JSON.stringify({ target: alertPhone, text: "\u{1F6A8} *Janus Email Alert*: Gmail auth failed (401). Domain-wide delegation may have been revoked." })
             });
           }
         } catch {
@@ -15322,7 +15342,7 @@ try {
 } catch {
   JANUS_SYSTEM_PROMPT = "You are Janus, the AI assistant for Janus.";
 }
-var JANUS_NUMBER = "           ";
+var JANUS_NUMBER = process.env.WATI_PHONE_NUMBER || "";
 var COOLDOWN_SECONDS = 30;
 function sanitizeReplyForWhatsApp(text2) {
   return text2.replace(/!\[[^\]]*\]\([^)]+\)/g, "").replace(/https?:\/\/[^\s]*supabase\.co\/storage\/[^\s)"]*/g, "").replace(/\n{3,}/g, "\n\n").trim();
@@ -16377,7 +16397,7 @@ async function handleWhatsApp(req, res) {
       return;
     }
     const normalizedFrom = fromNumber.replace(/[^\d]/g, "");
-    if (normalizedFrom === JANUS_NUMBER) {
+    if (JANUS_NUMBER && normalizedFrom === JANUS_NUMBER) {
       res.json({ ok: true, skipped: "self" });
       return;
     }
@@ -17308,7 +17328,7 @@ ${r.content}` : ""}`
 
 Search Queries Used: ${searchQueries.join(", ")}
 `;
-  const synthesisSystemPrompt = `You are an expert research analyst for the household administrator \u2014 a private estate in Local Area   . You have just completed a web research task.
+  const synthesisSystemPrompt = `You are an expert research analyst for the household administrator. You have just completed a web research task.
 
 Synthesize the provided research materials into a comprehensive, well-structured report. Use markdown formatting with headers, bullet points, and clear sections. Be thorough, precise, and factual \u2014 only state what the sources support.
 
@@ -17322,10 +17342,10 @@ Structure your report with:
 1. Executive Summary (2-3 sentences)
 2. Key Findings (bullet points with the most important discoveries)
 3. Detailed Analysis (organized by relevant subtopics)
-4. Implications & Recommendations (specific to Tony's context where applicable)
+4. Implications & Recommendations (specific to the household context where applicable)
 5. Sources (list ONLY the exact URLs from above that you referenced)
 
-Be direct and actionable. Tony is a busy executive \u2014 respect his time with clear takeaways.`;
+Be direct and actionable. Respect the administrator's time with clear takeaways.`;
   console.log("[Research] Synthesizing...");
   const rawReport = await callAI2(synthesisSystemPrompt, synthesisContent, 6e3);
   console.log(`[Research] Report generated (${rawReport.length} chars)`);
@@ -18230,6 +18250,9 @@ async function runCheck(name, fn) {
     let message;
     if (!msg) {
       status = latency_ms > 3e3 ? "degraded" : "ok";
+    } else if (msg.startsWith("not_configured:")) {
+      status = "not_configured";
+      message = msg.slice("not_configured:".length).trim();
     } else if (msg.startsWith("degraded:")) {
       status = "degraded";
       message = msg.slice("degraded:".length).trim();
@@ -18264,7 +18287,7 @@ async function checkJanusChat(signal) {
 async function checkJanusWhatsApp(signal) {
   const endpoint = process.env.WATI_API_ENDPOINT;
   const token = process.env.WATI_ACCESS_TOKEN;
-  if (!endpoint || !token) return "Missing WATI_API_ENDPOINT or WATI_ACCESS_TOKEN";
+  if (!endpoint || !token) return "not_configured: Missing WATI_API_ENDPOINT or WATI_ACCESS_TOKEN";
   const serverRoot = endpoint.replace(/\/$/, "").replace(/\/api\/ext\/v3\/?$/, "").replace(/\/api\/ext\/?$/, "");
   const url = `${serverRoot}/api/ext/v3/getContacts?pageSize=1`;
   const res = await fetch(url, {
@@ -18281,10 +18304,11 @@ async function checkJanusWhatsApp(signal) {
 }
 async function checkJanusEmail(signal) {
   const saKeyRaw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
-  if (!saKeyRaw) return "Missing GOOGLE_SERVICE_ACCOUNT_KEY";
+  if (!saKeyRaw) return "not_configured: Missing GOOGLE_SERVICE_ACCOUNT_KEY";
+  const assistantEmail = process.env.ASSISTANT_EMAIL || "assistant@example.com";
   const token = await getGoogleServiceToken(
     ["https://mail.google.com/"],
-    "assistant@example.com"
+    assistantEmail
   );
   const res = await fetch(
     "https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=1",
@@ -18296,12 +18320,13 @@ async function checkJanusEmail(signal) {
   }
   return null;
 }
-async function checkGmailTony(signal) {
+async function checkGoogleEmailAdmin(signal) {
   const saKeyRaw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
-  if (!saKeyRaw) return "Missing GOOGLE_SERVICE_ACCOUNT_KEY";
+  if (!saKeyRaw) return "not_configured: Missing GOOGLE_SERVICE_ACCOUNT_KEY";
+  const adminEmail = process.env.ADMIN_EMAIL || "admin@example.com";
   const token = await getGoogleServiceToken(
     ["https://mail.google.com/"],
-    "admin@example.com"
+    adminEmail
   );
   const res = await fetch(
     "https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=1",
@@ -18309,19 +18334,20 @@ async function checkGmailTony(signal) {
   );
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    return extractErrorMessage(body, `Gmail tony@ returned ${res.status}`);
+    return extractErrorMessage(body, `Gmail admin returned ${res.status}`);
   }
   return null;
 }
 async function checkGoogleCalendar(signal) {
   const saKeyRaw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
-  if (!saKeyRaw) return "Missing GOOGLE_SERVICE_ACCOUNT_KEY";
+  if (!saKeyRaw) return "not_configured: Missing GOOGLE_SERVICE_ACCOUNT_KEY";
+  const adminEmail = process.env.ADMIN_EMAIL || "admin@example.com";
   const token = await getGoogleServiceToken(
     ["https://www.googleapis.com/auth/calendar.readonly"],
-    "admin@example.com"
+    adminEmail
   );
   const res = await fetch(
-    "https://www.googleapis.com/calendar/v3/calendars/admin@example.com/events?maxResults=1",
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(adminEmail)}/events?maxResults=1`,
     { headers: { Authorization: `Bearer ${token}` }, signal }
   );
   if (!res.ok) {
@@ -18332,10 +18358,11 @@ async function checkGoogleCalendar(signal) {
 }
 async function checkGoogleDrive(signal) {
   const saKeyRaw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
-  if (!saKeyRaw) return "Missing GOOGLE_SERVICE_ACCOUNT_KEY";
+  if (!saKeyRaw) return "not_configured: Missing GOOGLE_SERVICE_ACCOUNT_KEY";
+  const adminEmail = process.env.ADMIN_EMAIL || "admin@example.com";
   const token = await getGoogleServiceToken(
     ["https://www.googleapis.com/auth/drive.readonly"],
-    "admin@example.com"
+    adminEmail
   );
   const res = await fetch(
     "https://www.googleapis.com/drive/v3/about?fields=storageQuota",
@@ -18349,7 +18376,7 @@ async function checkGoogleDrive(signal) {
 }
 async function checkGoogleMapsRoutes(signal) {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) return "Missing GOOGLE_MAPS_API_KEY";
+  if (!apiKey) return "not_configured: Missing GOOGLE_MAPS_API_KEY";
   const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${HOME_LAT2},${HOME_LNG2}&destinations=34.05,${HOME_LNG2}&units=imperial&key=${apiKey}`;
   const res = await fetch(url, { signal });
   if (!res.ok) return `Distance Matrix returned ${res.status}`;
@@ -18359,7 +18386,7 @@ async function checkGoogleMapsRoutes(signal) {
 }
 async function checkGoogleAirQuality(signal) {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) return "Missing GOOGLE_MAPS_API_KEY";
+  if (!apiKey) return "not_configured: Missing GOOGLE_MAPS_API_KEY";
   const res = await fetch(
     `https://airquality.googleapis.com/v1/currentConditions:lookup?key=${apiKey}`,
     {
@@ -18377,7 +18404,7 @@ async function checkGoogleAirQuality(signal) {
 }
 async function checkGooglePollen(signal) {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) return "Missing GOOGLE_MAPS_API_KEY";
+  if (!apiKey) return "not_configured: Missing GOOGLE_MAPS_API_KEY";
   const res = await fetch(
     `https://pollen.googleapis.com/v1/forecast:lookup?key=${apiKey}&location.latitude=${HOME_LAT2}&location.longitude=${HOME_LNG2}&days=1`,
     { signal }
@@ -18390,7 +18417,7 @@ async function checkGooglePollen(signal) {
 }
 async function checkFirecrawl(signal) {
   const apiKey = process.env.FIRECRAWL_API_KEY;
-  if (!apiKey) return "Missing FIRECRAWL_API_KEY";
+  if (!apiKey) return "not_configured: Missing FIRECRAWL_API_KEY";
   const res = await fetch("https://api.firecrawl.dev/v1/search", {
     method: "POST",
     headers: {
@@ -18408,7 +18435,7 @@ async function checkFirecrawl(signal) {
 }
 async function checkElevenLabs(signal) {
   const apiKey = process.env.ELEVENLABS_API_KEY;
-  if (!apiKey) return "Missing ELEVENLABS_API_KEY";
+  if (!apiKey) return "not_configured: Missing ELEVENLABS_API_KEY";
   const res = await fetch("https://api.elevenlabs.io/v1/user", {
     headers: { "xi-api-key": apiKey },
     signal
@@ -18423,7 +18450,7 @@ async function checkElevenLabs(signal) {
 }
 async function checkOpenRouter(signal) {
   const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) return "Missing OPENROUTER_API_KEY";
+  if (!apiKey) return "not_configured: Missing OPENROUTER_API_KEY";
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -18446,7 +18473,7 @@ async function checkOpenRouter(signal) {
 async function checkHomeAssistant(signal) {
   const haUrl = process.env.HA_URL;
   const haToken = process.env.HA_TOKEN;
-  if (!haUrl || !haToken) return "degraded: Not configured (HA_URL or HA_TOKEN missing)";
+  if (!haUrl || !haToken) return "not_configured: HA_URL or HA_TOKEN missing";
   const res = await fetch(`${haUrl}/api/`, {
     headers: { Authorization: `Bearer ${haToken}` },
     signal
@@ -18456,7 +18483,7 @@ async function checkHomeAssistant(signal) {
 }
 async function checkNotion(signal) {
   const apiKey = process.env.NOTION_API_KEY;
-  if (!apiKey) return "Missing NOTION_API_KEY";
+  if (!apiKey) return "not_configured: Missing NOTION_API_KEY";
   const res = await fetch("https://api.notion.com/v1/users/me", {
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -18482,7 +18509,7 @@ var checkDefs = [
   ["janus_chat", checkJanusChat],
   ["janus_whatsapp", checkJanusWhatsApp],
   ["janus_email", checkJanusEmail],
-  ["gmail_tony", checkGmailTony],
+  ["google_email", checkGoogleEmailAdmin],
   ["google_calendar", checkGoogleCalendar],
   ["google_drive", checkGoogleDrive],
   ["google_maps_routes", checkGoogleMapsRoutes],
@@ -19270,6 +19297,15 @@ function requireAuth2(req, res, next) {
     next();
     return;
   }
+  const haUserId = req.headers["x-remote-user-id"] || req.headers["x-ingress-user-id"];
+  if (haUserId) {
+    const haAdminHeader = req.headers["x-remote-user-is-admin"];
+    const isAdmin2 = String(haAdminHeader).toLowerCase() === "true" || haAdminHeader === "1";
+    req.userId = `ha:${haUserId}`;
+    req.userRole = isAdmin2 ? "admin" : "member";
+    next();
+    return;
+  }
   const authHeader = req.headers.authorization;
   const cookieToken = req.cookies?.auth_token;
   if (!authHeader?.startsWith("Bearer ") && !cookieToken) {
@@ -20048,6 +20084,125 @@ router5.get("/states", requireAuth2, (_req, res) => {
   }
   res.json(getEntityCache());
 });
+router5.get("/cameras", async (req, res) => {
+  try {
+    const creds = await resolveHACreds(req.userId);
+    if (!creds?.haUrl || !creds?.haToken) {
+      res.json({ success: true, cameras: [] });
+      return;
+    }
+    let states = [];
+    if (isCacheReady()) {
+      const cache3 = getEntityCache();
+      states = Object.values(cache3);
+    } else {
+      const { status, data } = await callHA(creds.haUrl, creds.haToken, "GET", "/api/states", void 0, { maxRetries: 1 });
+      if (status === 200 && Array.isArray(data)) {
+        states = data;
+      }
+    }
+    const cameras = states.filter((s3) => s3.entity_id && s3.entity_id.startsWith("camera.")).map((s3) => ({
+      camera_id: s3.entity_id,
+      entity_id: s3.entity_id,
+      name: s3.attributes?.friendly_name || s3.entity_id.replace(/^camera\./, "").replace(/_/g, " "),
+      status: s3.state === "unavailable" ? "offline" : "live",
+      model: s3.attributes?.brand || s3.attributes?.model_name || s3.attributes?.model || "Home Assistant",
+      location: s3.attributes?.area_id || "",
+      thumbnail_url: `/api/ha/camera_proxy/${s3.entity_id}`,
+      stream_url: `/api/ha/camera_stream/${s3.entity_id}`,
+      is_ha: true
+    }));
+    res.json({ success: true, cameras });
+  } catch (err) {
+    console.error("[ha-cameras] Failed to list cameras:", err);
+    res.json({ success: false, cameras: [], error: String(err) });
+  }
+});
+router5.get("/camera_proxy/:entityId", async (req, res) => {
+  const entityId = req.params.entityId;
+  if (!entityId || !entityId.startsWith("camera.")) {
+    res.status(400).json({ error: "Valid camera entityId required" });
+    return;
+  }
+  const creds = await resolveHACreds(req.userId);
+  if (!creds?.haUrl || !creds?.haToken) {
+    res.status(503).json({ error: "Home Assistant not configured" });
+    return;
+  }
+  try {
+    const haUrl = creds.haUrl.replace(/\/$/, "");
+    const proxyUrl = `${haUrl}/api/camera_proxy/${encodeURIComponent(entityId)}`;
+    const haRes = await undiciFetch2(proxyUrl, {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${creds.haToken}`
+      }
+    });
+    if (!haRes.ok) {
+      res.status(haRes.status).json({ error: `HA camera proxy returned ${haRes.status}` });
+      return;
+    }
+    const contentType = haRes.headers.get("content-type") || "image/jpeg";
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "no-cache, max-age=0, must-revalidate");
+    const buffer = Buffer.from(await haRes.arrayBuffer());
+    res.send(buffer);
+  } catch (err) {
+    console.error(`[ha-camera-proxy] Error proxying ${entityId}:`, err);
+    res.status(500).json({ error: "Failed to fetch camera snapshot" });
+  }
+});
+router5.get("/camera_stream/:entityId", async (req, res) => {
+  const entityId = req.params.entityId;
+  if (!entityId || !entityId.startsWith("camera.")) {
+    res.status(400).json({ error: "Valid camera entityId required" });
+    return;
+  }
+  const creds = await resolveHACreds(req.userId);
+  if (!creds?.haUrl || !creds?.haToken) {
+    res.status(503).json({ error: "Home Assistant not configured" });
+    return;
+  }
+  try {
+    const haUrl = creds.haUrl.replace(/\/$/, "");
+    const streamUrl = `${haUrl}/api/camera_proxy_stream/${encodeURIComponent(entityId)}`;
+    const haRes = await undiciFetch2(streamUrl, {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${creds.haToken}`
+      }
+    });
+    if (!haRes.ok) {
+      res.status(haRes.status).json({ error: `HA camera stream returned ${haRes.status}` });
+      return;
+    }
+    const contentType = haRes.headers.get("content-type") || "multipart/x-mixed-replace; boundary=--frame";
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.setHeader("Connection", "close");
+    if (haRes.body) {
+      const reader = haRes.body.getReader();
+      req.on("close", () => {
+        reader.cancel().catch(() => {
+        });
+      });
+      const pump = async () => {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          res.write(value);
+        }
+        res.end();
+      };
+      pump().catch(() => res.end());
+    } else {
+      res.status(500).json({ error: "No stream body available" });
+    }
+  } catch (err) {
+    console.error(`[ha-camera-stream] Error streaming ${entityId}:`, err);
+    if (!res.headersSent) res.status(500).json({ error: "Failed to stream camera" });
+  }
+});
 router5.get("/govee-ids", requireAuth2, (_req, res) => {
   res.json(getGoveeEntityIdsFromCache());
 });
@@ -20184,12 +20339,17 @@ router5.post("/", requireAuth2, async (req, res) => {
   const authUser = getAuthUser(req);
   const userId = authUser?.userId || req.userId || "UNKNOWN";
   const actorName = authUser?.displayName || authUser?.email || "UNKNOWN";
+  const isAdmin2 = authUser?.roles?.includes("admin") || req.userRole === "admin";
   try {
     const body = req.body;
     const { action, path: path12, method = "GET", payload } = body;
     if (action === "save-settings") {
       if (userId === "UNKNOWN") {
         res.status(401).json({ error: "Authentication required" });
+        return;
+      }
+      if (!isAdmin2) {
+        res.status(403).json({ error: "Admin privileges required to save Home Assistant configuration" });
         return;
       }
       const haUrlInput = typeof body.ha_url === "string" ? body.ha_url.trim().replace(/\/$/, "") : "";
@@ -20248,6 +20408,10 @@ router5.post("/", requireAuth2, async (req, res) => {
     if (action === "disconnect") {
       if (userId === "UNKNOWN") {
         res.status(401).json({ error: "Authentication required" });
+        return;
+      }
+      if (!isAdmin2) {
+        res.status(403).json({ error: "Admin privileges required to disconnect Home Assistant" });
         return;
       }
       const existing = await storage.getHomeAssistantSettings(userId);
@@ -20433,6 +20597,10 @@ router5.post("/", requireAuth2, async (req, res) => {
       return;
     }
     if (action === "call-service") {
+      if (!isAdmin2) {
+        res.status(403).json({ error: "Device control requires admin privileges" });
+        return;
+      }
       const { domain: svcDomain, service, service_data } = body;
       if (!svcDomain || !service) {
         res.status(400).json({ error: "domain and service required" });
@@ -22849,12 +23017,94 @@ async function teslaProxyHandler(req, res) {
       return;
     }
     const tokenRow = await getTokenRow();
+    const action = req.query.action;
     if (!tokenRow) {
-      res.status(401).json({ error: "Tesla not connected. Please authorize first." });
+      const haCreds = await resolveHACreds(userId);
+      if (haCreds?.haUrl && haCreds?.haToken) {
+        try {
+          const { status, data } = await callHA(haCreds.haUrl, haCreds.haToken, "GET", "/api/states", void 0, { maxRetries: 1 });
+          if (status === 200 && Array.isArray(data)) {
+            const teslaEntities = data.filter(
+              (s3) => s3.entity_id && (s3.entity_id.startsWith("sensor.") || s3.entity_id.startsWith("device_tracker.") || s3.entity_id.startsWith("climate.") || s3.entity_id.startsWith("lock.")) && (s3.entity_id.includes("tesla") || s3.entity_id.includes("model_3") || s3.entity_id.includes("model_y") || s3.entity_id.includes("model_s") || s3.entity_id.includes("model_x") || s3.entity_id.includes("cybertruck"))
+            );
+            if (teslaEntities.length > 0) {
+              const vehicleMap = /* @__PURE__ */ new Map();
+              for (const ent of teslaEntities) {
+                const parts = ent.entity_id.split(".")[1].split("_");
+                const key = parts.slice(0, 2).join("_");
+                if (!vehicleMap.has(key)) {
+                  const hash = Math.abs(key.split("").reduce((acc, char) => (acc << 5) - acc + char.charCodeAt(0), 0));
+                  vehicleMap.set(key, {
+                    id: hash,
+                    vehicle_id: hash,
+                    vin: `HA-${key.toUpperCase()}`,
+                    display_name: ent.attributes?.friendly_name ? ent.attributes.friendly_name.split(" ")[0] : key.replace(/_/g, " "),
+                    state: ent.state === "unavailable" ? "asleep" : "online",
+                    source: "home_assistant"
+                  });
+                }
+              }
+              const vehicles = Array.from(vehicleMap.values());
+              if (action === "vehicles") {
+                res.json({ response: vehicles, vehicles });
+                return;
+              }
+              if (action === "vehicle-data") {
+                const reqId = Number(req.query.id);
+                const target = vehicles.find((v) => v.id === reqId) || vehicles[0];
+                const batteryEnt = teslaEntities.find((e) => e.entity_id.includes("battery") && !e.entity_id.includes("range"));
+                const rangeEnt = teslaEntities.find((e) => e.entity_id.includes("range"));
+                const chargeStateEnt = teslaEntities.find((e) => e.entity_id.includes("charging_state"));
+                const trackerEnt = teslaEntities.find((e) => e.entity_id.startsWith("device_tracker.") || e.attributes?.latitude != null && e.attributes?.longitude != null);
+                const climateEnt = teslaEntities.find((e) => e.entity_id.startsWith("climate."));
+                const lockEnt = teslaEntities.find((e) => e.entity_id.startsWith("lock."));
+                const odoEnt = teslaEntities.find((e) => e.entity_id.includes("odometer"));
+                const batteryVal = batteryEnt ? parseFloat(batteryEnt.state) : 75;
+                const rangeVal = rangeEnt ? parseFloat(rangeEnt.state) : 220;
+                res.json({
+                  response: {
+                    charge_state: {
+                      battery_level: isNaN(batteryVal) ? 75 : batteryVal,
+                      battery_range: isNaN(rangeVal) ? 220 : rangeVal,
+                      charging_state: chargeStateEnt?.state || "Disconnected",
+                      charge_limit_soc: 80
+                    },
+                    climate_state: {
+                      inside_temp: climateEnt?.attributes?.current_temperature ?? 70,
+                      outside_temp: 72,
+                      is_climate_on: climateEnt ? climateEnt.state !== "off" : false
+                    },
+                    drive_state: {
+                      latitude: trackerEnt?.attributes?.latitude ?? null,
+                      longitude: trackerEnt?.attributes?.longitude ?? null,
+                      speed: trackerEnt?.attributes?.speed ?? null
+                    },
+                    vehicle_state: {
+                      locked: lockEnt ? lockEnt.state === "locked" : true,
+                      odometer: odoEnt ? parseFloat(odoEnt.state) || 12e3 : 12e3,
+                      car_version: "Home Assistant Integrated"
+                    }
+                  }
+                });
+                return;
+              }
+              if (action === "wake") {
+                res.json({ response: { result: true } });
+                return;
+              }
+            }
+          }
+        } catch {
+        }
+      }
+      if (action === "vehicles") {
+        res.json({ response: [], vehicles: [], not_configured: true });
+        return;
+      }
+      res.status(200).json({ error: "Tesla not connected", not_configured: true });
       return;
     }
     const accessToken = await refreshTokenIfNeeded2(tokenRow.user_id, tokenRow);
-    const action = req.query.action;
     if (action === "vehicles") {
       const apiRes = await fetch(`${TESLA_API_BASE4}/api/1/vehicles`, {
         headers: { Authorization: `Bearer ${accessToken}` }
@@ -23120,6 +23370,30 @@ router8.all("/setup", requireAuth2, async (req, res) => {
       const token = tokens.length > 0 ? tokens[0] : null;
       const hasClientId = !!process.env.TESLA_CLIENT_ID;
       const hasClientSecret = !!process.env.TESLA_CLIENT_SECRET;
+      let haHasTesla = false;
+      const haCreds = await resolveHACreds(req.userId);
+      if (haCreds?.haUrl && haCreds?.haToken) {
+        try {
+          const { status, data } = await callHA(haCreds.haUrl, haCreds.haToken, "GET", "/api/states", void 0, { maxRetries: 1 });
+          if (status === 200 && Array.isArray(data)) {
+            haHasTesla = data.some(
+              (s3) => s3.entity_id && (s3.entity_id.startsWith("sensor.") || s3.entity_id.startsWith("device_tracker.")) && (s3.entity_id.includes("tesla") || s3.entity_id.includes("model_3") || s3.entity_id.includes("model_y") || s3.entity_id.includes("model_s") || s3.entity_id.includes("model_x") || s3.entity_id.includes("cybertruck"))
+            );
+          }
+        } catch {
+        }
+      }
+      if (haHasTesla && !token) {
+        res.json({
+          credentials_configured: true,
+          keypair_generated: true,
+          partner_registered: true,
+          user_authenticated: true,
+          token_valid: true,
+          source: "home_assistant"
+        });
+        return;
+      }
       res.json({
         credentials_configured: hasClientId && hasClientSecret,
         keypair_generated: !!config?.public_key_pem,
@@ -28935,7 +29209,7 @@ function buildEmailHtml(childName, data, today) {
 
     <tr>
       <td style="padding:24px 32px 20px;border-bottom:1px solid #f3f4f6;">
-        <div style="font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#6b7280;border-left:3px solid #f59e0b;padding-left:8px;margin-bottom:14px;">\u{1F321}\uFE0F Weather \xB7 Local Area   </div>
+        <div style="font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#6b7280;border-left:3px solid #f59e0b;padding-left:8px;margin-bottom:14px;">\u{1F321}\uFE0F Weather \xB7 ${escapeHtml(process.env.HOME_LOCATION || "Local Forecast")}</div>
         ${weather.source ? `<div style="font-size:10px;color:#9ca3af;margin:-8px 0 10px 11px;">Live ${escapeHtml(weather.source)} data${weather.asOf ? ` \xB7 as of ${escapeHtml(weather.asOf)}` : ""}</div>` : ""}
         <table width="100%" cellpadding="0" cellspacing="0" border="0">
           <tr>
@@ -29187,8 +29461,8 @@ router17.post("/morning-weather", requireAuth2, async (_req, res) => {
       worldNews,
       dadEvents,
       momEvents,
-      emmeEvents,
-      islaEvents
+      student1Events,
+      student2Events
     ] = await Promise.all([
       fetchGoogleCurrentConditions(HOME_LAT, HOME_LNG),
       fetchGoogleHourlyForecast(HOME_LAT, HOME_LNG, 24),
@@ -29213,10 +29487,10 @@ router17.post("/morning-weather", requireAuth2, async (_req, res) => {
     };
     const weatherSummary = weatherData ? formatWeatherForAI(weatherData) : "";
     const childCalendars = {
-      "Student 1": emmeEvents,
-      "Student 2": islaEvents
+      "Student 1": student1Events,
+      "Student 2": student2Events
     };
-    console.log(`[Morning Email] Data fetched: weather ${weatherData ? "\u2713" : "\u2717"}, ${usNews.length} US / ${worldNews.length} world news, financial ${marketSnapshot ? "\u2713" : "\u2717"}, calendars (Admin:${dadEvents.length}, Member:${momEvents.length}, Student1:${emmeEvents.length}, Student2:${islaEvents.length})`);
+    console.log(`[Morning Email] Data fetched: weather ${weatherData ? "\u2713" : "\u2717"}, ${usNews.length} US / ${worldNews.length} world news, financial ${marketSnapshot ? "\u2713" : "\u2717"}, calendars (Admin:${dadEvents.length}, Member:${momEvents.length}, Student1:${student1Events.length}, Student2:${student2Events.length})`);
     const dataPromises = CHILDREN.map(
       (child) => generateEmailData(
         child.name,
@@ -36627,9 +36901,9 @@ function buildCategoryTree(devices) {
 init_storage();
 
 // server/lib/wifi-map.ts
-var DEFAULT_SUBNET_MAP = Object.freeze([
-  { cidr: "192.168.1.0/24", label: "34" }
-]);
+var DEFAULT_SUBNET_MAP = Object.freeze(
+  process.env.LAN_SUBNET_CIDR ? [{ cidr: process.env.LAN_SUBNET_CIDR, label: process.env.LAN_SUBNET_LABEL || "LAN" }] : []
+);
 function ipv4ToInt(ip) {
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
   if (!m) return null;
@@ -43472,6 +43746,7 @@ function gallonsToHcf(gallons) {
 init_irrigationFlow();
 
 // server/lib/floLogic.ts
+var FLOLOGIC_DEVICE_HOST = process.env.FLOLOGIC_DEVICE_HOST || "";
 async function getInteriorUsage(usageDate) {
   const manual = readManualUsage();
   if (manual && typeof manual[usageDate] === "number") {
@@ -46568,6 +46843,195 @@ ${payment.confirmation_ref ? `<p>Zelle Confirmation: ${payment.confirmation_ref}
 }
 var time_default = router39;
 
+// server/routes/estate.ts
+import { Router as Router41 } from "express";
+
+// server/lib/estateConfig.ts
+var cachedConfig = null;
+var lastFetchTime = 0;
+var CACHE_TTL_MS3 = 10 * 60 * 1e3;
+async function getEstateConfig() {
+  const now = Date.now();
+  if (cachedConfig && now - lastFetchTime < CACHE_TTL_MS3) {
+    return cachedConfig;
+  }
+  const fallback = {
+    latitude: Number(process.env.HOME_LAT) || 37.7749,
+    longitude: Number(process.env.HOME_LNG) || -122.4194,
+    elevation: 0,
+    timeZone: process.env.TZ || process.env.TIME_ZONE || "UTC",
+    unitSystem: {
+      length: "mi",
+      mass: "lb",
+      pressure: "psi",
+      temperature: "\xB0F",
+      volume: "gal"
+    },
+    locationName: process.env.HOME_LOCATION || "Home"
+  };
+  const haUrl = process.env.HA_URL || "http://supervisor/core";
+  const haToken = process.env.HA_TOKEN || process.env.SUPERVISOR_TOKEN;
+  if (!haToken) {
+    cachedConfig = fallback;
+    lastFetchTime = now;
+    return cachedConfig;
+  }
+  try {
+    const { status, data } = await callHA(haUrl, haToken, "GET", "/api/config", void 0, { maxRetries: 1 });
+    if (status === 200 && data && typeof data === "object") {
+      const d = data;
+      cachedConfig = {
+        latitude: typeof d.latitude === "number" ? d.latitude : fallback.latitude,
+        longitude: typeof d.longitude === "number" ? d.longitude : fallback.longitude,
+        elevation: typeof d.elevation === "number" ? d.elevation : fallback.elevation,
+        timeZone: d.time_zone || fallback.timeZone,
+        unitSystem: d.unit_system || fallback.unitSystem,
+        locationName: d.location_name || fallback.locationName
+      };
+      lastFetchTime = now;
+      return cachedConfig;
+    }
+  } catch (err) {
+    console.warn("[estateConfig] Failed to fetch HA /api/config, using fallback:", err instanceof Error ? err.message : err);
+  }
+  cachedConfig = fallback;
+  lastFetchTime = now;
+  return cachedConfig;
+}
+function getEstateTimezone() {
+  if (cachedConfig?.timeZone) return cachedConfig.timeZone;
+  return process.env.TZ || process.env.TIME_ZONE || "UTC";
+}
+
+// server/routes/estate.ts
+init_db2();
+init_auth();
+var router40 = Router41();
+router40.get("/config", async (_req, res) => {
+  try {
+    const config = await getEstateConfig();
+    res.json(config);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+router40.get("/settings/entity-mappings", async (_req, res) => {
+  try {
+    const { rows } = await query2(
+      `SELECT value FROM system_configs WHERE key = 'entity_mappings' LIMIT 1`
+    );
+    const mappings = rows[0]?.value ? JSON.parse(rows[0].value) : {
+      energy: [],
+      irrigation: [],
+      pool: {
+        pool_heater: "",
+        spa_heater: "",
+        pool_temp: "",
+        spa_temp: "",
+        pool_pump: "",
+        spa_pump: ""
+      },
+      climate: [],
+      cameras: [],
+      vehicles: [],
+      utility_rates: {
+        electricity_kwh_cost: 0.28,
+        water_hcf_cost: 12.5
+      }
+    };
+    res.json(mappings);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+router40.post("/settings/entity-mappings", requireAuth2, async (req, res) => {
+  const authUser = getAuthUser(req);
+  const isAdmin2 = authUser?.roles?.includes("admin") || req.userRole === "admin";
+  if (!isAdmin2) {
+    res.status(403).json({ error: "Admin privileges required to save entity mappings" });
+    return;
+  }
+  try {
+    const mappings = req.body;
+    await query2(
+      `INSERT INTO system_configs (key, value, updated_at)
+       VALUES ('entity_mappings', $1, NOW())
+       ON CONFLICT (key) DO UPDATE
+       SET value = EXCLUDED.value, updated_at = NOW()`,
+      [JSON.stringify(mappings)]
+    );
+    res.json({ success: true, mappings });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+router40.get("/ha/discover-entities", requireAuth2, async (_req, res) => {
+  const haUrl = process.env.HA_URL || "http://supervisor/core";
+  const haToken = process.env.HA_TOKEN || process.env.SUPERVISOR_TOKEN;
+  if (!haToken) {
+    res.status(503).json({ error: "Home Assistant not connected" });
+    return;
+  }
+  try {
+    const { status, data } = await callHA(haUrl, haToken, "GET", "/api/states", void 0, { maxRetries: 1 });
+    if (status !== 200 || !Array.isArray(data)) {
+      res.status(500).json({ error: "Failed to retrieve states from Home Assistant" });
+      return;
+    }
+    const states = data;
+    const discovered = {
+      energy: states.filter(
+        (s3) => s3.entity_id.startsWith("sensor.") && (s3.attributes.device_class === "energy" || s3.attributes.device_class === "power" || s3.attributes.unit_of_measurement === "kWh" || s3.attributes.unit_of_measurement === "W")
+      ).map((s3) => ({
+        entity_id: s3.entity_id,
+        name: s3.attributes.friendly_name || s3.entity_id,
+        device_class: s3.attributes.device_class,
+        unit: s3.attributes.unit_of_measurement
+      })),
+      irrigation: states.filter(
+        (s3) => (s3.entity_id.startsWith("switch.") || s3.entity_id.startsWith("valve.")) && (s3.entity_id.includes("sprinkler") || s3.entity_id.includes("irrigation") || s3.entity_id.includes("rain_bird") || s3.entity_id.includes("zone"))
+      ).map((s3) => ({
+        entity_id: s3.entity_id,
+        name: s3.attributes.friendly_name || s3.entity_id
+      })),
+      climate: states.filter((s3) => s3.entity_id.startsWith("climate.")).map((s3) => ({
+        entity_id: s3.entity_id,
+        name: s3.attributes.friendly_name || s3.entity_id,
+        current_temperature: s3.attributes.current_temperature,
+        temperature: s3.attributes.temperature
+      })),
+      cameras: states.filter((s3) => s3.entity_id.startsWith("camera.")).map((s3) => ({
+        entity_id: s3.entity_id,
+        name: s3.attributes.friendly_name || s3.entity_id,
+        state: s3.state
+      })),
+      vehicles: states.filter(
+        (s3) => (s3.entity_id.startsWith("sensor.") || s3.entity_id.startsWith("device_tracker.")) && (s3.entity_id.includes("tesla") || s3.entity_id.includes("vehicle") || s3.entity_id.includes("battery") || s3.attributes.device_class === "battery")
+      ).map((s3) => ({
+        entity_id: s3.entity_id,
+        name: s3.attributes.friendly_name || s3.entity_id,
+        state: s3.state
+      })),
+      pool: states.filter(
+        (s3) => s3.entity_id.includes("pool") || s3.entity_id.includes("spa") || s3.entity_id.includes("iaqualink")
+      ).map((s3) => ({
+        entity_id: s3.entity_id,
+        name: s3.attributes.friendly_name || s3.entity_id,
+        state: s3.state
+      })),
+      persons: states.filter((s3) => s3.entity_id.startsWith("person.")).map((s3) => ({
+        entity_id: s3.entity_id,
+        name: s3.attributes.friendly_name || s3.entity_id,
+        user_id: s3.attributes.user_id
+      }))
+    };
+    res.json(discovered);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+var estate_default = router40;
+
 // server/routes.ts
 var SUPABASE_COMPAT_MAP = {
   "home-assistant-proxy": "/api/home-assistant",
@@ -46656,6 +47120,8 @@ async function registerRoutes(app2) {
   app2.use("/api/goaccess", goaccess_default);
   app2.use("/api/electricity", electricity_default);
   app2.use("/api/water", water_default);
+  app2.use("/api/estate", estate_default);
+  app2.use("/api", estate_default);
   app2.use("/api/v1/external", external_default);
   app2.use(deploy_default);
   app2.get("/api/health", (_req, res) => {
@@ -47335,41 +47801,51 @@ function initCronJobs() {
     return;
   }
   console.log(`[cron] Initializing scheduled jobs... (${isProduction ? "production" : "dev+ENABLE_CRON"})`);
-  cron.schedule("*/30 * * * * *", () => {
-    triggerRoute("/api/janus/email-poll");
-  });
+  const tz = getEstateTimezone();
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+    cron.schedule("*/30 * * * * *", () => {
+      triggerRoute("/api/janus/email-poll");
+    });
+    cron.schedule("0 14 * * *", () => {
+      console.log("[cron] Running daily entertainment sync (6:00 AM PST)");
+      triggerRoute("/api/entertainment-sync", { action: "all" });
+    }, { timezone: "UTC" });
+    cron.schedule("15 14 * * *", () => {
+      console.log("[cron] Running daily media sync (6:15 AM PST)");
+      triggerRoute("/api/media-sync", { action: "all" });
+    }, { timezone: "UTC" });
+  }
   cron.schedule("*/30 * * * * *", () => {
     triggerRoute("/api/janus/reminder-dispatch");
   });
   cron.schedule("*/15 * * * *", () => {
     triggerRoute("/api/janus/health-check");
   });
-  cron.schedule("0 14 * * *", () => {
-    console.log("[cron] Running daily entertainment sync (6:00 AM PST)");
-    triggerRoute("/api/entertainment-sync", { action: "all" });
-  }, { timezone: "UTC" });
-  cron.schedule("15 14 * * *", () => {
-    console.log("[cron] Running daily media sync (6:15 AM PST)");
-    triggerRoute("/api/media-sync", { action: "all" });
-  }, { timezone: "UTC" });
   cron.schedule("*/15 * * * *", () => {
     triggerRoute("/api/internet-health-monitor");
   }, { timezone: "UTC" });
-  cron.schedule("*/15 * * * *", () => {
-    triggerRoute("/api/fortigate-health-snapshot");
-  }, { timezone: "UTC" });
-  cron.schedule("* * * * *", () => {
-    triggerRoute("/api/fortigate-wan-snapshot");
-  }, { timezone: "UTC" });
-  cron.schedule("*/5 * * * *", () => {
-    triggerRoute("/api/wireless-snapshot");
-  }, { timezone: "UTC" });
-  cron.schedule("*/2 * * * *", () => {
-    pingTunnel();
-  });
-  cron.schedule("*/2 * * * *", () => {
-    pingTunnel2();
-  });
+  if (process.env.FORTIGATE_BASE_URL) {
+    cron.schedule("*/15 * * * *", () => {
+      triggerRoute("/api/fortigate-health-snapshot");
+    }, { timezone: "UTC" });
+    cron.schedule("* * * * *", () => {
+      triggerRoute("/api/fortigate-wan-snapshot");
+    }, { timezone: "UTC" });
+    cron.schedule("*/2 * * * *", () => {
+      pingTunnel2();
+    });
+  }
+  if (process.env.RUCKUS_BASE_URL) {
+    cron.schedule("*/5 * * * *", () => {
+      triggerRoute("/api/wireless-snapshot");
+    }, { timezone: "UTC" });
+    cron.schedule("*/2 * * * *", () => {
+      pingTunnel();
+    });
+    cron.schedule("*/15 * * * *", () => {
+      triggerRoute("/api/wireless-snapshot-watchdog");
+    });
+  }
   cron.schedule("*/30 * * * *", () => {
     triggerRoute("/api/network-device-backfill");
   }, { timezone: "UTC" });
@@ -47397,31 +47873,32 @@ function initCronJobs() {
   }, { timezone: "UTC" });
   cron.schedule("0 */4 * * *", () => {
     triggerRoute("/api/ha-locks-monitor");
-  }, { timezone: "America/Los_Angeles" });
-  cron.schedule("*/15 * * * *", () => {
-    triggerRoute("/api/google-assistant-sdk-monitor");
-  }, { timezone: "UTC" });
+  }, { timezone: tz });
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+    cron.schedule("*/15 * * * *", () => {
+      triggerRoute("/api/google-assistant-sdk-monitor");
+    }, { timezone: "UTC" });
+  }
   cron.schedule("*/15 * * * *", () => {
     triggerRoute("/api/thermostat-monitor");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("0 21 * * *", () => {
     triggerRoute("/api/energy/fountains-off");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("*/5 * * * *", () => {
     triggerRoute("/api/energy/light-timers");
   }, { timezone: "UTC" });
-  cron.schedule("*/10 * * * *", () => {
-    triggerRoute("/api/av-closet-temp-monitor");
-  }, { timezone: "America/Los_Angeles" });
+  if (process.env.GOVEE_API_KEY || process.env.ENABLE_AV_CLOSET_MONITOR === "true") {
+    cron.schedule("*/10 * * * *", () => {
+      triggerRoute("/api/av-closet-temp-monitor");
+    }, { timezone: tz });
+  }
   cron.schedule("*/15 * * * *", () => {
     triggerRoute("/api/thermostat-freshness-monitor");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("*/15 * * * *", () => {
     triggerRoute("/api/pool-temp-freshness-monitor");
-  }, { timezone: "America/Los_Angeles" });
-  cron.schedule("*/15 * * * *", () => {
-    triggerRoute("/api/wireless-snapshot-watchdog");
-  });
+  }, { timezone: tz });
   cron.schedule("*/15 * * * *", () => {
     triggerRoute("/api/speedtest-pull-from-ha");
   }, { timezone: "UTC" });
@@ -47429,13 +47906,13 @@ function initCronJobs() {
     triggerRoute("/api/speed-test-freshness-monitor");
   }, { timezone: "UTC" });
   cron.schedule("30 8 * * 1,3,5", () => {
-    console.log("[cron] Running Morning Sauna automation (8:30 AM PT Mon/Wed/Fri)");
+    console.log("[cron] Running Morning Sauna automation (8:30 AM Mon/Wed/Fri)");
     triggerRoute("/api/automation/morning-sauna");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("50 8 * * 2,4", () => {
-    console.log("[cron] Running Morning Sauna automation (8:50 AM PT Tue/Thu)");
+    console.log("[cron] Running Morning Sauna automation (8:50 AM Tue/Thu)");
     triggerRoute("/api/automation/morning-sauna");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("0 9 * * 1,3,5", () => {
     console.log("[cron] Stopping Morning Sauna after 30 minutes (9:00 AM PT Mon/Wed/Fri)");
     triggerRoute("/api/automation/morning-sauna/stop");
@@ -47446,124 +47923,133 @@ function initCronJobs() {
   }, { timezone: "America/Los_Angeles" });
   cron.schedule("*/30 * * * *", () => {
     triggerRoute("/api/pool/temp-monitor");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("*/30 * * * *", () => {
     triggerRoute("/api/pool/spa-mode-monitor");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("0 0 * * 6", () => {
-    console.log("[cron] Grocery: opening weekly cycle (Sat 00:00 PT)");
+    console.log("[cron] Grocery: opening weekly cycle");
     triggerRoute("/cron/open-cycle");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("0 16 * * 2", () => {
-    console.log("[cron] Grocery: sending open-reminder notification (Tue 16:00 PT)");
+    console.log("[cron] Grocery: sending open-reminder notification");
     triggerRoute("/cron/open-reminder");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("0 16 * * 4", () => {
-    console.log("[cron] Grocery: sending last-call notification (Thu 16:00 PT)");
+    console.log("[cron] Grocery: sending last-call notification");
     triggerRoute("/cron/last-call");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("0 16 * * 5", () => {
-    console.log("[cron] Grocery: locking and submitting weekly order (Fri 16:00 PT)");
+    console.log("[cron] Grocery: locking and submitting weekly order");
     triggerRoute("/cron/lock-and-submit");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("0 6 * * 1", () => {
-    console.log("[cron] Grocery: Monday delivery follow-up (Mon 06:00 PT)");
+    console.log("[cron] Grocery: Monday delivery follow-up");
     triggerRoute("/cron/rina-monday");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("0 7 * * *", () => {
-    console.log("[cron] Running Morning Weather Email (7:00 AM PT daily)");
+    console.log("[cron] Running Morning Weather Email (7:00 AM daily)");
     triggerRoute("/api/reports/morning-weather");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("0 16 * * *", () => {
-    console.log("[cron] Running Daily EOD Summary (4:00 PM PT daily)");
+    console.log("[cron] Running Daily EOD Summary (4:00 PM daily)");
     triggerRoute("/api/reports/eod-summary");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("0 16 * * 5", () => {
-    console.log("[cron] Running Weekly Planning Email (Fridays 4:00 PM PT)");
+    console.log("[cron] Running Weekly Planning Email (Fridays 4:00 PM)");
     triggerRoute("/api/reports/weekly-planning");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("0 8 * * *", () => {
-    console.log("[cron] Running Executive Status Email (8:00 AM PT daily)");
+    console.log("[cron] Running Executive Status Email (8:00 AM daily)");
     triggerRoute("/api/reports/executive-status");
-  }, { timezone: "America/Los_Angeles" });
-  cron.schedule("*/30 * * * *", () => {
-    triggerRoute("/api/calendar/conflicts");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+    cron.schedule("*/30 * * * *", () => {
+      triggerRoute("/api/calendar/conflicts");
+    }, { timezone: tz });
+  }
   cron.schedule("50 6 * * 1-5", () => {
-    console.log("[cron] Running School Morning Broadcast (6:50 AM PT weekdays)");
+    console.log("[cron] Running School Morning Broadcast (6:50 AM weekdays)");
     triggerRoute("/api/broadcast/school-morning");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("30 7 * * 1-5", () => {
-    console.log("[cron] Running School Morning Broadcast (7:30 AM PT weekdays)");
+    console.log("[cron] Running School Morning Broadcast (7:30 AM weekdays)");
     triggerRoute("/api/broadcast/school-morning");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("0 */2 * * *", () => {
     triggerRoute("/api/followup/accountability");
-  }, { timezone: "America/Los_Angeles" });
-  cron.schedule("*/5 * * * *", () => {
-    console.log("[cron] Running Calendar Nav Tesla (every 5 min)");
-    triggerRoute("/api/calendar/nav-tesla");
-  }, { timezone: "America/Los_Angeles" });
-  cron.schedule("*/30 * * * *", () => {
-    triggerRoute("/api/tesla/battery-monitor");
-  }, { timezone: "UTC" });
+  }, { timezone: tz });
+  if (process.env.TESLA_CLIENT_ID || process.env.ENABLE_TESLA === "true") {
+    if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+      cron.schedule("*/5 * * * *", () => {
+        triggerRoute("/api/calendar/nav-tesla");
+      }, { timezone: tz });
+    }
+    cron.schedule("*/30 * * * *", () => {
+      triggerRoute("/api/tesla/battery-monitor");
+    }, { timezone: "UTC" });
+  }
   cron.schedule("*/30 * * * *", () => {
     triggerRoute("/api/pool/rain-guard");
-  }, { timezone: "America/Los_Angeles" });
-  cron.schedule("*/15 * * * *", () => {
-    runVerkadaWebhookHealthCheck().catch((err) => console.error("[cron] Verkada webhook health check failed:", err));
-  }, { timezone: "UTC" });
-  cron.schedule("0 */4 * * *", () => {
-    triggerRoute("/api/verkada/poi-backfill");
-  }, { timezone: "UTC" });
+  }, { timezone: tz });
+  if (process.env.VERKADA_API_KEY) {
+    cron.schedule("*/15 * * * *", () => {
+      runVerkadaWebhookHealthCheck().catch((err) => console.error("[cron] Verkada webhook health check failed:", err));
+    }, { timezone: "UTC" });
+    cron.schedule("0 */4 * * *", () => {
+      triggerRoute("/api/verkada/poi-backfill");
+    }, { timezone: "UTC" });
+  }
   cron.schedule("*/5 * * * *", () => {
     triggerRoute("/api/goaccess/poll");
-  }, { timezone: "America/Los_Angeles" });
-  cron.schedule("*/10 * * * *", () => {
-    triggerRoute("/api/notion/poll");
-  }, { timezone: "UTC" });
-  cron.schedule("*/15 * * * *", () => {
-    triggerRoute("/api/notion-webhook-health-monitor");
-  }, { timezone: "UTC" });
+  }, { timezone: tz });
+  if (process.env.NOTION_API_KEY) {
+    cron.schedule("*/10 * * * *", () => {
+      triggerRoute("/api/notion/poll");
+    }, { timezone: "UTC" });
+    cron.schedule("*/15 * * * *", () => {
+      triggerRoute("/api/notion-webhook-health-monitor");
+    }, { timezone: "UTC" });
+  }
   cron.schedule("5 * * * *", () => {
     console.log("[cron] Running hourly electricity snapshot sync");
     triggerRoute("/api/electricity/live-cost");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("10 5 * * *", () => {
     console.log("[cron] Running daily per-circuit energy snapshot (prior day)");
     triggerRoute("/api/electricity/snapshot-daily");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("15 5 * * *", () => {
     console.log("[cron] Running daily water usage snapshot (prior day)");
     triggerRoute("/api/water/snapshot-daily");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("0 9 * * *", () => {
-    console.log("[cron] Running token-expiration warnings sweep (9:00 AM PT)");
+    console.log("[cron] Running token-expiration warnings sweep (9:00 AM)");
     triggerRoute("/api/janus/token-expiration-warnings");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("*/30 * * * *", () => {
     triggerRoute("/api/ha-workflow-reconciler");
   }, { timezone: "UTC" });
   cron.schedule("30 6 * * *", () => {
-    console.log("[cron] Running dependency security audit (6:30 AM PT daily)");
+    console.log("[cron] Running dependency security audit (6:30 AM daily)");
     triggerRoute("/api/security-audit-monitor");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("30 17 * * *", () => {
-    console.log("[cron] Running What's New auto-generator (5:30 PM PT daily)");
+    console.log("[cron] Running What's New auto-generator (5:30 PM daily)");
     triggerRoute("/api/updates-autogen");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("0 18 * * 1-6", () => {
-    console.log("[cron] Running time worker daily digest (6 PM PT)");
+    console.log("[cron] Running time worker daily digest (6 PM)");
     triggerRoute("/api/time/cron/worker-digest");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("0 7 * * 1-6", () => {
-    console.log("[cron] Running time admin pending digest (7 AM PT)");
+    console.log("[cron] Running time admin pending digest (7 AM)");
     triggerRoute("/api/time/cron/admin-pending-digest");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("0 7 * * 1", () => {
-    console.log("[cron] Running time weekly close-out (Mon 7 AM PT)");
+    console.log("[cron] Running time weekly close-out (Mon 7 AM)");
     triggerRoute("/api/time/cron/weekly-closeout");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   console.log("[cron] All scheduled jobs registered");
 }
 
