@@ -162,6 +162,7 @@ export function initCronJobs(): void {
   }, { timezone: 'UTC' });
 
   cron.schedule('*/5 * * * *', () => {
+    if (!process.env.GOOGLE_SERVICE_ACCOUNT_KEY) return;
     triggerRoute('/api/package-arrival-monitor');
   }, { timezone: 'UTC' });
 
@@ -291,6 +292,7 @@ export function initCronJobs(): void {
   }, { timezone: tz });
 
   cron.schedule('0 7 * * *', () => {
+    if (!process.env.OPENROUTER_API_KEY) return;
     console.log('[cron] Running Morning Weather Email (7:00 AM daily)');
     triggerRoute('/api/reports/morning-weather');
   }, { timezone: tz });
@@ -357,9 +359,11 @@ export function initCronJobs(): void {
     }, { timezone: 'UTC' });
   }
 
-  cron.schedule('*/5 * * * *', () => {
-    triggerRoute('/api/goaccess/poll');
-  }, { timezone: tz });
+  if (process.env.ENABLE_GOACCESS === 'true') {
+    cron.schedule('*/5 * * * *', () => {
+      triggerRoute('/api/goaccess/poll');
+    }, { timezone: tz });
+  }
 
   if (process.env.NOTION_API_KEY) {
     cron.schedule('*/10 * * * *', () => {

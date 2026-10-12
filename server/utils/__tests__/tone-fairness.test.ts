@@ -5,7 +5,7 @@
  * and per role (admin / member / staff / outsider). Nothing today
  * verifies that the rendered system prompt actually carries those
  * anchors. If a future SOUL edit accidentally deletes "Direct,
- * concise, data-first" from Tony's paragraph, the only signal is "the
+ * concise, data-first" from the admin paragraph, the only signal is "the
  * model started replying differently" — which is exactly the bug we
  * want to catch.
  *
@@ -17,7 +17,7 @@
  * The rendered prompt is the same for every recognized user — what
  * varies is the role-addendum appended to it. So we check:
  *   1. The core SOUL prompt always contains every tone anchor
- *      ("Direct" for Tony, "Warm" for Lana, "age-appropriate" for the
+ *      ("Direct" for Admin, "Warm" for Member, "age-appropriate" for the
  *      kids, "task-oriented" / "low-context" for staff, "Professional,
  *      polished" for outsiders).
  *   2. The role-addendum for each role names the right role and ships
@@ -47,12 +47,12 @@ const SOUL = fs.readFileSync(SOUL_PATH, "utf8");
 // UUIDs; it just needs a string that resembles what household_members
 // would produce so we can verify *absence* of PII in the outsider
 // path.
-const SAMPLE_DIRECTORY = `| Tony | admin@example.com | UUID-1 | UUID-A |
-| Lana | member@example.com | UUID-2 | UUID-B |
-| Isla | member2@example.com | UUID-3 | UUID-C |
-| Emme | member3@example.com | UUID-4 | UUID-D |
-| Enzo | member@example.com | UUID-5 | UUID-E |
-| Sandra | staff@example.com | UUID-6 | UUID-F |`;
+const SAMPLE_DIRECTORY = `| Alex | admin@example.com | UUID-1 | UUID-A |
+| Sam | member@example.com | UUID-2 | UUID-B |
+| Jordan | member2@example.com | UUID-3 | UUID-C |
+| Taylor | member3@example.com | UUID-4 | UUID-D |
+| Morgan | member@example.com | UUID-5 | UUID-E |
+| Riley | staff@example.com | UUID-6 | UUID-F |`;
 
 const CORE_PROMPT = renderSystemPrompt(SOUL, { householdDirectory: SAMPLE_DIRECTORY });
 
@@ -148,8 +148,8 @@ describe("Outsider quick-reply prompt is firm and PII-free", () => {
   // exposed to people we don't know, so the contract is:
   //   - polished + brief
   //   - explicit "no personal info"
-  //   - zero family / staff names beyond Tony/Lana (which are merely
-  //     mentioned as "the family", not by first name in the prompt)
+  //   - zero family / staff names beyond generic references
+  //     ("the family")
   //   - zero phone-shaped digit sequences
 
   it("explicitly forbids personal information", () => {
@@ -171,14 +171,9 @@ describe("Outsider quick-reply prompt is firm and PII-free", () => {
   });
 
   it("contains no household first names beyond a generic 'the family' reference", () => {
-    // Isla / Emme / Enzo / Sandra / Jesse / Rina / Esmerelda must not
-    // appear in the outsider prompt — the contract is "represent the
-    // household well but reveal nothing." Tony and Lana are fine to
-    // exclude from the check since they could legitimately appear in
-    // a generic phrasing; we explicitly verify they're NOT in the
-    // current prompt as a stronger guarantee.
+    // Specific household names must not appear in the outsider prompt.
     const lowerPrompt = OUTSIDER_QUICK_REPLY_PROMPT.toLowerCase();
-    for (const name of ["isla", "emme", "enzo", "sandra", "jesse", "rina", "esmerelda", "tony", "lana"]) {
+    for (const name of ["alex", "sam", "jordan", "taylor", "morgan", "riley"]) {
       expect(lowerPrompt, `outsider prompt leaks "${name}"`).not.toContain(name);
     }
   });
@@ -190,8 +185,8 @@ describe("Snapshot regression — SOUL tone anchors", () => {
   // its boolean flips and this fingerprint changes. Avoids leaking
   // the full PII-bearing prompt into the snapshot file.
 
-  // Tolerant of markdown bold (`**Tony:**`) and minor punctuation
-  // drift. The point is "this concept still appears in Tony's line",
+  // Tolerant of markdown formatting and minor punctuation
+  // drift. The point is "this concept still appears in the target line",
   // not "this exact regex matches a specific layout."
   const ANCHORS: Array<[string, RegExp]> = [
     ["admin_direct_data", /admin[^.\n]*direct[^.]*data-first/i],
@@ -228,7 +223,7 @@ describe("Snapshot regression — SOUL tone anchors", () => {
 
 // Optional live LLM smoke test. Off by default — runs only when
 // JANUS_FAIRNESS_LIVE=1 is set and OPENROUTER_API_KEY is configured.
-// Verifies the coarse contract "Tony's reply is shorter than Lana's
+// Verifies the coarse contract "Admin reply is shorter than Member's
 // on average" given identical input, by hitting the real model twice.
 // Not run in CI; available for manual eval.
 const LIVE = process.env.JANUS_FAIRNESS_LIVE === "1" && !!process.env.OPENROUTER_API_KEY;

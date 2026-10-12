@@ -10,8 +10,8 @@
  *                  (runtime read from HA switch history; GPM from
  *                   server/lib/irrigationFlow.ts)
  *
- * Cost model is LADWP Schedule A tiered (server/lib/ladwpWater.ts). Because Tony
- * runs irrigation deep into the upper tiers, the headline is the marginal $/gal.
+ * Cost model is LADWP Schedule A tiered (server/lib/ladwpWater.ts). Because estate
+ * usage extends into the upper tiers, the headline is the marginal $/gal.
  *
  * Mirrors server/routes/electricity.ts patterns; electricity behaviour is
  * untouched (water is purely additive).
@@ -591,7 +591,7 @@ router.post('/snapshot-daily', async (req: AuthenticatedRequest, res: Response) 
       : laDayBounds(Math.max(1, Math.min(parseInt(String(req.body?.daysBack ?? '1'), 10) || 1, 400)));
 
     // Marginal tier rate is keyed to cycle-to-date HCF so attributed $ reflects
-    // Tony's upper-tier position (irrigation gallons price at the margin).
+    // the estate's upper-tier position (irrigation gallons price at the margin).
     const cycleHcf = await getCycleHcf(bounds.usageDate);
     const tier = getCurrentWaterTierRate(cycleHcf);
     const marginalPerHcf = tier.ratePerHcf;

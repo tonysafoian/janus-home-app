@@ -102,7 +102,7 @@ export async function pollGoAccessEmails(_req: Request, res: Response): Promise<
   try {
     const token = await getGoAccessOAuthToken();
     if (!token) {
-      res.json({ success: false, error: "GoAccess Google account not connected" });
+      res.json({ success: true, skipped: true, reason: "GoAccess Google account not connected" });
       return;
     }
 

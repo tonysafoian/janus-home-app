@@ -8,7 +8,7 @@ let currentRole = "admin";
 vi.mock("../../middleware/auth.js", () => ({
   requireAuth: (req: any, _res: Response, next: NextFunction) => {
     req.userRole = currentRole;
-    req.userId = "tony";
+    req.userId = "admin_user";
     next();
   },
 }));

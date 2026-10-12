@@ -97,15 +97,15 @@ describe("executeRecallFacts — keyword path", () => {
   it("returns keyword hits and never calls the embedding API", async () => {
     const stub = makeStub();
     stub.__queue({
-      data: [{ key: "isla_food_allergies", value: "peanut, sesame", context: "", updated_at: "2026-05-01", pinned: false }],
+      data: [{ key: "family_member_food_allergies", value: "peanut, sesame", context: "", updated_at: "2026-05-01", pinned: false }],
       error: null,
     });
 
-    const result = await executeRecallFacts(stub as any, "user-1", "isla");
+    const result = await executeRecallFacts(stub as any, "user-1", "family_member");
     const parsed = JSON.parse(result);
     expect(parsed.path).toBe("keyword");
     expect(parsed.count).toBe(1);
-    expect(parsed.facts[0].key).toBe("isla_food_allergies");
+    expect(parsed.facts[0].key).toBe("family_member_food_allergies");
     expect(embedTextMock).not.toHaveBeenCalled();
     expect(semanticRecallMock).not.toHaveBeenCalled();
   });
@@ -125,15 +125,15 @@ describe("executeRecallFacts — semantic fallback", () => {
     const queryEmbedding = Array(768).fill(0.1);
     embedTextMock.mockResolvedValueOnce(queryEmbedding);
     semanticRecallMock.mockResolvedValueOnce([
-      { key: "isla_food_allergies", value: "peanut, sesame", context: null, updated_at: "2026-05-01", pinned: true, similarity: 0.82 },
-      { key: "tony_birthday", value: "1975-04-12", context: null, updated_at: "2026-05-02", pinned: false, similarity: 0.40 },
+      { key: "child_food_allergies", value: "peanut, sesame", context: null, updated_at: "2026-05-01", pinned: true, similarity: 0.82 },
+      { key: "admin_birthday", value: "1975-04-12", context: null, updated_at: "2026-05-02", pinned: false, similarity: 0.40 },
     ]);
 
-    const result = await executeRecallFacts(stub as any, "user-1", "isla allergy");
+    const result = await executeRecallFacts(stub as any, "user-1", "child allergy");
     const parsed = JSON.parse(result);
     expect(parsed.path).toBe("semantic");
     expect(parsed.count).toBe(1);
-    expect(parsed.facts[0].key).toBe("isla_food_allergies");
+    expect(parsed.facts[0].key).toBe("child_food_allergies");
     expect(parsed.facts[0].similarity).toBe(0.82);
     expect(parsed.facts[0].note).toBe("[via semantic match]");
     expect(embedTextMock).toHaveBeenCalledTimes(1);

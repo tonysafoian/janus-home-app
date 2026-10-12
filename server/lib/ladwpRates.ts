@@ -60,7 +60,7 @@ export const TIER_ALLOTMENTS = {
 
 // ── Power Access Charge (PAC) ──────────────────────────────────────────
 // Based on highest monthly kWh over prior 12 months.
-// Tony's bills consistently show PAC Tier 3 (peak month ~10,007 kWh).
+// Estate bills consistently show PAC Tier 3 (peak month ~10,007 kWh).
 const PAC_TIERS = [
   { label: 'Tier 1', maxMonthlyKwh: 350,  monthlyCharge: 2.30 },
   { label: 'Tier 2', maxMonthlyKwh: 1050, monthlyCharge: 7.90 },

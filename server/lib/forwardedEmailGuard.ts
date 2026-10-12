@@ -7,7 +7,7 @@
  * forwarded body has no obvious question, so the LLM defaulted to its
  * fallback greeting ("I'm Janus — I run the house at Janus. What can I
  * help you with?"). That reply then got sent back to the original vendor
- * (and CC'd to Tony), which is both noisy and embarrassing.
+ * (and CC'd to the admin), which is both noisy and undesirable.
  *
  * Heuristic — ALL of the following must hold for us to suppress the reply:
  *   1. Subject begins with a forwarding marker (Fwd:, Fw:, FW:, Tr:, etc.).

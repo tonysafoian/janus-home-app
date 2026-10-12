@@ -299,7 +299,7 @@ export function AdminHouseholdContent() {
                   id="displayName"
                   value={formData.displayName}
                   onChange={(e) => setFormData((p) => ({ ...p, displayName: e.target.value }))}
-                  placeholder="Jesse"
+                  placeholder="Alex"
                 />
               </div>
               <div className="space-y-1.5">
@@ -374,7 +374,7 @@ export function AdminHouseholdContent() {
                   value={aliasInput}
                   onChange={(e) => setAliasInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addAlias())}
-                  placeholder="jesse b, the builder…"
+                  placeholder="alex b, builder…"
                   className="flex-1"
                 />
                 <Button type="button" variant="outline" size="sm" onClick={addAlias}>

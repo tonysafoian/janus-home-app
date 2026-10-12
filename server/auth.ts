@@ -66,7 +66,8 @@ export function getAuthUser(req: Request): AuthUser | null {
   }
 
   // Check Home Assistant Ingress identity headers
-  const isHAEnvironment = !!(process.env.SUPERVISOR_TOKEN || req.headers['x-ingress-path']);
+  // Reject headers on standalone deployments to prevent header spoofing (only honor if SUPERVISOR_TOKEN exists)
+  const isHAEnvironment = Boolean(process.env.SUPERVISOR_TOKEN);
   const haUserId = (req.headers['x-remote-user-id'] as string) || (req.headers['x-ingress-user-id'] as string);
   if (isHAEnvironment && haUserId) {
     const haUserName = (req.headers['x-remote-user-name'] as string) || (req.headers['x-remote-user-display-name'] as string) || 'HA User';

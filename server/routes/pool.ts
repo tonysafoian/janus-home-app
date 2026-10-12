@@ -10,6 +10,7 @@ import type { AutomationStatusRow } from '../../shared/dbRows.js';
 import { sendMonitorAlert } from '../utils/notifications.js';
 import { getAlertPhoneNumber } from '../utils/janus-tools.js';
 import { fetchGoogleHourlyForecast } from '../utils/google-weather.js';
+import { getEntityMappings } from '../lib/estateConfig.js';
 
 const router = Router();
 
@@ -258,19 +259,23 @@ router.post('/rain-guard', requireAuth, async (req: AuthenticatedRequest, res: R
 
     let action: string;
     const haResults: Record<string, unknown>[] = [];
+    const mappings = await getEntityMappings();
+    const poolHeaterEntity = mappings.pool?.pool_heater || POOL_HEATER_ENTITY;
+    const spaHeaterEntity = mappings.pool?.spa_heater || SPA_HEATER_ENTITY;
+    const poolClimateEntity = POOL_CLIMATE_ENTITY;
 
     if (rainIn24h) {
       action = 'heaters_off';
-      const r1 = await callHAProxy({ action: 'call-service', domain: 'switch', service: 'turn_off', service_data: { entity_id: POOL_HEATER_ENTITY } });
-      haResults.push({ entity: POOL_HEATER_ENTITY, service: 'turn_off', status: r1.status });
-      const r2 = await callHAProxy({ action: 'call-service', domain: 'switch', service: 'turn_off', service_data: { entity_id: SPA_HEATER_ENTITY } });
-      haResults.push({ entity: SPA_HEATER_ENTITY, service: 'turn_off', status: r2.status });
+      const r1 = await callHAProxy({ action: 'call-service', domain: 'switch', service: 'turn_off', service_data: { entity_id: poolHeaterEntity } });
+      haResults.push({ entity: poolHeaterEntity, service: 'turn_off', status: r1.status });
+      const r2 = await callHAProxy({ action: 'call-service', domain: 'switch', service: 'turn_off', service_data: { entity_id: spaHeaterEntity } });
+      haResults.push({ entity: spaHeaterEntity, service: 'turn_off', status: r2.status });
     } else if (!rainIn48h) {
       action = 'pool_heater_on_87';
-      const r1 = await callHAProxy({ action: 'call-service', domain: 'switch', service: 'turn_on', service_data: { entity_id: POOL_HEATER_ENTITY } });
-      haResults.push({ entity: POOL_HEATER_ENTITY, service: 'turn_on', status: r1.status });
-      const r2 = await callHAProxy({ action: 'call-service', domain: 'climate', service: 'set_temperature', service_data: { entity_id: POOL_CLIMATE_ENTITY, temperature: TARGET_TEMP } });
-      haResults.push({ entity: POOL_CLIMATE_ENTITY, service: 'set_temperature', status: r2.status });
+      const r1 = await callHAProxy({ action: 'call-service', domain: 'switch', service: 'turn_on', service_data: { entity_id: poolHeaterEntity } });
+      haResults.push({ entity: poolHeaterEntity, service: 'turn_on', status: r1.status });
+      const r2 = await callHAProxy({ action: 'call-service', domain: 'climate', service: 'set_temperature', service_data: { entity_id: poolClimateEntity, temperature: TARGET_TEMP } });
+      haResults.push({ entity: poolClimateEntity, service: 'set_temperature', status: r2.status });
     } else {
       action = 'no_change';
     }
@@ -352,10 +357,13 @@ function aggregateToDailyAverages(historyPoints: any[]): { date: string; avg: nu
 
 router.get('/temp-history', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const mappings = await getEntityMappings();
+    const poolSensor = mappings.pool?.pool_temp || 'sensor.pool_temp';
+    const spaSensor = mappings.pool?.spa_temp || 'sensor.spa_temp';
     const hours = 30 * 24;
     const [poolHistory, spaHistory] = await Promise.all([
-      fetchHAHistory('sensor.pool_temp', hours),
-      fetchHAHistory('sensor.spa_temp', hours),
+      fetchHAHistory(poolSensor, hours),
+      fetchHAHistory(spaSensor, hours),
     ]);
 
     const poolDaily = aggregateToDailyAverages(poolHistory);
@@ -387,7 +395,9 @@ async function fetchCurrentPoolTemp(): Promise<number | null> {
   if (!haUrl || !haToken) return null;
 
   try {
-    const url = `${haUrl.replace(/\/$/, '')}/api/states/sensor.pool_temp`;
+    const mappings = await getEntityMappings();
+    const poolSensor = mappings.pool?.pool_temp || 'sensor.pool_temp';
+    const url = `${haUrl.replace(/\/$/, '')}/api/states/${poolSensor}`;
     const res = await fetchT(url, {
       method: 'GET',
       headers: { 'Authorization': `Bearer ${haToken}`, 'Content-Type': 'application/json' },
@@ -507,7 +517,9 @@ async function fetchSpaPumpState(): Promise<{ state: string; last_changed: strin
   if (!haUrl || !haToken) return null;
 
   try {
-    const url = `${haUrl.replace(/\/$/, '')}/api/states/switch.spa_pump`;
+    const mappings = await getEntityMappings();
+    const spaPumpEntity = mappings.pool?.spa_pump || 'switch.spa_pump';
+    const url = `${haUrl.replace(/\/$/, '')}/api/states/${spaPumpEntity}`;
     const res = await fetchT(url, {
       method: 'GET',
       headers: { 'Authorization': `Bearer ${haToken}`, 'Content-Type': 'application/json' },

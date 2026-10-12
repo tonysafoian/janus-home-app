@@ -34,7 +34,7 @@ if [ -f "$CONFIG_PATH" ]; then
 fi
 
 echo "===================================================="
-echo " 🏛️ Starting Janus Home Automation (v1.0.18)"
+echo " 🏛️ Starting Janus Home Automation (v1.0.19)"
 echo "===================================================="
 
 # Set up database

@@ -58,7 +58,8 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
   }
 
   // Home Assistant Ingress authentication
-  const isHAEnvironment = !!(process.env.SUPERVISOR_TOKEN || req.headers['x-ingress-path']);
+  // Reject headers on standalone deployments to prevent header spoofing (only honor if SUPERVISOR_TOKEN exists)
+  const isHAEnvironment = Boolean(process.env.SUPERVISOR_TOKEN);
   const haUserId = (req.headers['x-remote-user-id'] as string) || (req.headers['x-ingress-user-id'] as string);
   if (isHAEnvironment && haUserId) {
     const haAdminHeader = req.headers['x-remote-user-is-admin'];
@@ -182,7 +183,8 @@ export function requireAuthStrictAdmin(
 }
 
 export function optionalAuth(req: AuthenticatedRequest, _res: Response, next: NextFunction): void {
-  const isHAEnvironment = !!(process.env.SUPERVISOR_TOKEN || req.headers['x-ingress-path']);
+  // Reject headers on standalone deployments to prevent header spoofing (only honor if SUPERVISOR_TOKEN exists)
+  const isHAEnvironment = Boolean(process.env.SUPERVISOR_TOKEN);
   const haUserId = (req.headers['x-remote-user-id'] as string) || (req.headers['x-ingress-user-id'] as string);
   if (isHAEnvironment && haUserId) {
     const haAdminHeader = req.headers['x-remote-user-is-admin'];

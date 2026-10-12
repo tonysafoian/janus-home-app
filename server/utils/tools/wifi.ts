@@ -3,7 +3,7 @@
  *
  * - wifi_who_is_online — joins live Ruckus clients with the
  *   network_devices inventory and groups by person / role so chat
- *   answers look like "Tony's iPhone on 34 at -54 dBm" not
+ *   answers look like "Admin's iPhone on 34 at -54 dBm" not
  *   "11:22:33:44:55:66".
  * - wifi_label_device — admin-only chat label flow. Accepts a MAC plus
  *   any of label / owner_person_id / owner_role / device_type /
@@ -67,7 +67,7 @@ function deriveGroupKey(device: NetworkDeviceRow | null, filter?: WhoOnlineArgs[
   }
   if (device.owner_person_id) {
     const role = device.owner_role ?? "family";
-    // Title-case the person id ('tony' → 'Tony').
+    // Title-case the person id ('admin' → 'Admin').
     const name = device.owner_person_id.charAt(0).toUpperCase() + device.owner_person_id.slice(1);
     return `${name} (${role})`;
   }

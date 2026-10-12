@@ -1,5 +1,5 @@
 import { Router, type Response } from 'express';
-import { getEstateConfig, invalidateEstateConfigCache } from '../lib/estateConfig.js';
+import { getEstateConfig, invalidateEstateConfigCache, invalidateEntityMappingsCache } from '../lib/estateConfig.js';
 import { query } from '../lib/db.js';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
 import { getAuthUser } from '../auth.js';
@@ -66,6 +66,7 @@ router.post('/settings/entity-mappings', requireAuth, async (req: AuthenticatedR
        SET value = EXCLUDED.value, updated_at = NOW()`,
       [JSON.stringify(mappings)]
     );
+    invalidateEntityMappingsCache();
     res.json({ success: true, mappings });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });

@@ -3,7 +3,7 @@
 -- Builds an inventory of every device observed on the network and ties
 -- each one (by MAC) to a person, role, and label so the rest of the
 -- network section can stop talking in MAC addresses and start talking
--- in "Tony's iPhone".
+-- in friendly labels like "Admin's iPhone".
 --
 -- Populated three ways:
 --   1. Auto-ingest from FortiGate + Ruckus data calls (best-effort,

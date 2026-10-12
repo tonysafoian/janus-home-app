@@ -1,6 +1,6 @@
 -- One-time repair for environments where Bathroom Light Timer already existed
--- with an empty excluded_terms array before migration 0052 ran. Preserve the
--- requested Enzo exclusion. Future admin edits (including intentionally
+-- with an empty excluded_terms array before migration 0052 ran. Preserve any
+-- user-configured exclusions. Future admin edits (including intentionally
 -- clearing the list) remain untouched because this migration runs only once.
 
 UPDATE family_automations

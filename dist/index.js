@@ -2458,7 +2458,7 @@ function getAuthUser(req) {
       approvalStatus: "approved"
     };
   }
-  const isHAEnvironment = !!(process.env.SUPERVISOR_TOKEN || req.headers["x-ingress-path"]);
+  const isHAEnvironment = Boolean(process.env.SUPERVISOR_TOKEN);
   const haUserId = req.headers["x-remote-user-id"] || req.headers["x-ingress-user-id"];
   if (isHAEnvironment && haUserId) {
     const haUserName = req.headers["x-remote-user-name"] || req.headers["x-remote-user-display-name"] || "HA User";
@@ -3523,19 +3523,15 @@ var init_breakers = __esm({
 var helpers_exports = {};
 __export(helpers_exports, {
   ADMIN_EMAIL: () => ADMIN_EMAIL,
-  EMME_EMAIL: () => EMME_EMAIL,
   GOOGLE_CLIENT_ID: () => GOOGLE_CLIENT_ID,
   HOME_LAT: () => HOME_LAT,
   HOME_LNG: () => HOME_LNG,
-  ISLA_EMAIL: () => ISLA_EMAIL,
   JANUS_EMAIL: () => JANUS_EMAIL,
   MEMBER2_EMAIL: () => MEMBER2_EMAIL,
   MEMBER3_EMAIL: () => MEMBER3_EMAIL,
   MEMBER_EMAIL: () => MEMBER_EMAIL,
-  MOM_EMAIL: () => MOM_EMAIL,
   PROJECT_ID: () => PROJECT_ID,
   REDIRECT_URI: () => REDIRECT_URI,
-  TONY_EMAIL: () => TONY_EMAIL,
   authenticateRequest: () => authenticateRequest,
   base64url: () => base64url,
   callAI: () => callAI,
@@ -3653,7 +3649,7 @@ async function getAlertPhoneNumber() {
   if (_alertPhone) return _alertPhone;
   try {
     const svc = getServiceClient2();
-    const { data } = await svc.from("system_config").select("value").eq("key", "alert_phone_number").single();
+    const { data } = await svc.from("system_configs").select("value").eq("key", "alert_phone_number").single();
     if (data?.value) {
       _alertPhone = data.value;
       return data.value;
@@ -3714,7 +3710,7 @@ async function getBroadcastFallbackPhone() {
   if (_fallbackPhone) return _fallbackPhone;
   try {
     const svc = getServiceClient2();
-    const { data } = await svc.from("system_config").select("value").eq("key", "broadcast_fallback_phone").single();
+    const { data } = await svc.from("system_configs").select("value").eq("key", "broadcast_fallback_phone").single();
     if (data?.value) {
       _fallbackPhone = data.value;
       return data.value;
@@ -3892,21 +3888,17 @@ async function callAIJSON(prompt, maxTokens = 4e3) {
     return JSON.parse(m ? m[1] || m[0] : content);
   }
 }
-var PROJECT_ID, ADMIN_EMAIL, TONY_EMAIL, JANUS_EMAIL, MEMBER_EMAIL, MOM_EMAIL, MEMBER2_EMAIL, EMME_EMAIL, MEMBER3_EMAIL, ISLA_EMAIL, HOME_LAT, HOME_LNG, GOOGLE_CLIENT_ID, APP_DOMAIN, GOOGLE_REDIRECT_BASE, REDIRECT_URI, _alertPhone, _fallbackPhone;
+var PROJECT_ID, ADMIN_EMAIL, JANUS_EMAIL, MEMBER_EMAIL, MEMBER2_EMAIL, MEMBER3_EMAIL, HOME_LAT, HOME_LNG, GOOGLE_CLIENT_ID, APP_DOMAIN, GOOGLE_REDIRECT_BASE, REDIRECT_URI, _alertPhone, _fallbackPhone;
 var init_helpers = __esm({
   "server/lib/helpers.ts"() {
     init_supabase();
     init_breakers();
     PROJECT_ID = process.env.PROJECT_ID || "sample-project-id";
     ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@example.com";
-    TONY_EMAIL = ADMIN_EMAIL;
     JANUS_EMAIL = process.env.ASSISTANT_EMAIL || "assistant@example.com";
     MEMBER_EMAIL = process.env.MEMBER_EMAIL || "member@example.com";
-    MOM_EMAIL = MEMBER_EMAIL;
     MEMBER2_EMAIL = process.env.MEMBER2_EMAIL || "member2@example.com";
-    EMME_EMAIL = MEMBER2_EMAIL;
     MEMBER3_EMAIL = process.env.MEMBER3_EMAIL || "member3@example.com";
-    ISLA_EMAIL = MEMBER3_EMAIL;
     HOME_LAT = Number(process.env.HOME_LAT) || 34.0522;
     HOME_LNG = Number(process.env.HOME_LNG) || -118.2437;
     GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || "";
@@ -10005,9 +9997,9 @@ async function executeGetCalendarEvents(calendarId, timeMin, timeMax, maxResults
     const timeMinVal = timeMin || (/* @__PURE__ */ new Date()).toISOString();
     const timeMaxVal = timeMax || new Date(Date.now() + 7 * 24 * 60 * 60 * 1e3).toISOString();
     const perCalMax = Math.min(maxResults || 25, 50);
-    const isTonyDefault = !calendarId || effectiveCalId === process.env.PRIMARY_CALENDAR_ID || "primary";
+    const isPrimaryDefault = !calendarId || effectiveCalId === process.env.PRIMARY_CALENDAR_ID || "primary";
     let calendarIds = [effectiveCalId];
-    if (isTonyDefault) {
+    if (isPrimaryDefault) {
       try {
         const listData = await callCalendarProxy({ action: "list-calendars", calendarId: effectiveCalId });
         if (listData.success && Array.isArray(listData.calendars)) {
@@ -10072,26 +10064,26 @@ async function executeCreateCalendarEvent(calendarId, title, start, end, descrip
     const effectiveCalId = calendarId || process.env.PRIMARY_CALENDAR_ID || "primary";
     const normalizedStart = start ? normalizeToPacific(start) : start;
     const normalizedEnd = end ? normalizeToPacific(end) : end;
-    const TONY_EMAIL2 = process.env.PRIMARY_CALENDAR_ID || "primary";
-    const isTonysCalendar = effectiveCalId.toLowerCase() === TONY_EMAIL2;
-    const involvesTony = isTonysCalendar || (attendees || []).some((a) => a.toLowerCase() === TONY_EMAIL2);
-    if (involvesTony && normalizedStart && normalizedEnd) {
+    const PRIMARY_EMAIL = process.env.PRIMARY_CALENDAR_ID || "primary";
+    const isPrimaryCalendar = effectiveCalId.toLowerCase() === PRIMARY_EMAIL;
+    const involvesPrimary = isPrimaryCalendar || (attendees || []).some((a) => a.toLowerCase() === PRIMARY_EMAIL);
+    if (involvesPrimary && normalizedStart && normalizedEnd) {
       try {
         const availData = await callCalendarProxy({
           action: "check-availability",
-          emails: [TONY_EMAIL2],
+          emails: [PRIMARY_EMAIL],
           timeMin: normalizedStart,
           timeMax: normalizedEnd
         });
         if (availData.success && availData.availability) {
-          const tonyBusy = availData.availability[TONY_EMAIL2] || availData.availability[Object.keys(availData.availability)[0]];
-          if (Array.isArray(tonyBusy) && tonyBusy.length > 0) {
-            const conflicts = tonyBusy.map((b2) => `${b2.start} \u2013 ${b2.end}`).join(", ");
+          const primaryBusy = availData.availability[PRIMARY_EMAIL] || availData.availability[Object.keys(availData.availability)[0]];
+          if (Array.isArray(primaryBusy) && primaryBusy.length > 0) {
+            const conflicts = primaryBusy.map((b2) => `${b2.start} \u2013 ${b2.end}`).join(", ");
             return JSON.stringify({
               success: false,
               blocked_by_conflict: true,
-              conflicts: tonyBusy,
-              message: `CANNOT CREATE EVENT: Tony has ${tonyBusy.length} conflict(s) during this time: ${conflicts}. You MUST find alternative times. Use check_availability to find open slots, then present 2-3 options to Tony.`
+              conflicts: primaryBusy,
+              message: `CANNOT CREATE EVENT: Primary user has ${primaryBusy.length} conflict(s) during this time: ${conflicts}. You MUST find alternative times. Use check_availability to find open slots, then present 2-3 options.`
             });
           }
         }
@@ -11818,7 +11810,7 @@ async function enforceBrowseWebsiteQuota(ctx) {
     });
     return {
       allowed: false,
-      message: `I've hit my daily browser-use cap (${DAILY_CAP}/day). Tell Tony if this needs to go higher.`
+      message: `I've hit my daily browser-use cap (${DAILY_CAP}/day). Tell the administrator if this needs to go higher.`
     };
   }
   state.count += 1;
@@ -18689,19 +18681,19 @@ var TEST_CASES = [
     failReason: "Janus refused to search Notion or returned an access error"
   },
   {
-    name: "Notion Filter \u2014 Jesse Assignee",
-    prompt: "Show me all tasks assigned to Jesse in Notion",
+    name: "Notion Filter \u2014 Staff Assignee",
+    prompt: "Show me all tasks assigned to staff in Notion",
     userId: "functional-test-admin",
     userRole: "admin",
     passCondition: (r) => {
       const lower = r.toLowerCase();
       if (lower.includes("user id") || lower.includes("uuid") || lower.includes("please provide")) return false;
-      return lower.includes("jesse") || lower.includes("task") || lower.includes("assigned") || lower.includes("no tasks");
+      return lower.includes("staff") || lower.includes("task") || lower.includes("assigned") || lower.includes("no tasks");
     },
-    failReason: "Janus asked for Jesse's user ID instead of looking it up, or returned no data"
+    failReason: "Janus asked for staff user ID instead of looking it up, or returned no data"
   },
   {
-    name: "Notion Filter \u2014 Sandra Assignee",
+    name: "Notion Filter \u2014 Member Assignee",
     prompt: "What does the family member have on their plate this week in Notion?",
     userId: "functional-test-admin",
     userRole: "admin",
@@ -18756,7 +18748,7 @@ var TEST_CASES = [
     userRole: "member",
     passCondition: (r) => {
       const lower = r.toLowerCase();
-      const refusals = ["can't send", "cannot send", "not able to send", "don't have permission", "only admin", "administrator", "tony", "restricted"];
+      const refusals = ["can't send", "cannot send", "not able to send", "don't have permission", "only admin", "administrator", "restricted", "not authorized"];
       return refusals.some((s3) => lower.includes(s3));
     },
     failReason: "Janus sent (or attempted to send) an email for a member-role user \u2014 role restriction broken"
@@ -19314,7 +19306,7 @@ function requireAuth2(req, res, next) {
     next();
     return;
   }
-  const isHAEnvironment = !!(process.env.SUPERVISOR_TOKEN || req.headers["x-ingress-path"]);
+  const isHAEnvironment = Boolean(process.env.SUPERVISOR_TOKEN);
   const haUserId = req.headers["x-remote-user-id"] || req.headers["x-ingress-user-id"];
   if (isHAEnvironment && haUserId) {
     const haAdminHeader = req.headers["x-remote-user-is-admin"];
@@ -20102,7 +20094,7 @@ router5.get("/states", requireAuth2, (_req, res) => {
   }
   res.json(getEntityCache());
 });
-router5.get("/cameras", async (req, res) => {
+router5.get("/cameras", requireAuth2, async (req, res) => {
   try {
     const creds = await resolveHACreds(req.userId);
     if (!creds?.haUrl || !creds?.haToken) {
@@ -20136,7 +20128,7 @@ router5.get("/cameras", async (req, res) => {
     res.json({ success: false, cameras: [], error: String(err) });
   }
 });
-router5.get("/camera_proxy/:entityId", async (req, res) => {
+router5.get("/camera_proxy/:entityId", requireAuth2, async (req, res) => {
   const rawEntityId = req.params.entityId;
   const entityId = Array.isArray(rawEntityId) ? rawEntityId[0] : rawEntityId;
   if (!entityId || !entityId.startsWith("camera.")) {
@@ -20171,7 +20163,7 @@ router5.get("/camera_proxy/:entityId", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch camera snapshot" });
   }
 });
-router5.get("/camera_stream/:entityId", async (req, res) => {
+router5.get("/camera_stream/:entityId", requireAuth2, async (req, res) => {
   const rawEntityId = req.params.entityId;
   const entityId = Array.isArray(rawEntityId) ? rawEntityId[0] : rawEntityId;
   if (!entityId || !entityId.startsWith("camera.")) {
@@ -23636,6 +23628,131 @@ function googleTypeToWMO(type) {
   }
 }
 
+// server/lib/estateConfig.ts
+var cachedConfig = null;
+var lastFetchTime = 0;
+var CACHE_TTL_MS2 = 10 * 60 * 1e3;
+async function getEstateConfig() {
+  const now = Date.now();
+  if (cachedConfig && now - lastFetchTime < CACHE_TTL_MS2) {
+    return cachedConfig;
+  }
+  const fallback = {
+    latitude: Number(process.env.HOME_LAT) || 37.7749,
+    longitude: Number(process.env.HOME_LNG) || -122.4194,
+    elevation: 0,
+    timeZone: process.env.TZ || process.env.TIME_ZONE || "UTC",
+    unitSystem: {
+      length: "mi",
+      mass: "lb",
+      pressure: "psi",
+      temperature: "\xB0F",
+      volume: "gal"
+    },
+    locationName: process.env.HOME_LOCATION || "Home"
+  };
+  const haUrl = process.env.HA_URL || "http://supervisor/core";
+  const haToken = process.env.HA_TOKEN || process.env.SUPERVISOR_TOKEN;
+  if (!haToken) {
+    cachedConfig = fallback;
+    lastFetchTime = now;
+    return cachedConfig;
+  }
+  try {
+    const { status, data } = await callHA(haUrl, haToken, "GET", "/api/config", void 0, { maxRetries: 1 });
+    if (status === 200 && data && typeof data === "object") {
+      const d = data;
+      cachedConfig = {
+        latitude: typeof d.latitude === "number" ? d.latitude : fallback.latitude,
+        longitude: typeof d.longitude === "number" ? d.longitude : fallback.longitude,
+        elevation: typeof d.elevation === "number" ? d.elevation : fallback.elevation,
+        timeZone: d.time_zone || fallback.timeZone,
+        unitSystem: d.unit_system || fallback.unitSystem,
+        locationName: d.location_name || fallback.locationName
+      };
+      lastFetchTime = now;
+      return cachedConfig;
+    }
+  } catch (err) {
+    console.warn("[estateConfig] Failed to fetch HA /api/config, using fallback:", err instanceof Error ? err.message : err);
+  }
+  cachedConfig = fallback;
+  lastFetchTime = now;
+  return cachedConfig;
+}
+function getEstateTimezone() {
+  if (cachedConfig?.timeZone) return cachedConfig.timeZone;
+  return process.env.TZ || process.env.TIME_ZONE || "UTC";
+}
+var cachedEntityMappings = null;
+var lastEntityMappingsFetchTime = 0;
+async function getEntityMappings() {
+  const now = Date.now();
+  if (cachedEntityMappings && now - lastEntityMappingsFetchTime < CACHE_TTL_MS2) {
+    return cachedEntityMappings;
+  }
+  const fallback = {
+    energy: [],
+    irrigation: [],
+    pool: {
+      pool_heater: "switch.pool_heater",
+      spa_heater: "switch.spa_heater",
+      pool_temp: "sensor.pool_temp",
+      spa_temp: "sensor.spa_temp",
+      pool_pump: "switch.pool_pump",
+      spa_pump: "switch.spa_pump"
+    },
+    climate: [],
+    cameras: [],
+    vehicles: [],
+    speedtest: {
+      download: "sensor.speedtest_download",
+      upload: "sensor.speedtest_upload",
+      ping: "sensor.speedtest_ping"
+    },
+    utility_rates: {
+      electricity_kwh_cost: 0.28,
+      water_hcf_cost: 12.5
+    }
+  };
+  try {
+    const { query: query2 } = await Promise.resolve().then(() => (init_db2(), db_exports));
+    const res = await query2(
+      `SELECT value FROM system_configs WHERE key = 'entity_mappings' LIMIT 1`
+    );
+    if (res?.rows?.[0]?.value) {
+      const parsed = typeof res.rows[0].value === "string" ? JSON.parse(res.rows[0].value) : res.rows[0].value;
+      cachedEntityMappings = {
+        ...fallback,
+        ...parsed,
+        pool: {
+          ...fallback.pool,
+          ...parsed.pool || {}
+        },
+        speedtest: {
+          ...fallback.speedtest,
+          ...parsed.speedtest || {}
+        },
+        utility_rates: {
+          ...fallback.utility_rates,
+          ...parsed.utility_rates || {}
+        }
+      };
+      lastEntityMappingsFetchTime = now;
+      return cachedEntityMappings;
+    }
+  } catch (err) {
+    console.warn("[estateConfig] Failed to fetch entity_mappings from system_configs:", err instanceof Error ? err.message : err);
+  }
+  cachedEntityMappings = fallback;
+  lastEntityMappingsFetchTime = now;
+  return cachedEntityMappings;
+}
+function invalidateEntityMappingsCache() {
+  cachedEntityMappings = null;
+  lastEntityMappingsFetchTime = 0;
+}
+
 // server/routes/pool.ts
 var router9 = Router10();
 var ZODIAC_BASE = "https://prod.zodiac-io.com";
@@ -23839,18 +23956,22 @@ router9.post("/rain-guard", requireAuth2, async (req, res) => {
     const maxPrecip48 = Math.max(...hours0to24, ...hours24to48);
     let action;
     const haResults = [];
+    const mappings = await getEntityMappings();
+    const poolHeaterEntity = mappings.pool?.pool_heater || POOL_HEATER_ENTITY;
+    const spaHeaterEntity = mappings.pool?.spa_heater || SPA_HEATER_ENTITY;
+    const poolClimateEntity = POOL_CLIMATE_ENTITY;
     if (rainIn24h) {
       action = "heaters_off";
-      const r1 = await callHAProxy4({ action: "call-service", domain: "switch", service: "turn_off", service_data: { entity_id: POOL_HEATER_ENTITY } });
-      haResults.push({ entity: POOL_HEATER_ENTITY, service: "turn_off", status: r1.status });
-      const r2 = await callHAProxy4({ action: "call-service", domain: "switch", service: "turn_off", service_data: { entity_id: SPA_HEATER_ENTITY } });
-      haResults.push({ entity: SPA_HEATER_ENTITY, service: "turn_off", status: r2.status });
+      const r1 = await callHAProxy4({ action: "call-service", domain: "switch", service: "turn_off", service_data: { entity_id: poolHeaterEntity } });
+      haResults.push({ entity: poolHeaterEntity, service: "turn_off", status: r1.status });
+      const r2 = await callHAProxy4({ action: "call-service", domain: "switch", service: "turn_off", service_data: { entity_id: spaHeaterEntity } });
+      haResults.push({ entity: spaHeaterEntity, service: "turn_off", status: r2.status });
     } else if (!rainIn48h) {
       action = "pool_heater_on_87";
-      const r1 = await callHAProxy4({ action: "call-service", domain: "switch", service: "turn_on", service_data: { entity_id: POOL_HEATER_ENTITY } });
-      haResults.push({ entity: POOL_HEATER_ENTITY, service: "turn_on", status: r1.status });
-      const r2 = await callHAProxy4({ action: "call-service", domain: "climate", service: "set_temperature", service_data: { entity_id: POOL_CLIMATE_ENTITY, temperature: TARGET_TEMP } });
-      haResults.push({ entity: POOL_CLIMATE_ENTITY, service: "set_temperature", status: r2.status });
+      const r1 = await callHAProxy4({ action: "call-service", domain: "switch", service: "turn_on", service_data: { entity_id: poolHeaterEntity } });
+      haResults.push({ entity: poolHeaterEntity, service: "turn_on", status: r1.status });
+      const r2 = await callHAProxy4({ action: "call-service", domain: "climate", service: "set_temperature", service_data: { entity_id: poolClimateEntity, temperature: TARGET_TEMP } });
+      haResults.push({ entity: poolClimateEntity, service: "set_temperature", status: r2.status });
     } else {
       action = "no_change";
     }
@@ -23928,10 +24049,13 @@ function aggregateToDailyAverages(historyPoints) {
 }
 router9.get("/temp-history", requireAuth2, async (req, res) => {
   try {
+    const mappings = await getEntityMappings();
+    const poolSensor = mappings.pool?.pool_temp || "sensor.pool_temp";
+    const spaSensor = mappings.pool?.spa_temp || "sensor.spa_temp";
     const hours = 30 * 24;
     const [poolHistory, spaHistory] = await Promise.all([
-      fetchHAHistory("sensor.pool_temp", hours),
-      fetchHAHistory("sensor.spa_temp", hours)
+      fetchHAHistory(poolSensor, hours),
+      fetchHAHistory(spaSensor, hours)
     ]);
     const poolDaily = aggregateToDailyAverages(poolHistory);
     const spaDaily = aggregateToDailyAverages(spaHistory);
@@ -23956,7 +24080,9 @@ async function fetchCurrentPoolTemp() {
   const haToken = process.env.HA_TOKEN;
   if (!haUrl || !haToken) return null;
   try {
-    const url = `${haUrl.replace(/\/$/, "")}/api/states/sensor.pool_temp`;
+    const mappings = await getEntityMappings();
+    const poolSensor = mappings.pool?.pool_temp || "sensor.pool_temp";
+    const url = `${haUrl.replace(/\/$/, "")}/api/states/${poolSensor}`;
     const res = await fetchT2(url, {
       method: "GET",
       headers: { "Authorization": `Bearer ${haToken}`, "Content-Type": "application/json" }
@@ -24069,7 +24195,9 @@ async function fetchSpaPumpState() {
   const haToken = process.env.HA_TOKEN;
   if (!haUrl || !haToken) return null;
   try {
-    const url = `${haUrl.replace(/\/$/, "")}/api/states/switch.spa_pump`;
+    const mappings = await getEntityMappings();
+    const spaPumpEntity = mappings.pool?.spa_pump || "switch.spa_pump";
+    const url = `${haUrl.replace(/\/$/, "")}/api/states/${spaPumpEntity}`;
     const res = await fetchT2(url, {
       method: "GET",
       headers: { "Authorization": `Bearer ${haToken}`, "Content-Type": "application/json" }
@@ -25196,7 +25324,7 @@ async function fetchCalendarEventsForDays(saKey, days) {
   const token = await getServiceToken(
     saKey,
     "https://www.googleapis.com/auth/calendar.readonly",
-    TONY_EMAIL
+    ADMIN_EMAIL
   );
   const now = /* @__PURE__ */ new Date();
   const end = new Date(now.getTime() + days * 24 * 60 * 60 * 1e3);
@@ -25208,7 +25336,7 @@ async function fetchCalendarEventsForDays(saKey, days) {
     maxResults: "250"
   });
   const res = await fetchT(
-    `${CALENDAR_BASE2}/calendars/${TONY_EMAIL}/events?${params}`,
+    `${CALENDAR_BASE2}/calendars/${ADMIN_EMAIL}/events?${params}`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
   if (!res.ok) throw new Error(`Calendar fetch failed: ${res.status}`);
@@ -25357,7 +25485,7 @@ router13.post("/nav-tesla", async (req, res) => {
     const calToken = await getServiceToken(
       saKey,
       "https://www.googleapis.com/auth/calendar.readonly",
-      TONY_EMAIL
+      ADMIN_EMAIL
     );
     const now = /* @__PURE__ */ new Date();
     let timeMin;
@@ -25379,7 +25507,7 @@ router13.post("/nav-tesla", async (req, res) => {
       maxResults: isDryRun ? "250" : "20"
     });
     const calRes = await fetchT(
-      `${CALENDAR_BASE2}/calendars/${TONY_EMAIL}/events?${params}`,
+      `${CALENDAR_BASE2}/calendars/${ADMIN_EMAIL}/events?${params}`,
       { headers: { Authorization: `Bearer ${calToken}` } }
     );
     if (!calRes.ok) throw new Error(`Calendar fetch: ${calRes.status}`);
@@ -27658,12 +27786,12 @@ router16.post("/accountability", async (_req, res) => {
       const subject = urgentCount > 0 ? `\u26A0\uFE0F ${urgentCount} Overdue Follow-Up${urgentCount > 1 ? "s" : ""} \u2014 ${dateStr}` : `Follow-Up Digest \u2014 ${dateStr}`;
       const sent = await sendGmailRaw(
         saKey,
-        TONY_EMAIL,
+        ADMIN_EMAIL,
         subject,
         `<pre>${sections.join("\n")}</pre>`,
         sections.join("\n")
       );
-      await logEmail("followup_digest", subject, [TONY_EMAIL], `<pre>${sections.join("\n")}</pre>`, sent ? "sent" : "error", sent ? void 0 : "sendGmailRaw returned false", sections.join("\n"));
+      await logEmail("followup_digest", subject, [ADMIN_EMAIL], `<pre>${sections.join("\n")}</pre>`, sent ? "sent" : "error", sent ? void 0 : "sendGmailRaw returned false", sections.join("\n"));
     }
     logAudit2("followup-accountability", {
       category: "automation",
@@ -29393,7 +29521,10 @@ router17.post("/morning-weather", requireAuth2, async (_req, res) => {
       throw dedupErr;
     }
     const openrouterApiKey = process.env.OPENROUTER_API_KEY;
-    if (!openrouterApiKey) throw new Error("OPENROUTER_API_KEY not configured");
+    if (!openrouterApiKey) {
+      console.log("[morning-weather] Skipping: OPENROUTER_API_KEY not configured");
+      return res.status(200).json({ ok: true, skipped: true, reason: "openrouter_api_key_not_configured", period: mwDate });
+    }
     const saKey = getSaKey();
     const today = (/* @__PURE__ */ new Date()).toLocaleDateString("en-US", {
       weekday: "long",
@@ -29678,7 +29809,7 @@ router17.post("/morning-weather", requireAuth2, async (_req, res) => {
         [ccTodayDateLA, ccMetaKey]
       );
       if (ccDedupCheck.rows.length > 0) {
-        console.log(`[Morning Email] Skipping CC (tony) for ${ccChildName} \u2014 already sent today (dedup guard)`);
+        console.log(`[Morning Email] Skipping CC (admin) for ${ccChildName} \u2014 already sent today (dedup guard)`);
         childStatusMap[ccMetaKey] = "skipped";
         continue;
       }
@@ -31206,7 +31337,7 @@ var router19 = Router20();
 var HOME_LAT3 = 34.0522;
 var HOME_LNG3 = -118.2437;
 var cachedData = null;
-var CACHE_TTL_MS2 = 5 * 60 * 1e3;
+var CACHE_TTL_MS3 = 5 * 60 * 1e3;
 router19.post("/api/weather-dashboard", async (req, res) => {
   if (cachedData && Date.now() < cachedData.expiresAt) {
     return res.json(cachedData.data);
@@ -31302,7 +31433,7 @@ router19.post("/api/weather-dashboard", async (req, res) => {
       }
     }
     const result = { forecast, airQuality, pollen, pollenForecast, weatherAlerts, healthRecommendations };
-    cachedData = { data: result, expiresAt: Date.now() + CACHE_TTL_MS2 };
+    cachedData = { data: result, expiresAt: Date.now() + CACHE_TTL_MS3 };
     res.json(result);
   } catch (err) {
     console.error("Weather dashboard error:", err);
@@ -31403,7 +31534,7 @@ router19.post("/api/weather-forecast", async (_req, res) => {
         wind_speed_10m_max: dailyWindMax
       }
     };
-    cachedForecastData = { data, expiresAt: Date.now() + CACHE_TTL_MS2 };
+    cachedForecastData = { data, expiresAt: Date.now() + CACHE_TTL_MS3 };
     res.json(data);
   } catch (err) {
     console.error("Weather forecast proxy error:", err);
@@ -31620,6 +31751,14 @@ var SPEEDTEST_ENTITIES = {
   upload: "sensor.speedtest_upload",
   ping: "sensor.speedtest_ping"
 };
+async function getEffectiveSpeedtestEntities() {
+  const mappings = await getEntityMappings();
+  return {
+    download: mappings.speedtest?.download || SPEEDTEST_ENTITIES.download,
+    upload: mappings.speedtest?.upload || SPEEDTEST_ENTITIES.upload,
+    ping: mappings.speedtest?.ping || SPEEDTEST_ENTITIES.ping
+  };
+}
 var FORTIGATE_WAN_ENTITIES = ["sensor.fortigate_wan_status", "sensor.fortigate_wan1_status", "sensor.fortinet_wan_status"];
 var INTERNET_THRESHOLDS = {
   download_degraded: 100,
@@ -31631,7 +31770,7 @@ var INTERNET_THRESHOLDS = {
 };
 var PRINTERS = [
   {
-    name: "Sandra's Office",
+    name: "Office Printer 2",
     statusEntity: "sensor.hp_color_laserjet_pro_mfp_3301_2",
     cartridges: [
       { color: "Black", entity: "sensor.hp_color_laserjet_pro_mfp_3301_black_cartridge_2" },
@@ -31703,7 +31842,7 @@ router20.post("/api/internet-health-monitor", requireAuth2, async (req, res) => 
   try {
     const db2 = storage;
     const { rows: [automation] } = await db2.query(`SELECT id, is_active FROM family_automations WHERE name = 'Internet Health Monitor' LIMIT 1`);
-    if (!automation) return res.status(404).json({ error: "Automation not found in DB" });
+    if (!automation) return res.status(200).json({ skipped: true, reason: "Automation not found in DB" });
     if (!automation.is_active) return res.json({ skipped: true, reason: "Automation is disabled" });
     if (!isHAConfigured2()) {
       console.log("[internet-health-monitor] Home Assistant not configured \u2014 skipping.");
@@ -31717,9 +31856,10 @@ router20.post("/api/internet-health-monitor", requireAuth2, async (req, res) => 
     const wanEntity = FORTIGATE_WAN_ENTITIES.find((e) => states[e]);
     const wanState = wanEntity ? states[wanEntity].state : null;
     const wanAttributes = wanEntity ? states[wanEntity].attributes || {} : {};
-    const download = states[SPEEDTEST_ENTITIES.download] ? parseFloat(states[SPEEDTEST_ENTITIES.download].state) : NaN;
-    const upload = states[SPEEDTEST_ENTITIES.upload] ? parseFloat(states[SPEEDTEST_ENTITIES.upload].state) : NaN;
-    const ping = states[SPEEDTEST_ENTITIES.ping] ? parseFloat(states[SPEEDTEST_ENTITIES.ping].state) : NaN;
+    const speedtestEntities = await getEffectiveSpeedtestEntities();
+    const download = states[speedtestEntities.download] ? parseFloat(states[speedtestEntities.download].state) : NaN;
+    const upload = states[speedtestEntities.upload] ? parseFloat(states[speedtestEntities.upload].state) : NaN;
+    const ping = states[speedtestEntities.ping] ? parseFloat(states[speedtestEntities.ping].state) : NaN;
     const wanTraffic = {};
     const rxBytes = wanAttributes.rx_bytes ?? wanAttributes.wan_rx_bytes ?? wanAttributes.bytes_recv ?? null;
     const txBytes = wanAttributes.tx_bytes ?? wanAttributes.wan_tx_bytes ?? wanAttributes.bytes_sent ?? null;
@@ -31801,17 +31941,18 @@ router20.post("/api/speedtest-pull-from-ha", requireAuth2, async (req, res) => {
     if (Array.isArray(allStates)) {
       for (const s3 of allStates) states[s3.entity_id] = s3;
     }
-    const dl = states[SPEEDTEST_ENTITIES.download];
-    const ul = states[SPEEDTEST_ENTITIES.upload];
-    const pg3 = states[SPEEDTEST_ENTITIES.ping];
+    const speedtestEntities = await getEffectiveSpeedtestEntities();
+    const dl = states[speedtestEntities.download];
+    const ul = states[speedtestEntities.upload];
+    const pg3 = states[speedtestEntities.ping];
     if (!dl || !ul || !pg3) {
       return res.json({
         skipped: true,
         reason: "ha_speedtest_sensors_missing",
         missing: [
-          !dl ? SPEEDTEST_ENTITIES.download : null,
-          !ul ? SPEEDTEST_ENTITIES.upload : null,
-          !pg3 ? SPEEDTEST_ENTITIES.ping : null
+          !dl ? speedtestEntities.download : null,
+          !ul ? speedtestEntities.upload : null,
+          !pg3 ? speedtestEntities.ping : null
         ].filter(Boolean)
       });
     }
@@ -31923,7 +32064,7 @@ router20.post("/api/printer-health-monitor", requireAuth2, async (req, res) => {
   try {
     const db2 = storage;
     const { rows: [automation] } = await db2.query(`SELECT id, is_active FROM family_automations WHERE name = 'Printer Health Monitor' LIMIT 1`);
-    if (!automation) return res.status(404).json({ error: "Automation not found in DB" });
+    if (!automation) return res.status(200).json({ skipped: true, reason: "Automation not found in DB" });
     if (!automation.is_active) return res.json({ skipped: true, reason: "Automation is disabled" });
     if (!isHAConfigured2()) {
       console.log("[printer-health-monitor] Home Assistant not configured \u2014 skipping.");
@@ -32043,7 +32184,7 @@ router20.post("/api/ha-server-health-monitor", requireAuth2, async (req, res) =>
   try {
     const db2 = storage;
     const { rows: [automation] } = await db2.query(`SELECT id, is_active FROM family_automations WHERE name = 'HA Server Health Monitor' LIMIT 1`);
-    if (!automation) return res.status(404).json({ error: "Automation not found in DB" });
+    if (!automation) return res.status(200).json({ skipped: true, reason: "Automation not found in DB" });
     if (!automation.is_active) return res.json({ skipped: true, reason: "Automation is disabled" });
     if (!isHAConfigured2()) {
       console.log("[ha-server-health-monitor] Home Assistant not configured \u2014 skipping.");
@@ -32522,7 +32663,10 @@ router20.post("/api/thermostat-monitor", requireAuth2, async (req, res) => {
     if (Array.isArray(allStates)) {
       for (const s3 of allStates) stateMap[s3.entity_id] = s3;
     }
+    const mappings = await getEntityMappings();
+    const mappedClimateSet = new Set(mappings.climate || []);
     const climateEntities = Object.values(stateMap).filter((s3) => {
+      if (mappedClimateSet.has(s3.entity_id)) return true;
       if (!s3.entity_id.startsWith("climate.")) return false;
       const fn = s3.attributes?.friendly_name ?? "";
       return !isPoolOrSpa(s3.entity_id, fn);
@@ -32752,8 +32896,8 @@ router20.post("/api/av-closet-temp-monitor", requireAuth2, async (req, res) => {
     const { sendMonitorAlert: sendMonitorAlert2 } = await Promise.resolve().then(() => (init_notifications(), notifications_exports));
     const isOffline = avReading.online === false || !Number.isFinite(avReading.tempF);
     if (isOffline) {
-      const tony = findMember("admin@example.com");
-      const tonyWhatsApp = tony?.whatsapp_number || process.env.ALERT_PHONE_NUMBER;
+      const adminMember = findMember("admin@example.com");
+      const adminWhatsApp = adminMember?.whatsapp_number || process.env.ALERT_PHONE_NUMBER;
       const { rows: recent } = await db2.query(
         `SELECT id FROM system_audit_log
          WHERE event_type = 'monitor_alert_sent'
@@ -32765,7 +32909,7 @@ router20.post("/api/av-closet-temp-monitor", requireAuth2, async (req, res) => {
       if (recent.length === 0) {
         const recipients = [
           ...AV_CLOSET_RECIPIENT_EMAILS.map((e) => ({ email: findMember(e)?.email || e })),
-          ...tonyWhatsApp ? [{ whatsapp: tonyWhatsApp }] : []
+          ...adminWhatsApp ? [{ whatsapp: adminWhatsApp }] : []
         ];
         const sendResult = await sendMonitorAlert2({
           recipients,
@@ -32836,8 +32980,8 @@ Please check ventilation/cooling for the AV equipment closet.`,
       }
     }
     if (isCriticalActive) {
-      const tony = findMember("admin@example.com");
-      const tonyWhatsApp = tony?.whatsapp_number || process.env.ALERT_PHONE_NUMBER;
+      const adminMember = findMember("admin@example.com");
+      const adminWhatsApp = adminMember?.whatsapp_number || process.env.ALERT_PHONE_NUMBER;
       const { rows: recent } = await db2.query(
         `SELECT id FROM system_audit_log
          WHERE event_type = 'monitor_alert_sent'
@@ -32845,9 +32989,9 @@ Please check ventilation/cooling for the AV equipment closet.`,
            AND created_at > NOW() - INTERVAL '${AV_CLOSET_DEDUP_HOURS} hours'
          LIMIT 1`
       );
-      if (recent.length === 0 && tonyWhatsApp) {
+      if (recent.length === 0 && adminWhatsApp) {
         await sendMonitorAlert2({
-          recipients: [{ whatsapp: tonyWhatsApp }],
+          recipients: [{ whatsapp: adminWhatsApp }],
           subject: `\u{1F6A8} AV Closet Temperature Critical: ${temp}${unit}`,
           body: `The ${name} temperature is ${temp}${unit}, above the critical ${AV_CLOSET_CRITICAL_TEMP}${unit} threshold. Immediate attention needed to prevent equipment damage.`,
           channels: ["whatsapp"],
@@ -33800,11 +33944,17 @@ router20.post("/api/ha-locks-monitor", async (_req, res) => {
     if (automation && !automation.is_active) {
       return res.json({ skipped: true, reason: "Automation is disabled" });
     }
+    if (!isHAConfigured2()) {
+      return res.json({ skipped: true, reason: "Home Assistant not configured" });
+    }
     const allStates = await callHAProxy5({ action: "get-states" });
     if (!Array.isArray(allStates)) {
-      throw new Error("Expected array of states from Home Assistant");
+      return res.json({ skipped: true, reason: "Could not fetch states from Home Assistant" });
     }
     const lockEntities = allStates.filter((s3) => s3.entity_id.startsWith("lock."));
+    if (lockEntities.length === 0) {
+      return res.json({ skipped: true, reason: "No lock entities found in Home Assistant" });
+    }
     const locksSummary = [];
     const issues = [];
     let hasCritical = false;
@@ -34248,6 +34398,9 @@ async function archiveMessage(token, messageId) {
   });
 }
 router22.post("/api/package-arrival-monitor", requireAuth2, async (req, res) => {
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+    return res.status(200).json({ skipped: true, reason: "google_service_account_not_configured" });
+  }
   try {
     const token = await getGmailAccessToken(ADMIN_EMAIL3);
     const db2 = storage;
@@ -36691,7 +36844,7 @@ function classifyByFields(vendor, deviceType, osType, hostname) {
   if (/\balarm\b/i.test(haystack)) {
     return { category: "Smart Gate Devices", subcategory: "Access Control", vendor: detectVendorName(vendor) || "Unknown" };
   }
-  if (/\badmin\b/i.test(haystack) || /\btony\b/i.test(haystack)) {
+  if (/\badmin\b/i.test(haystack) || /\bexecutive\b/i.test(haystack)) {
     return { category: "Admin Systems", subcategory: "Admin Systems", vendor: detectVendorName(vendor) || vendor || "Unknown" };
   }
   if (/nvidia/i.test(haystack)) {
@@ -40098,7 +40251,7 @@ async function pollGoAccessEmails(_req, res) {
   try {
     const token = await getGoAccessOAuthToken();
     if (!token) {
-      res.json({ success: false, error: "GoAccess Google account not connected" });
+      res.json({ success: true, skipped: true, reason: "GoAccess Google account not connected" });
       return;
     }
     await query(
@@ -42068,8 +42221,8 @@ var ENERGY_CIRCUITS = [
   { entityId: "sensor.gh_furnace_energy_today", powerEntityId: "sensor.gh_furnace_power_minute_average", label: "GH Furnace", category: "HVAC", panel: "guest_house" },
   { entityId: "sensor.gym_ac_energy_today", powerEntityId: "sensor.gym_ac_power_minute_average", label: "Gym AC", category: "HVAC", panel: "guest_house" },
   { entityId: "sensor.gym_furnace_energy_today", powerEntityId: "sensor.gym_furnace_power_minute_average", label: "Gym Furnace", category: "HVAC", panel: "guest_house" },
-  { entityId: "sensor.lana_s_car_charger_energy_today", powerEntityId: "sensor.lana_s_car_charger_power_minute_average", label: "EV Charger 1", category: "Vehicles", panel: "guest_house" },
-  { entityId: "sensor.tony_s_car_charger_energy_today", powerEntityId: "sensor.tony_s_car_charger_power_minute_average", label: "EV Charger 2", category: "Vehicles", panel: "guest_house" },
+  { entityId: "sensor.ev_charger_1_energy_today", powerEntityId: "sensor.ev_charger_1_power_minute_average", label: "EV Charger 1", category: "Vehicles", panel: "guest_house" },
+  { entityId: "sensor.ev_charger_2_energy_today", powerEntityId: "sensor.ev_charger_2_power_minute_average", label: "EV Charger 2", category: "Vehicles", panel: "guest_house" },
   { entityId: "sensor.equipment_room_cabana_energy_today", powerEntityId: "sensor.equipment_room_cabana_power_minute_average", label: "ERC Panel (Main)", category: "Outdoor", panel: "equipment_room" },
   { entityId: "sensor.equipment_room_cabana_energy_today_2", powerEntityId: "sensor.equipment_room_cabana_power_minute_average_2", label: "ERC Breaker 2", category: "Outdoor", panel: "equipment_room" },
   { entityId: "sensor.equipment_room_cabana_energy_today_3", powerEntityId: "sensor.equipment_room_cabana_power_minute_average_3", label: "ERC Breaker 3", category: "Outdoor", panel: "equipment_room" },
@@ -46696,8 +46849,8 @@ router39.post("/api/time/cron/admin-pending-digest", async (req, res) => {
       res.json({ skipped: true, reason: "no_service_account_key" });
       return;
     }
-    const { TONY_EMAIL: TONY_EMAIL2 } = await Promise.resolve().then(() => (init_helpers(), helpers_exports));
-    const adminEmails = [TONY_EMAIL2];
+    const { ADMIN_EMAIL: ADMIN_EMAIL6 } = await Promise.resolve().then(() => (init_helpers(), helpers_exports));
+    const adminEmails = [ADMIN_EMAIL6];
     const pending = await query(
       `SELECT w.full_name, COUNT(te.id) AS cnt, SUM(te.hours::numeric * te.rate_cents) AS labor_cents
        FROM tt_time_entries te JOIN tt_workers w ON w.id = te.worker_id
@@ -46757,8 +46910,8 @@ router39.post("/api/time/cron/weekly-closeout", async (req, res) => {
       res.json({ skipped: true, reason: "no_service_account_key" });
       return;
     }
-    const { TONY_EMAIL: TONY_EMAIL2 } = await Promise.resolve().then(() => (init_helpers(), helpers_exports));
-    const adminEmails = [TONY_EMAIL2];
+    const { ADMIN_EMAIL: ADMIN_EMAIL6 } = await Promise.resolve().then(() => (init_helpers(), helpers_exports));
+    const adminEmails = [ADMIN_EMAIL6];
     const today = getTodayPT();
     const lastWeekEnd = addDays2(today, -1);
     const lastWeekStart = getWeekStartPT(lastWeekEnd);
@@ -46879,65 +47032,6 @@ var time_default = router39;
 
 // server/routes/estate.ts
 import { Router as Router41 } from "express";
-
-// server/lib/estateConfig.ts
-var cachedConfig = null;
-var lastFetchTime = 0;
-var CACHE_TTL_MS3 = 10 * 60 * 1e3;
-async function getEstateConfig() {
-  const now = Date.now();
-  if (cachedConfig && now - lastFetchTime < CACHE_TTL_MS3) {
-    return cachedConfig;
-  }
-  const fallback = {
-    latitude: Number(process.env.HOME_LAT) || 37.7749,
-    longitude: Number(process.env.HOME_LNG) || -122.4194,
-    elevation: 0,
-    timeZone: process.env.TZ || process.env.TIME_ZONE || "UTC",
-    unitSystem: {
-      length: "mi",
-      mass: "lb",
-      pressure: "psi",
-      temperature: "\xB0F",
-      volume: "gal"
-    },
-    locationName: process.env.HOME_LOCATION || "Home"
-  };
-  const haUrl = process.env.HA_URL || "http://supervisor/core";
-  const haToken = process.env.HA_TOKEN || process.env.SUPERVISOR_TOKEN;
-  if (!haToken) {
-    cachedConfig = fallback;
-    lastFetchTime = now;
-    return cachedConfig;
-  }
-  try {
-    const { status, data } = await callHA(haUrl, haToken, "GET", "/api/config", void 0, { maxRetries: 1 });
-    if (status === 200 && data && typeof data === "object") {
-      const d = data;
-      cachedConfig = {
-        latitude: typeof d.latitude === "number" ? d.latitude : fallback.latitude,
-        longitude: typeof d.longitude === "number" ? d.longitude : fallback.longitude,
-        elevation: typeof d.elevation === "number" ? d.elevation : fallback.elevation,
-        timeZone: d.time_zone || fallback.timeZone,
-        unitSystem: d.unit_system || fallback.unitSystem,
-        locationName: d.location_name || fallback.locationName
-      };
-      lastFetchTime = now;
-      return cachedConfig;
-    }
-  } catch (err) {
-    console.warn("[estateConfig] Failed to fetch HA /api/config, using fallback:", err instanceof Error ? err.message : err);
-  }
-  cachedConfig = fallback;
-  lastFetchTime = now;
-  return cachedConfig;
-}
-function getEstateTimezone() {
-  if (cachedConfig?.timeZone) return cachedConfig.timeZone;
-  return process.env.TZ || process.env.TIME_ZONE || "UTC";
-}
-
-// server/routes/estate.ts
 init_db2();
 init_auth();
 var router40 = Router41();
@@ -46994,6 +47088,7 @@ router40.post("/settings/entity-mappings", requireAuth2, async (req, res) => {
        SET value = EXCLUDED.value, updated_at = NOW()`,
       [JSON.stringify(mappings)]
     );
+    invalidateEntityMappingsCache();
     res.json({ success: true, mappings });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
@@ -47709,34 +47804,7 @@ async function seedFamilyAutomations() {
   } catch (e) {
     console.warn("[SEED] Could not clean up stale audit-log rows:", e);
   }
-  const { rows } = await query("SELECT count(*)::int AS cnt FROM family_automations");
-  if (rows[0]?.cnt > 0) {
-    const newAutomations = [
-      { name: "Gym Timer & Temperature", type: "gym-thermostat", schedule: "*/15 * * * *", desc: "AC on 6 AM\u20133 PM daily at 68\xB0F cool / 64\xB0F heat. Alerts if temp out of range." },
-      { name: "Theater Timer & Temperature", type: "theater-thermostat", schedule: "*/15 * * * *", desc: "Heat 68\xB0F / Cool 72\xB0F (dual auto) from 10 AM\u201311 PM daily. Off otherwise. Alerts if temp out of range." },
-      { name: "Spa Mode 12 Hour Alert", type: "spa-mode-alert", schedule: "*/30 * * * *", desc: "Alerts household members when pool has been left on SPA mode for more than 12 hours" },
-      { name: "AV Closet Temperature Monitor", type: "av-closet-temp-monitor", schedule: "*/10 * * * *", desc: "Checks AV Closet temp every 10 min. Emails household admins over 90\xB0F; sends WhatsApp alert over 100\xB0F." },
-      { name: "Fountains Off at 9 PM", type: "energy-fountains-off", schedule: "0 21 * * *", desc: "Turns off all fountain lights at 9:00 PM PT every night" },
-      { name: "Closet Light Timer", type: "energy-closet-timer", schedule: "*/5 * * * *", desc: "Turns off any closet light left on for more than 30 minutes" },
-      // Guest bathroom light timer configuration;
-      // the list is admin-editable from the Automations page.
-      { name: "Bathroom Light Timer", type: "energy-bathroom-timer", schedule: "*/5 * * * *", desc: "Turns off bathroom lights after 15 minutes \u2014 Primary Bath gets 1 hour", config: { excluded_terms: ["guest"] } },
-      { name: "Door Locks & Battery Monitor", type: "ha-locks", schedule: "0 */4 * * *", desc: "Monitors Yale & Crestron door locks for low battery, offline status, and jammed locks via Home Assistant" }
-    ];
-    for (const a of newAutomations) {
-      const { rows: existing } = await query(`SELECT id FROM family_automations WHERE name = $1 LIMIT 1`, [a.name]);
-      if (existing.length === 0) {
-        await query(
-          `INSERT INTO family_automations (name, automation_type, schedule, is_active, description, config)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [a.name, a.type, a.schedule, true, a.desc, JSON.stringify(a.config ?? {})]
-        );
-        console.log(`[SEED] Inserted new automation: "${a.name}"`);
-      }
-    }
-    return;
-  }
-  console.log("[SEED] Seeding family_automations...");
+  console.log("[SEED] Ensuring all family_automations exist...");
   const automations = [
     { name: "Morning School & Family Wake-Up", type: "school-broadcast", schedule: "50 6 * * 1-5", desc: "School calendar sync + 6:50am & 7:30am wake-up broadcasts" },
     { name: "Morning Brief Email", type: "morning-email", schedule: "0 7 * * *", desc: "Weather, news, markets & calendar digest" },
@@ -47757,17 +47825,19 @@ async function seedFamilyAutomations() {
     { name: "AV Closet Temperature Monitor", type: "av-closet-temp-monitor", schedule: "*/10 * * * *", desc: "Checks AV Closet temp every 10 min. Emails household admins over 90\xB0F; sends WhatsApp alert over 100\xB0F." },
     { name: "Fountains Off at 9 PM", type: "energy-fountains-off", schedule: "0 21 * * *", desc: "Turns off all fountain lights at 9:00 PM PT every night" },
     { name: "Closet Light Timer", type: "energy-closet-timer", schedule: "*/5 * * * *", desc: "Turns off any closet light left on for more than 30 minutes" },
-    // Guest bathroom light timer configuration;
-    // the list is admin-editable from the Automations page.
     { name: "Bathroom Light Timer", type: "energy-bathroom-timer", schedule: "*/5 * * * *", desc: "Turns off bathroom lights after 15 minutes \u2014 Primary Bath gets 1 hour", config: { excluded_terms: ["guest"] } },
     { name: "Door Locks & Battery Monitor", type: "ha-locks", schedule: "0 */4 * * *", desc: "Monitors Yale & Crestron door locks for low battery, offline status, and jammed locks via Home Assistant" }
   ];
   for (const a of automations) {
-    await query(
-      `INSERT INTO family_automations (name, automation_type, schedule, is_active, description, config)
-       VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,
-      [a.name, a.type, a.schedule, true, a.desc, JSON.stringify(a.config ?? {})]
-    );
+    const { rows: existing } = await query(`SELECT id FROM family_automations WHERE name = $1 LIMIT 1`, [a.name]);
+    if (existing.length === 0) {
+      await query(
+        `INSERT INTO family_automations (name, automation_type, schedule, is_active, description, config)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [a.name, a.type, a.schedule, true, a.desc, JSON.stringify(a.config ?? {})]
+      );
+      console.log(`[SEED] Inserted automation: "${a.name}"`);
+    }
   }
 }
 
@@ -47899,6 +47969,7 @@ function initCronJobs() {
     triggerRoute("/api/failed-job-retry-worker");
   }, { timezone: "UTC" });
   cron.schedule("*/5 * * * *", () => {
+    if (!process.env.GOOGLE_SERVICE_ACCOUNT_KEY) return;
     triggerRoute("/api/package-arrival-monitor");
   }, { timezone: "UTC" });
   cron.schedule("*/5 * * * *", () => {
@@ -47984,6 +48055,7 @@ function initCronJobs() {
     triggerRoute("/cron/rina-monday");
   }, { timezone: tz });
   cron.schedule("0 7 * * *", () => {
+    if (!process.env.OPENROUTER_API_KEY) return;
     console.log("[cron] Running Morning Weather Email (7:00 AM daily)");
     triggerRoute("/api/reports/morning-weather");
   }, { timezone: tz });
@@ -48036,9 +48108,11 @@ function initCronJobs() {
       triggerRoute("/api/verkada/poi-backfill");
     }, { timezone: "UTC" });
   }
-  cron.schedule("*/5 * * * *", () => {
-    triggerRoute("/api/goaccess/poll");
-  }, { timezone: tz });
+  if (process.env.ENABLE_GOACCESS === "true") {
+    cron.schedule("*/5 * * * *", () => {
+      triggerRoute("/api/goaccess/poll");
+    }, { timezone: tz });
+  }
   if (process.env.NOTION_API_KEY) {
     cron.schedule("*/10 * * * *", () => {
       triggerRoute("/api/notion/poll");

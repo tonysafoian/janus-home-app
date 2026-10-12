@@ -26,6 +26,7 @@ import {
 } from '../../shared/avCloset.js';
 import { getAvClosetReading } from '../services/govee.js';
 import type { CreatedAtRow } from '../../shared/dbRows.js';
+import { getEntityMappings } from '../lib/estateConfig.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -192,6 +193,15 @@ const SPEEDTEST_ENTITIES = {
   ping: 'sensor.speedtest_ping',
 };
 
+async function getEffectiveSpeedtestEntities() {
+  const mappings = await getEntityMappings();
+  return {
+    download: mappings.speedtest?.download || SPEEDTEST_ENTITIES.download,
+    upload: mappings.speedtest?.upload || SPEEDTEST_ENTITIES.upload,
+    ping: mappings.speedtest?.ping || SPEEDTEST_ENTITIES.ping,
+  };
+}
+
 const FORTIGATE_WAN_ENTITIES = ['sensor.fortigate_wan_status', 'sensor.fortigate_wan1_status', 'sensor.fortinet_wan_status'];
 
 const INTERNET_THRESHOLDS = {
@@ -204,7 +214,7 @@ const DEDUP_MINUTES = 60;
 
 const PRINTERS = [
   {
-    name: "Sandra's Office",
+    name: "Office Printer 2",
     statusEntity: 'sensor.hp_color_laserjet_pro_mfp_3301_2',
     cartridges: [
       { color: 'Black', entity: 'sensor.hp_color_laserjet_pro_mfp_3301_black_cartridge_2' },
@@ -283,7 +293,7 @@ router.post('/api/internet-health-monitor', requireAuth, async (req: any, res: a
   try {
     const db = storage;
     const { rows: [automation] } = await db.query(`SELECT id, is_active FROM family_automations WHERE name = 'Internet Health Monitor' LIMIT 1`);
-    if (!automation) return res.status(404).json({ error: 'Automation not found in DB' });
+    if (!automation) return res.status(200).json({ skipped: true, reason: 'Automation not found in DB' });
     if (!automation.is_active) return res.json({ skipped: true, reason: 'Automation is disabled' });
     if (!isHAConfigured()) {
       console.log('[internet-health-monitor] Home Assistant not configured — skipping.');
@@ -297,9 +307,10 @@ router.post('/api/internet-health-monitor', requireAuth, async (req: any, res: a
     const wanEntity = FORTIGATE_WAN_ENTITIES.find(e => states[e]);
     const wanState = wanEntity ? states[wanEntity].state : null;
     const wanAttributes = wanEntity ? (states[wanEntity].attributes || {}) : {};
-    const download = states[SPEEDTEST_ENTITIES.download] ? parseFloat(states[SPEEDTEST_ENTITIES.download].state) : NaN;
-    const upload = states[SPEEDTEST_ENTITIES.upload] ? parseFloat(states[SPEEDTEST_ENTITIES.upload].state) : NaN;
-    const ping = states[SPEEDTEST_ENTITIES.ping] ? parseFloat(states[SPEEDTEST_ENTITIES.ping].state) : NaN;
+    const speedtestEntities = await getEffectiveSpeedtestEntities();
+    const download = states[speedtestEntities.download] ? parseFloat(states[speedtestEntities.download].state) : NaN;
+    const upload = states[speedtestEntities.upload] ? parseFloat(states[speedtestEntities.upload].state) : NaN;
+    const ping = states[speedtestEntities.ping] ? parseFloat(states[speedtestEntities.ping].state) : NaN;
 
     const wanTraffic: Record<string, unknown> = {};
     const rxBytes = wanAttributes.rx_bytes ?? wanAttributes.wan_rx_bytes ?? wanAttributes.bytes_recv ?? null;
@@ -402,17 +413,18 @@ router.post('/api/speedtest-pull-from-ha', requireAuth, async (req: any, res: an
     if (Array.isArray(allStates)) {
       for (const s of allStates) states[s.entity_id] = s;
     }
-    const dl = states[SPEEDTEST_ENTITIES.download];
-    const ul = states[SPEEDTEST_ENTITIES.upload];
-    const pg = states[SPEEDTEST_ENTITIES.ping];
+    const speedtestEntities = await getEffectiveSpeedtestEntities();
+    const dl = states[speedtestEntities.download];
+    const ul = states[speedtestEntities.upload];
+    const pg = states[speedtestEntities.ping];
     if (!dl || !ul || !pg) {
       return res.json({
         skipped: true,
         reason: 'ha_speedtest_sensors_missing',
         missing: [
-          !dl ? SPEEDTEST_ENTITIES.download : null,
-          !ul ? SPEEDTEST_ENTITIES.upload : null,
-          !pg ? SPEEDTEST_ENTITIES.ping : null,
+          !dl ? speedtestEntities.download : null,
+          !ul ? speedtestEntities.upload : null,
+          !pg ? speedtestEntities.ping : null,
         ].filter(Boolean),
       });
     }
@@ -535,7 +547,7 @@ router.post('/api/printer-health-monitor', requireAuth, async (req: any, res: an
   try {
     const db = storage;
     const { rows: [automation] } = await db.query(`SELECT id, is_active FROM family_automations WHERE name = 'Printer Health Monitor' LIMIT 1`);
-    if (!automation) return res.status(404).json({ error: 'Automation not found in DB' });
+    if (!automation) return res.status(200).json({ skipped: true, reason: 'Automation not found in DB' });
     if (!automation.is_active) return res.json({ skipped: true, reason: 'Automation is disabled' });
     if (!isHAConfigured()) {
       console.log('[printer-health-monitor] Home Assistant not configured — skipping.');
@@ -656,7 +668,7 @@ router.post('/api/ha-server-health-monitor', requireAuth, async (req: any, res: 
   try {
     const db = storage;
     const { rows: [automation] } = await db.query(`SELECT id, is_active FROM family_automations WHERE name = 'HA Server Health Monitor' LIMIT 1`);
-    if (!automation) return res.status(404).json({ error: 'Automation not found in DB' });
+    if (!automation) return res.status(200).json({ skipped: true, reason: 'Automation not found in DB' });
     if (!automation.is_active) return res.json({ skipped: true, reason: 'Automation is disabled' });
     if (!isHAConfigured()) {
       console.log('[ha-server-health-monitor] Home Assistant not configured — skipping.');
@@ -1209,8 +1221,11 @@ router.post('/api/thermostat-monitor', requireAuth, async (req: any, res: any) =
       for (const s of allStates) stateMap[s.entity_id] = s;
     }
 
-    // Filter climate entities, excluding pool/spa
+    // Filter climate entities, excluding pool/spa (unless explicitly mapped in entity_mappings)
+    const mappings = await getEntityMappings();
+    const mappedClimateSet = new Set(mappings.climate || []);
     const climateEntities = Object.values(stateMap).filter((s: any) => {
+      if (mappedClimateSet.has(s.entity_id)) return true;
       if (!s.entity_id.startsWith('climate.')) return false;
       const fn = s.attributes?.friendly_name ?? '';
       return !isPoolOrSpa(s.entity_id, fn);
@@ -1438,8 +1453,8 @@ router.post('/api/thermostat-monitor', requireAuth, async (req: any, res: any) =
 // ── AV Closet Temperature Monitor ───────────────────────────────────────────
 // Runs every 10 min (see cron.ts). Reads the AV Closet temperature straight from
 // the Govee Cloud API (HA's Govee integration double-converts to a bogus ~155°F,
-// so we never alert on the HA value). If temp > 90°F, emails Tony, Sandra & Jesse.
-// If temp > 100°F, also WhatsApps Tony (from Janus). Each threshold has its own
+// so we never alert on the HA value). If temp > 90°F, emails configured alert recipients.
+// If temp > 100°F, also WhatsApps the primary admin (from Janus). Each threshold has its own
 // 2-hour dedup cooldown.
 const AV_CLOSET_RECIPIENT_EMAILS = ['admin@example.com', 'staff@example.com', 'staff2@example.com'];
 const AV_CLOSET_DEDUP_HOURS = 2;
@@ -1512,12 +1527,12 @@ router.post('/api/av-closet-temp-monitor', requireAuth, async (req: any, res: an
     // Offline detection — the Govee API responded but the device is reporting
     // offline (online === false) or returned no usable temperature. This means
     // the sensor is down (dead battery, lost connectivity), so monitoring is
-    // blind. Alert the same recipients as an overheat: email Tony/Sandra/Jesse
-    // AND WhatsApp Tony. Own 2-hour dedup cooldown.
+    // blind. Alert the same recipients as an overheat: email configured alert recipients
+    // AND WhatsApp primary admin. Own 2-hour dedup cooldown.
     const isOffline = avReading.online === false || !Number.isFinite(avReading.tempF as number);
     if (isOffline) {
-      const tony = findMember('admin@example.com');
-      const tonyWhatsApp = tony?.whatsapp_number || process.env.ALERT_PHONE_NUMBER;
+      const adminMember = findMember('admin@example.com');
+      const adminWhatsApp = adminMember?.whatsapp_number || process.env.ALERT_PHONE_NUMBER;
       // Only a *successful* prior send counts toward the cooldown — a failed
       // delivery must not suppress retries while the sensor is still down.
       const { rows: recent } = await db.query(
@@ -1531,7 +1546,7 @@ router.post('/api/av-closet-temp-monitor', requireAuth, async (req: any, res: an
       if (recent.length === 0) {
         const recipients: Array<{ email?: string; whatsapp?: string }> = [
           ...AV_CLOSET_RECIPIENT_EMAILS.map(e => ({ email: findMember(e)?.email || e })),
-          ...(tonyWhatsApp ? [{ whatsapp: tonyWhatsApp }] : []),
+          ...(adminWhatsApp ? [{ whatsapp: adminWhatsApp }] : []),
         ];
         const sendResult = await sendMonitorAlert({
           recipients,
@@ -1579,7 +1594,7 @@ router.post('/api/av-closet-temp-monitor', requireAuth, async (req: any, res: an
     const isCriticalActive = Number.isFinite(temp) && temp > AV_CLOSET_CRITICAL_TEMP;
     const isWarnActive = Number.isFinite(temp) && temp > AV_CLOSET_WARN_TEMP;
 
-    // Warning threshold (> 90°F): email Tony, Sandra & Jesse.
+    // Warning threshold (> 90°F): email configured alert recipients.
     if (isWarnActive) {
       const { rows: recent } = await db.query(
         `SELECT id FROM system_audit_log
@@ -1607,10 +1622,10 @@ router.post('/api/av-closet-temp-monitor', requireAuth, async (req: any, res: an
       }
     }
 
-    // Critical threshold (> 100°F): WhatsApp Tony from Janus.
+    // Critical threshold (> 100°F): WhatsApp primary admin from Janus.
     if (isCriticalActive) {
-      const tony = findMember('admin@example.com');
-      const tonyWhatsApp = tony?.whatsapp_number || process.env.ALERT_PHONE_NUMBER;
+      const adminMember = findMember('admin@example.com');
+      const adminWhatsApp = adminMember?.whatsapp_number || process.env.ALERT_PHONE_NUMBER;
       const { rows: recent } = await db.query(
         `SELECT id FROM system_audit_log
          WHERE event_type = 'monitor_alert_sent'
@@ -1618,9 +1633,9 @@ router.post('/api/av-closet-temp-monitor', requireAuth, async (req: any, res: an
            AND created_at > NOW() - INTERVAL '${AV_CLOSET_DEDUP_HOURS} hours'
          LIMIT 1`
       );
-      if (recent.length === 0 && tonyWhatsApp) {
+      if (recent.length === 0 && adminWhatsApp) {
         await sendMonitorAlert({
-          recipients: [{ whatsapp: tonyWhatsApp }],
+          recipients: [{ whatsapp: adminWhatsApp }],
           subject: `🚨 AV Closet Temperature Critical: ${temp}${unit}`,
           body: `The ${name} temperature is ${temp}${unit}, above the critical ${AV_CLOSET_CRITICAL_TEMP}${unit} threshold. Immediate attention needed to prevent equipment damage.`,
           channels: ['whatsapp'],
@@ -1709,7 +1724,7 @@ router.get('/api/thermostat-monitor/history', async (req: any, res: any) => {
 // ── Thermostat Data Freshness Monitor ────────────────────────────────────────
 // Runs every 15 min alongside the thermostat-monitor cron.
 // If no row has been written to thermostat_logs in the last 30 minutes during
-// normal operating hours (6 AM – midnight PT), sends a WhatsApp alert to Tony.
+// normal operating hours (6 AM – midnight PT), sends a WhatsApp alert to the primary admin.
 // Deduplicated: at most one alert per stale incident; writes a "recovered"
 // entry the first time fresh data is seen again after an alert.
 
@@ -2789,7 +2804,7 @@ router.post('/api/security-audit-monitor', requireAuth, async (_req: Request, re
 // ── HA Door Locks & Battery Monitor ──────────────────────────────────────────
 // Inspects all lock.* entities and companion battery sensors from Home Assistant.
 // Checks for jammed locks, offline/unavailable states, and low battery (<20% warning, <10% critical).
-// Alerts via WhatsApp to Tony with a 24-hour deduplication window.
+// Alerts via WhatsApp to the primary admin with a 24-hour deduplication window.
 const LOCKS_AUDIT_KEY = 'ha_locks_alert';
 const LOCKS_DEDUP_HOURS = 24;
 
@@ -2804,12 +2819,19 @@ router.post('/api/ha-locks-monitor', async (_req: any, res: any) => {
       return res.json({ skipped: true, reason: 'Automation is disabled' });
     }
 
+    if (!isHAConfigured()) {
+      return res.json({ skipped: true, reason: 'Home Assistant not configured' });
+    }
+
     const allStates = await callHAProxy({ action: 'get-states' });
     if (!Array.isArray(allStates)) {
-      throw new Error('Expected array of states from Home Assistant');
+      return res.json({ skipped: true, reason: 'Could not fetch states from Home Assistant' });
     }
 
     const lockEntities = allStates.filter(s => s.entity_id.startsWith('lock.'));
+    if (lockEntities.length === 0) {
+      return res.json({ skipped: true, reason: 'No lock entities found in Home Assistant' });
+    }
     const locksSummary: Array<{
       entity_id: string;
       name: string;

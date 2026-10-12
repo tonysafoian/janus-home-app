@@ -72,7 +72,7 @@ export interface LabelDeviceInput {
 
 // --- OUI lookup ----------------------------------------------------------
 //
-// Static map of the most common 24-bit OUI prefixes seen on Tony's LAN.
+// Static map of the most common 24-bit OUI prefixes seen on the estate LAN.
 // Real-world: each vendor owns hundreds of OUIs, so this is a tiny
 // subset — but it covers the gear actually on the network. Unknown
 // MAC → null and we leave vendor inference to a future improvement.

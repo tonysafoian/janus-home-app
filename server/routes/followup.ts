@@ -9,7 +9,7 @@ import {
   sendGmailRaw,
   getAlertPhoneNumber,
   getServiceClient,
-  TONY_EMAIL,
+  ADMIN_EMAIL,
   JANUS_EMAIL,
   type ServiceAccountKey,
 } from "../lib/helpers.js";
@@ -253,12 +253,12 @@ router.post("/accountability", async (_req: Request, res: Response) => {
 
       const sent = await sendGmailRaw(
         saKey,
-        TONY_EMAIL,
+        ADMIN_EMAIL,
         subject,
         `<pre>${sections.join("\n")}</pre>`,
         sections.join("\n"),
       );
-      await logEmail("followup_digest", subject, [TONY_EMAIL], `<pre>${sections.join("\n")}</pre>`, sent ? "sent" : "error", sent ? undefined : "sendGmailRaw returned false", sections.join("\n"));
+      await logEmail("followup_digest", subject, [ADMIN_EMAIL], `<pre>${sections.join("\n")}</pre>`, sent ? "sent" : "error", sent ? undefined : "sendGmailRaw returned false", sections.join("\n"));
     }
 
     logAudit("followup-accountability", {

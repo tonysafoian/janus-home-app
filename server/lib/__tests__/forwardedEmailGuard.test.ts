@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { classifyForwardedEmail, splitForwardedBody } from "../forwardedEmailGuard.js";
 
 describe("classifyForwardedEmail — should SUPPRESS reply", () => {
-  it("the Tony appointment-confirmation case (Fwd:, no ask, transactional body)", () => {
+  it("the appointment-confirmation case (Fwd:, no ask, transactional body)", () => {
     const result = classifyForwardedEmail({
       subject: "Fwd: Your In-home Appointment Confirmation  // 30630380",
       body: [
@@ -53,7 +53,7 @@ describe("classifyForwardedEmail — should SUPPRESS reply", () => {
   it("transactional body with no forwarded block but Fwd: subject", () => {
     const result = classifyForwardedEmail({
       subject: "Fwd: appointment confirmation",
-      body: "Hi Tony, your appointment is confirmed for Friday at 10am.",
+      body: "Hi Alex, your appointment is confirmed for Friday at 10am.",
     });
     expect(result.isForwardedTransactional).toBe(true);
   });

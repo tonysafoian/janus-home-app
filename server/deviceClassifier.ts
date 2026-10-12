@@ -193,7 +193,7 @@ function classifyByFields(vendor: string | null, deviceType: string | null, osTy
     return { category: 'Smart Gate Devices', subcategory: 'Access Control', vendor: detectVendorName(vendor) || 'Unknown' };
   }
 
-  if (/\badmin\b/i.test(haystack) || /\btony\b/i.test(haystack)) {
+  if (/\badmin\b/i.test(haystack) || /\bexecutive\b/i.test(haystack)) {
     return { category: "Admin Systems", subcategory: "Admin Systems", vendor: detectVendorName(vendor) || vendor || 'Unknown' };
   }
 

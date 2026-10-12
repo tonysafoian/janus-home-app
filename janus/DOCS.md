@@ -35,6 +35,12 @@ All options in the add-on configuration are optional. API keys are masked as pas
 | `enable_mock_mode` | boolean | `false` | Generates simulated telemetry for offline development. |
 | `database_url` | password | `""` | Optional external PostgreSQL connection string. If left blank, Janus uses its isolated built-in PostgreSQL database. |
 | `cron_secret` | password | `""` | Secret key for scheduled background task triggers. Auto-generated on first boot if omitted. |
+| `computer_admin_token` | password | `""` | Optional high-entropy token for machine agents (`X-Computer-Token`). |
+| `home_location` | string | `""` | Estate or home label (e.g. "Main Residence"). Falls back to Home Assistant location name. |
+| `home_lat`, `home_lng` | float | `""` | Estate GPS coordinates for weather and vehicle distance tracking. Falls back to Home Assistant Core coordinates. |
+| `staff_emails` | string | `""` | Comma-separated list of household staff email addresses for operational notifications. |
+| `assistant_email` | string | `""` | Estate manager / executive assistant email address. |
+| `enable_goaccess` | boolean | `false` | Enables real-time GoAccess web log analytics polling if installed on host. |
 
 ### AI & LLM Providers
 

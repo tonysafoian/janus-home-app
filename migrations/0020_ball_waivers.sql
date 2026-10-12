@@ -5,7 +5,7 @@
 -- most one active waiver per player per version so the gate logic in
 -- POST /api/ball/rsvp can do a simple "active waiver exists?" check.
 --
--- Tony (the host) is backfilled at the bottom so the host never has
+-- Host (the organizer) is backfilled at the bottom so the host never has
 -- to click anything on /ball/p/:token.
 
 CREATE TABLE IF NOT EXISTS ball_waivers (
@@ -29,10 +29,10 @@ CREATE INDEX IF NOT EXISTS idx_ball_waivers_player_active
   ON ball_waivers (player_id)
   WHERE revoked_at IS NULL;
 
--- Host backfill — Tony is auto-signed so the host UI never shows the
+-- Host backfill — Host is auto-signed so the host UI never shows the
 -- waiver gate. ON CONFLICT DO NOTHING in case this migration is
--- re-applied or Tony already has a row.
--- Host backfill — only insert if Tony exists and doesn't already have an
+-- re-applied or host already has a row.
+-- Host backfill — only insert if host exists and doesn't already have an
 -- active v1 waiver. NOT EXISTS instead of ON CONFLICT because the unique
 -- constraint is a partial index, which can't be named in ON CONFLICT.
 INSERT INTO ball_waivers (player_id, waiver_version, ip, user_agent)

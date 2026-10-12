@@ -1797,7 +1797,10 @@ router.post("/morning-weather", requireAuth, async (_req: Request, res: Response
     }
 
     const openrouterApiKey = process.env.OPENROUTER_API_KEY;
-    if (!openrouterApiKey) throw new Error("OPENROUTER_API_KEY not configured");
+    if (!openrouterApiKey) {
+      console.log("[morning-weather] Skipping: OPENROUTER_API_KEY not configured");
+      return res.status(200).json({ ok: true, skipped: true, reason: "openrouter_api_key_not_configured", period: mwDate });
+    }
 
     const saKey = getSaKey();
 
@@ -2114,7 +2117,7 @@ router.post("/morning-weather", requireAuth, async (_req: Request, res: Response
         [ccTodayDateLA, ccMetaKey],
       );
       if (ccDedupCheck.rows.length > 0) {
-        console.log(`[Morning Email] Skipping CC (tony) for ${ccChildName} — already sent today (dedup guard)`);
+        console.log(`[Morning Email] Skipping CC (admin) for ${ccChildName} — already sent today (dedup guard)`);
         childStatusMap[ccMetaKey] = "skipped";
         continue;
       }

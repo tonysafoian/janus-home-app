@@ -247,7 +247,7 @@ describe("upsertObservedDevice", () => {
 
   it("never overwrites a non-null device_vendor", async () => {
     await upsertObservedDevice({ mac: "aa:bb:cc:dd:ee:ff", ip: "192.168.1.10" });
-    await labelDevice("aa:bb:cc:dd:ee:ff", { device_vendor: "Custom Co" }, "tony");
+    await labelDevice("aa:bb:cc:dd:ee:ff", { device_vendor: "Custom Co" }, "admin_user");
     await upsertObservedDevice({ mac: "aa:bb:cc:dd:ee:ff", ip: "192.168.1.11" });
     const dev = await getDevice("aa:bb:cc:dd:ee:ff");
     expect(dev!.device_vendor).toBe("Custom Co");
@@ -258,18 +258,18 @@ describe("labelDevice", () => {
   it("creates the row if missing and applies the patch", async () => {
     const updated = await labelDevice(
       "11:22:33:44:55:66",
-      { label: "Lana's iPad", owner_person_id: "lana", owner_role: "family", device_type: "tablet" },
-      "tony",
+      { label: "Family iPad", owner_person_id: "member1", owner_role: "family", device_type: "tablet" },
+      "admin_user",
     );
     expect(updated).not.toBeNull();
-    expect(updated!.label).toBe("Lana's iPad");
-    expect(updated!.owner_person_id).toBe("lana");
-    expect(updated!.last_labeled_by).toBe("tony");
+    expect(updated!.label).toBe("Family iPad");
+    expect(updated!.owner_person_id).toBe("member1");
+    expect(updated!.last_labeled_by).toBe("admin_user");
     expect(updated!.last_labeled_at).not.toBeNull();
   });
 
   it("preserves unrelated fields when patching a subset", async () => {
-    await labelDevice("11:22:33:44:55:66", { label: "Old Label", owner_role: "family" }, "tony");
+    await labelDevice("11:22:33:44:55:66", { label: "Old Label", owner_role: "family" }, "admin_user");
     await labelDevice("11:22:33:44:55:66", { trusted: true }, "janus");
     const dev = await getDevice("11:22:33:44:55:66");
     expect(dev!.label).toBe("Old Label");
@@ -283,10 +283,10 @@ describe("unknownDevices", () => {
   it("returns only rows with no label, no owner, not trusted", async () => {
     // Set up: one labeled, one trusted, one true unknown.
     await upsertObservedDevice({ mac: "aa:00:00:00:00:01" });
-    await labelDevice("aa:00:00:00:00:01", { label: "Labeled" }, "tony");
+    await labelDevice("aa:00:00:00:00:01", { label: "Labeled" }, "admin_user");
 
     await upsertObservedDevice({ mac: "aa:00:00:00:00:02" });
-    await labelDevice("aa:00:00:00:00:02", { trusted: true }, "tony");
+    await labelDevice("aa:00:00:00:00:02", { trusted: true }, "admin_user");
 
     await upsertObservedDevice({ mac: "aa:00:00:00:00:03" });
 
@@ -301,11 +301,11 @@ describe("unknownDevices", () => {
 describe("listDevices filters", () => {
   beforeEach(async () => {
     await upsertObservedDevice({ mac: "ff:00:00:00:00:01" });
-    await labelDevice("ff:00:00:00:00:01", { owner_role: "family", trusted: true, device_type: "phone" }, "tony");
+    await labelDevice("ff:00:00:00:00:01", { owner_role: "family", trusted: true, device_type: "phone" }, "admin_user");
     await upsertObservedDevice({ mac: "ff:00:00:00:00:02" });
-    await labelDevice("ff:00:00:00:00:02", { owner_role: "iot", trusted: true, device_type: "speaker" }, "tony");
+    await labelDevice("ff:00:00:00:00:02", { owner_role: "iot", trusted: true, device_type: "speaker" }, "admin_user");
     await upsertObservedDevice({ mac: "ff:00:00:00:00:03" });
-    await labelDevice("ff:00:00:00:00:03", { owner_role: "family", trusted: false, device_type: "tablet" }, "tony");
+    await labelDevice("ff:00:00:00:00:03", { owner_role: "family", trusted: false, device_type: "tablet" }, "admin_user");
   });
 
   it("filters by owner_role", async () => {
@@ -339,7 +339,7 @@ describe("backfillFromDeviceTrackers", () => {
     const result = await backfillFromDeviceTrackers([
       { entity_id: "device_tracker.00_e6_3a_29_d5_a0", state: "not_home", attributes: { friendly_name: "00_e6_3a_29_d5_a0" } },
       { entity_id: "device_tracker.alarm", state: "not_home", attributes: { friendly_name: "ALARM" } },
-      { entity_id: "device_tracker.aa_bb_cc_dd_ee_ff", state: "home", attributes: { friendly_name: "Tony iPhone" } },
+      { entity_id: "device_tracker.aa_bb_cc_dd_ee_ff", state: "home", attributes: { friendly_name: "Admin iPhone" } },
     ]);
     expect(result.scanned).toBe(3);
     expect(result.mac_based).toBe(2);
@@ -378,7 +378,7 @@ describe("getDevicesByIps", () => {
   it("resolves a batch of IPs to label + hostname + mac in one query", async () => {
     seedRow({
       mac_address: "aa:bb:cc:00:00:01",
-      label: "Tony's iPhone",
+      label: "Admin's iPhone",
       hostnames: ["iPhone"],
       ip_addresses: ["192.168.1.10"],
     });
@@ -393,7 +393,7 @@ describe("getDevicesByIps", () => {
     expect(queryMock).toHaveBeenCalledTimes(1);
     expect(map.get("192.168.1.10")).toEqual({
       mac: "aa:bb:cc:00:00:01",
-      label: "Tony's iPhone",
+      label: "Admin's iPhone",
       hostname: "iPhone",
     });
     expect(map.get("192.168.1.20")).toEqual({

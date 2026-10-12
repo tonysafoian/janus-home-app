@@ -217,6 +217,9 @@ async function archiveMessage(token: string, messageId: string): Promise<void> {
 }
 
 router.post('/api/package-arrival-monitor', requireAuth, async (req: any, res: any) => {
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+    return res.status(200).json({ skipped: true, reason: 'google_service_account_not_configured' });
+  }
   try {
     const token = await getGmailAccessToken(ADMIN_EMAIL);
     const db = storage;

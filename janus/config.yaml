@@ -1,5 +1,5 @@
 name: "Janus"
-version: "1.0.18"
+version: "1.0.19"
 slug: "janus"
 description: "AI-orchestrated residential estate operating system and command deck."
 url: "https://github.com/tonysafoian/janus-home-app"
@@ -13,6 +13,7 @@ ingress: true
 ingress_port: 5080
 panel_icon: "mdi:shield-home"
 panel_title: "Janus"
+panel_admin: true
 homeassistant_api: true
 hassio_api: true
 hassio_role: "default"
@@ -25,6 +26,14 @@ schema:
   log_level: "list(trace|debug|info|notice|warning|error|fatal)?"
   enable_demo_login: "bool?"
   enable_mock_mode: "bool?"
+  home_location: "str?"
+  home_lat: "float?"
+  home_lng: "float?"
+  staff_emails: "str?"
+  assistant_email: "str?"
+  computer_admin_token: "password?"
+  cron_secret: "password?"
+  enable_goaccess: "bool?"
   openrouter_api_key: "password?"
   gemini_api_key: "password?"
   google_client_id: "str?"

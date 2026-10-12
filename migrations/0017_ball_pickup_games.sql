@@ -18,9 +18,9 @@ CREATE TABLE IF NOT EXISTS ball_players (
   phone         text,
   token         text NOT NULL UNIQUE,
   active        boolean NOT NULL DEFAULT true,
-  -- is_host = Tony. Auto-confirmed IN for every game, skipped on all
+  -- is_host = Host. Auto-confirmed IN for every game, skipped on all
   -- email blasts (invites, decisions, reminders). Counts toward the
-  -- 6-player minimum since he's always playing.
+  -- 6-player minimum since they're always playing.
   is_host       boolean NOT NULL DEFAULT false,
   notes         text,
   created_at    timestamptz NOT NULL DEFAULT now(),

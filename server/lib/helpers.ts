@@ -3,14 +3,10 @@ import { breakers } from "./breakers.js";
 
 export const PROJECT_ID = process.env.PROJECT_ID || "sample-project-id";
 export const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@example.com";
-export const TONY_EMAIL = ADMIN_EMAIL;
 export const JANUS_EMAIL = process.env.ASSISTANT_EMAIL || "assistant@example.com";
 export const MEMBER_EMAIL = process.env.MEMBER_EMAIL || "member@example.com";
-export const MOM_EMAIL = MEMBER_EMAIL;
 export const MEMBER2_EMAIL = process.env.MEMBER2_EMAIL || "member2@example.com";
-export const EMME_EMAIL = MEMBER2_EMAIL;
 export const MEMBER3_EMAIL = process.env.MEMBER3_EMAIL || "member3@example.com";
-export const ISLA_EMAIL = MEMBER3_EMAIL;
 export const HOME_LAT = Number(process.env.HOME_LAT) || 34.0522;
 export const HOME_LNG = Number(process.env.HOME_LNG) || -118.2437;
 export const GOOGLE_CLIENT_ID =
@@ -157,7 +153,7 @@ export async function getAlertPhoneNumber(): Promise<string> {
   try {
     const svc = getServiceClient();
     const { data } = await svc
-      .from("system_config")
+      .from("system_configs")
       .select("value")
       .eq("key", "alert_phone_number")
       .single();
@@ -244,7 +240,7 @@ export async function getBroadcastFallbackPhone(): Promise<string> {
   try {
     const svc = getServiceClient();
     const { data } = await svc
-      .from("system_config")
+      .from("system_configs")
       .select("value")
       .eq("key", "broadcast_fallback_phone")
       .single();
@@ -253,7 +249,7 @@ export async function getBroadcastFallbackPhone(): Promise<string> {
       return data.value;
     }
   } catch (_) {}
-  // Fall back to the alert phone (Tony's number)
+  // Fall back to the alert phone (configured admin number)
   const alertPhone = await getAlertPhoneNumber();
   _fallbackPhone = alertPhone;
   return alertPhone;

@@ -91,3 +91,102 @@ export function getEstateTimezone(): string {
   if (cachedConfig?.timeZone) return cachedConfig.timeZone;
   return process.env.TZ || process.env.TIME_ZONE || 'UTC';
 }
+
+export interface EntityMappings {
+  energy?: string[];
+  irrigation?: string[];
+  pool?: {
+    pool_heater?: string;
+    spa_heater?: string;
+    pool_temp?: string;
+    spa_temp?: string;
+    pool_pump?: string;
+    spa_pump?: string;
+  };
+  climate?: string[];
+  cameras?: string[];
+  vehicles?: string[];
+  speedtest?: {
+    download?: string;
+    upload?: string;
+    ping?: string;
+  };
+  utility_rates?: {
+    electricity_kwh_cost?: number;
+    water_hcf_cost?: number;
+  };
+}
+
+let cachedEntityMappings: EntityMappings | null = null;
+let lastEntityMappingsFetchTime = 0;
+
+export async function getEntityMappings(): Promise<EntityMappings> {
+  const now = Date.now();
+  if (cachedEntityMappings && now - lastEntityMappingsFetchTime < CACHE_TTL_MS) {
+    return cachedEntityMappings;
+  }
+
+  const fallback: EntityMappings = {
+    energy: [],
+    irrigation: [],
+    pool: {
+      pool_heater: 'switch.pool_heater',
+      spa_heater: 'switch.spa_heater',
+      pool_temp: 'sensor.pool_temp',
+      spa_temp: 'sensor.spa_temp',
+      pool_pump: 'switch.pool_pump',
+      spa_pump: 'switch.spa_pump',
+    },
+    climate: [],
+    cameras: [],
+    vehicles: [],
+    speedtest: {
+      download: 'sensor.speedtest_download',
+      upload: 'sensor.speedtest_upload',
+      ping: 'sensor.speedtest_ping',
+    },
+    utility_rates: {
+      electricity_kwh_cost: 0.28,
+      water_hcf_cost: 12.5,
+    },
+  };
+
+  try {
+    const { query } = await import('./db.js');
+    const res = await query<{ value: string }>(
+      `SELECT value FROM system_configs WHERE key = 'entity_mappings' LIMIT 1`
+    );
+    if (res?.rows?.[0]?.value) {
+      const parsed = typeof res.rows[0].value === 'string' ? JSON.parse(res.rows[0].value) : res.rows[0].value;
+      cachedEntityMappings = {
+        ...fallback,
+        ...parsed,
+        pool: {
+          ...fallback.pool,
+          ...(parsed.pool || {}),
+        },
+        speedtest: {
+          ...fallback.speedtest,
+          ...(parsed.speedtest || {}),
+        },
+        utility_rates: {
+          ...fallback.utility_rates,
+          ...(parsed.utility_rates || {}),
+        },
+      };
+      lastEntityMappingsFetchTime = now;
+      return cachedEntityMappings!;
+    }
+  } catch (err) {
+    console.warn('[estateConfig] Failed to fetch entity_mappings from system_configs:', err instanceof Error ? err.message : err);
+  }
+
+  cachedEntityMappings = fallback;
+  lastEntityMappingsFetchTime = now;
+  return cachedEntityMappings;
+}
+
+export function invalidateEntityMappingsCache(): void {
+  cachedEntityMappings = null;
+  lastEntityMappingsFetchTime = 0;
+}

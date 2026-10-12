@@ -96,7 +96,7 @@ function VehicleProfileRow({
             <Input
               value={editLabel}
               onChange={(e) => setEditLabel(e.target.value)}
-              placeholder="Label (e.g. Jesse's Model X)"
+              placeholder="Label (e.g. Family Model X)"
               className="h-7 text-sm"
               autoFocus
               data-testid={`input-label-${profile.id}`}

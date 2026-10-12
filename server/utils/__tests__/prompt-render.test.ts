@@ -11,11 +11,11 @@ describe("renderSystemPrompt", () => {
 ${HOUSEHOLD_DIRECTORY_PLACEHOLDER}
 
 Footer`;
-    const directory = "| Tony | admin@example.com | UUID-1 |\n| Lana | member@example.com | UUID-2 |";
+    const directory = "| Alex | admin@example.com | UUID-1 |\n| Sam | member@example.com | UUID-2 |";
 
     const out = renderSystemPrompt(soul, { householdDirectory: directory });
-    expect(out).toContain("Tony");
-    expect(out).toContain("Lana");
+    expect(out).toContain("Alex");
+    expect(out).toContain("Sam");
     expect(out).not.toContain(HOUSEHOLD_DIRECTORY_PLACEHOLDER);
   });
 
@@ -27,7 +27,7 @@ Footer`;
 
   it("does not introduce PII when the input has none", () => {
     const soul = `You are Janus.\n\n${HOUSEHOLD_DIRECTORY_PLACEHOLDER}\n\nBe brief.`;
-    const directory = "| Tony | admin@example.com | UUID-1 |";
+    const directory = "| Alex | admin@example.com | UUID-1 |";
     const out = renderSystemPrompt(soul, { householdDirectory: directory });
     // The only digits in the output should come from the directory we
     // explicitly supplied — no phone-shaped sequence smuggled in.

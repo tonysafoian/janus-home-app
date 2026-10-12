@@ -10,7 +10,7 @@ import {
   getAlertPhoneNumber,
   getServiceClient,
   base64url,
-  TONY_EMAIL,
+  ADMIN_EMAIL,
   JANUS_EMAIL,
   type ServiceAccountKey,
 } from "../lib/helpers.js";
@@ -44,7 +44,7 @@ async function fetchCalendarEventsForDays(
   const token = await getServiceToken(
     saKey,
     "https://www.googleapis.com/auth/calendar.readonly",
-    TONY_EMAIL,
+    ADMIN_EMAIL,
   );
   const now = new Date();
   const end = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
@@ -57,7 +57,7 @@ async function fetchCalendarEventsForDays(
   });
 
   const res = await fetchT(
-    `${CALENDAR_BASE}/calendars/${TONY_EMAIL}/events?${params}`,
+    `${CALENDAR_BASE}/calendars/${ADMIN_EMAIL}/events?${params}`,
     { headers: { Authorization: `Bearer ${token}` } },
   );
   if (!res.ok) throw new Error(`Calendar fetch failed: ${res.status}`);
@@ -243,7 +243,7 @@ router.post("/nav-tesla", async (req: Request, res: Response) => {
     const calToken = await getServiceToken(
       saKey,
       "https://www.googleapis.com/auth/calendar.readonly",
-      TONY_EMAIL,
+      ADMIN_EMAIL,
     );
 
     const now = new Date();
@@ -271,7 +271,7 @@ router.post("/nav-tesla", async (req: Request, res: Response) => {
     });
 
     const calRes = await fetchT(
-      `${CALENDAR_BASE}/calendars/${TONY_EMAIL}/events?${params}`,
+      `${CALENDAR_BASE}/calendars/${ADMIN_EMAIL}/events?${params}`,
       { headers: { Authorization: `Bearer ${calToken}` } },
     );
     if (!calRes.ok) throw new Error(`Calendar fetch: ${calRes.status}`);

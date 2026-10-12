@@ -59,17 +59,17 @@ async function verifyWhatsAppIdentityResolution() {
   const baseUrl = `http://localhost:${port}`;
 
   try {
-    const tonyRes = await fetch(`${baseUrl}/api/janus/whatsapp`, {
+    const adminRes = await fetch(`${baseUrl}/api/janus/whatsapp`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ waId: "15550100", senderName: "Admin", text: "identity test admin check", type: "text" }),
     });
-    const tonyData = await tonyRes.json() as Record<string, unknown>;
-    const tonyIsNotOutsider = tonyData.outsider !== true;
+    const adminData = await adminRes.json() as Record<string, unknown>;
+    const adminIsNotOutsider = adminData.outsider !== true;
     results.push({
       test: "Admin (15550100) resolves as non-outsider via webhook",
-      passed: tonyIsNotOutsider,
-      detail: JSON.stringify(tonyData),
+      passed: adminIsNotOutsider,
+      detail: JSON.stringify(adminData),
     });
   } catch (e) {
     results.push({ test: "Admin webhook test", passed: false, detail: `Error: ${e}` });

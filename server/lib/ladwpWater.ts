@@ -8,7 +8,7 @@
  * Current schedule is calibrated from the Aug 19, 2026 bill:
  * 217 HCF → $3,179.32 water commodity. Sewer is additive on top.
  *
- * Tony sits in the upper tiers (Tier 3/4) for most of the cycle because of
+ * The estate sits in the upper tiers (Tier 3/4) for most of the cycle because of
  * irrigation, so the HEADLINE figure is the marginal $/HCF (and $/gal) — the
  * true cost of the next unit of water.
  *
@@ -180,7 +180,7 @@ export interface WaterTierRate {
 /**
  * Given cumulative HCF already consumed this cycle, return the tier the NEXT
  * unit of water falls into and its marginal $/HCF and $/gal. This is the
- * headline cost figure for Tony (upper-tier irrigation user).
+ * headline cost figure for the estate (upper-tier irrigation user).
  */
 export function getCurrentWaterTierRate(accumulatedHcfThisCycle: number): WaterTierRate {
   const hcf = Math.max(0, accumulatedHcfThisCycle);

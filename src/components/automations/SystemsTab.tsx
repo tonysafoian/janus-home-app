@@ -85,7 +85,7 @@ const SELF_HEAL_RULES: Record<string, { title: string; suggestion: string }> = {
     title: 'WATI WhatsApp API issue',
     suggestion: 'The WATI access token may be expired or the endpoint is wrong. Check WATI_API_ENDPOINT and WATI_ACCESS_TOKEN secrets.',
   },
-  gmail_tony: {
+  google_email: {
     title: 'Gmail (Primary) access failed',
     suggestion: 'The Google Service Account may have lost domain-wide delegation. Check the service account in Google Admin Console and verify delegation.',
   },

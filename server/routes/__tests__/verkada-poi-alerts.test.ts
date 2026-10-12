@@ -37,10 +37,10 @@ function jsonResponse(body: unknown, status = 200) {
   } as any;
 }
 
-// Roster: "Isla" maps to a canonical verkada_person_id; "Tony" present too.
+// Roster: "FamilyMember" maps to a canonical verkada_person_id; "PrimaryAdmin" present too.
 const ROSTER_ROWS = [
-  { verkada_person_id: "PID_ISLA", label: "Isla" },
-  { verkada_person_id: "PID_TONY", label: "Tony" },
+  { verkada_person_id: "PID_MEMBER", label: "FamilyMember" },
+  { verkada_person_id: "PID_ADMIN", label: "PrimaryAdmin" },
 ];
 
 function installFetch(notifications: any[]) {
@@ -70,7 +70,7 @@ describe("fetchPoiAlerts parsing", () => {
     installFetch([
       {
         notification_type: "person_of_interest",
-        person_label: "Isla",
+        person_label: "FamilyMember",
         camera_id: "cam-front",
         created: 1700000000,
       },
@@ -81,8 +81,8 @@ describe("fetchPoiAlerts parsing", () => {
     expect(result.ok).toBe(true);
     expect(result.sightings).toHaveLength(1);
     const s = result.sightings[0];
-    expect(s.personId).toBe("PID_ISLA");
-    expect(s.label).toBe("Isla");
+    expect(s.personId).toBe("PID_MEMBER");
+    expect(s.label).toBe("FamilyMember");
     expect(s.cameraName).toBe("Front Door");
   });
 
@@ -90,14 +90,14 @@ describe("fetchPoiAlerts parsing", () => {
     installFetch([
       {
         notification_type: "person_of_interest",
-        person_label: "  iSLA ",
+        person_label: "  fAMILYmEMBER ",
         camera_id: "cam-front",
         created: 1700000123,
       },
     ]);
 
     const result = await fetchPoiAlerts("test-key", "test-org", 1699990000, 1700001000);
-    expect(result.sightings[0].personId).toBe("PID_ISLA");
+    expect(result.sightings[0].personId).toBe("PID_MEMBER");
   });
 
   it("falls back to a label:<label> key when the label is not in the roster", async () => {
@@ -119,7 +119,7 @@ describe("fetchPoiAlerts parsing", () => {
     installFetch([
       {
         notification_type: "person_of_interest",
-        person_label: "Isla",
+        person_label: "FamilyMember",
         person_id: "EXPLICIT_ID",
         camera_id: "cam-front",
         created: 1700000300,
@@ -132,8 +132,8 @@ describe("fetchPoiAlerts parsing", () => {
 
   it("keeps only person_of_interest notifications, dropping other types", async () => {
     installFetch([
-      { notification_type: "person_of_interest", person_label: "Isla", camera_id: "cam-front", created: 1700000400 },
-      { notification_type: "motion", person_label: "Isla", camera_id: "cam-front", created: 1700000401 },
+      { notification_type: "person_of_interest", person_label: "FamilyMember", camera_id: "cam-front", created: 1700000400 },
+      { notification_type: "motion", person_label: "FamilyMember", camera_id: "cam-front", created: 1700000401 },
       { notification_type: "tamper", camera_id: "cam-front", created: 1700000402 },
       { notification_type: "crowd", camera_id: "cam-front", created: 1700000403 },
     ]);
@@ -142,14 +142,14 @@ describe("fetchPoiAlerts parsing", () => {
     // fetched counts every raw record, but only the POI sighting is normalized.
     expect(result.fetched).toBe(4);
     expect(result.sightings).toHaveLength(1);
-    expect(result.sightings[0].personId).toBe("PID_ISLA");
+    expect(result.sightings[0].personId).toBe("PID_MEMBER");
   });
 
   it("produces a stable dedup_key of poi_<personId>_<cameraId>_<ts>", async () => {
     installFetch([
       {
         notification_type: "person_of_interest",
-        person_label: "Isla",
+        person_label: "FamilyMember",
         camera_id: "cam-front",
         created: 1700000500,
       },
@@ -162,7 +162,7 @@ describe("fetchPoiAlerts parsing", () => {
     ]);
 
     const result = await fetchPoiAlerts("test-key", "test-org", 1699990000, 1700001000);
-    expect(result.sightings[0].dedupKey).toBe("poi_PID_ISLA_cam-front_1700000500");
+    expect(result.sightings[0].dedupKey).toBe("poi_PID_MEMBER_cam-front_1700000500");
     // unmatched label falls back to the label key inside the same dedup shape.
     expect(result.sightings[1].dedupKey).toBe("poi_label:walk-in_cam-front_1700000600");
   });
