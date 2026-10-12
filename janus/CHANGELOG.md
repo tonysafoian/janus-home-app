@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.18
+
+- **Database Seed Migrations Fix**: Fixed SQL syntax and column mismatch errors in fresh database seeds (`0025`, `0029`, `0031`, and `0049`) allowing clean out-of-the-box initialization.
+- **Dynamic Seeding Parameters**: Fixed prepared statement parameter count mismatch in `server/seed.ts` household members verification.
+- **Home Assistant Ingress RBAC**: Corrected admin detection for Home Assistant Ingress users (Supervisor does not forward `X-Remote-User-Is-Admin`; now securely defaults Ingress sessions to admin when running within the add-on environment).
+- **Package Arrival Monitor Auth**: Fixed CRON authentication on `/api/package-arrival-monitor` by using standard middleware auth and checking `x-cron-secret`.
+- **HA Camera Endpoint Mount**: Mounted Home Assistant routes at `/api/ha` in addition to `/api/home-assistant`, matching frontend camera proxy and stream endpoints.
+- **Graceful Cron Monitors**: Handled missing pool temperature, spa pump, and speedtest entities gracefully without returning 500/503 errors on standard cron sweeps.
+- **PII Scrubbing**: Replaced remaining test/comment PII (IPs, coordinates, and personal name references in automation descriptions and prompts) with role-based and configurable values.
+- **Multi-line Option Export**: Hardened `janus/run.sh` to safely parse and export multi-line JSON secrets and service accounts without line truncation.
+
 ## 1.0.8
 
 - **Fix**: Load Home Assistant Supervisor `SUPERVISOR_TOKEN` from S6-overlay `/var/run/s6/container_environment/` and wrap startup with `with-contenv`. Auto-configure `HA_URL="http://supervisor/core"` and `HA_TOKEN` so Home Assistant WebSocket connects on boot and pulls all smart home entities.

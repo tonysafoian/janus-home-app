@@ -524,8 +524,9 @@ async function seedHouseholdMembers(): Promise<void> {
     console.log(`[SEED] Household members seeded (${upserted} members upserted).`);
   }
 
+  const placeholders = members.map((_, i) => `$${i + 1}`).join(',');
   const { rows } = await query<{ cnt: number }>(
-    `SELECT count(*)::int AS cnt FROM household_members WHERE id IN ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    `SELECT count(*)::int AS cnt FROM household_members WHERE id IN (${placeholders})`,
     members.map(m => m.id)
   );
   const count = rows[0]?.cnt ?? 0;
@@ -613,8 +614,8 @@ async function seedFamilyAutomations(): Promise<void> {
     const newAutomations: Array<{ name: string; type: string; schedule: string; desc: string; config?: Record<string, unknown> }> = [
       { name: 'Gym Timer & Temperature', type: 'gym-thermostat', schedule: '*/15 * * * *', desc: 'AC on 6 AM–3 PM daily at 68°F cool / 64°F heat. Alerts if temp out of range.' },
       { name: 'Theater Timer & Temperature', type: 'theater-thermostat', schedule: '*/15 * * * *', desc: 'Heat 68°F / Cool 72°F (dual auto) from 10 AM–11 PM daily. Off otherwise. Alerts if temp out of range.' },
-      { name: 'Spa Mode 12 Hour Alert', type: 'spa-mode-alert', schedule: '*/30 * * * *', desc: 'Alerts Jesse, Sandra & Tony when pool has been left on SPA mode for more than 12 hours' },
-      { name: 'AV Closet Temperature Monitor', type: 'av-closet-temp-monitor', schedule: '*/10 * * * *', desc: 'Checks AV Closet temp every 10 min. Emails Tony, Sandra & Jesse over 90°F; WhatsApps Tony over 100°F.' },
+      { name: 'Spa Mode 12 Hour Alert', type: 'spa-mode-alert', schedule: '*/30 * * * *', desc: 'Alerts household members when pool has been left on SPA mode for more than 12 hours' },
+      { name: 'AV Closet Temperature Monitor', type: 'av-closet-temp-monitor', schedule: '*/10 * * * *', desc: 'Checks AV Closet temp every 10 min. Emails household admins over 90°F; sends WhatsApp alert over 100°F.' },
       { name: 'Fountains Off at 9 PM', type: 'energy-fountains-off', schedule: '0 21 * * *', desc: 'Turns off all fountain lights at 9:00 PM PT every night' },
       { name: 'Closet Light Timer', type: 'energy-closet-timer', schedule: '*/5 * * * *', desc: 'Turns off any closet light left on for more than 30 minutes' },
       // Guest bathroom light timer configuration;
@@ -643,18 +644,18 @@ async function seedFamilyAutomations(): Promise<void> {
     { name: 'Morning Sauna', type: 'morning-sauna', schedule: 'MWF 8:30–9:00 AM · Tu/Th 8:50–9:20 AM PT', desc: 'Runs the sauna at 190°F for 30 minutes on weekday mornings using Home Assistant power and temperature helpers' },
     { name: 'Tesla Battery Monitor', type: 'tesla-battery', schedule: '*/30 * * * *', desc: 'Alerts staff when range ≤ 100 mi & vehicle is at home' },
     { name: 'Pool Heater Rain Guard', type: 'pool-rain-guard', schedule: '*/30 * * * *', desc: 'Turns off heaters when rain is expected, restores to 87°F when clear' },
-    { name: 'Package Arrival Monitor', type: 'package-arrival', schedule: '*/5 * * * *', desc: 'WhatsApp Tony, email Sandra & Jesse, archive notification from inbox' },
+    { name: 'Package Arrival Monitor', type: 'package-arrival', schedule: '*/5 * * * *', desc: 'Sends WhatsApp alert to admin, emails household members, archives notification from inbox' },
     { name: 'Printer Health Monitor', type: 'printer-health', schedule: '*/30 * * * *', desc: 'Monitors HP printers and Bambu Lab 3D printers' },
     { name: 'Internet Health Monitor', type: 'internet-health', schedule: '*/15 * * * *', desc: 'Monitors Spectrum internet via HA Speedtest' },
-    { name: 'HA Server Health Monitor', type: 'ha-server-health', schedule: '*/5 * * * *', desc: 'Emails Tony when CPU or RAM stay critically high for 15+ minutes' },
+    { name: 'HA Server Health Monitor', type: 'ha-server-health', schedule: '*/5 * * * *', desc: 'Emails admin when CPU or RAM stay critically high for 15+ minutes' },
     { name: 'Verkada POI Sync', type: 'verkada-poi-sync', schedule: '*/5 * * * *', desc: 'Syncs Person of Interest detections from Verkada API' },
-    { name: 'Calendar Nav to Tesla', type: 'calendar-nav-tesla', schedule: '*/5 * * * *', desc: 'Sends meeting locations to BeastX navigation 15 min before events' },
-    { name: 'Pool Temp Monitor', type: 'pool-temp-monitor', schedule: '*/30 * * * *', desc: 'Alerts Jesse, Sandra & Tony when pool drops below 82°F' },
-    { name: 'Spa Mode 12 Hour Alert', type: 'spa-mode-alert', schedule: '*/30 * * * *', desc: 'Alerts Jesse, Sandra & Tony when pool has been left on SPA mode for more than 12 hours' },
-    { name: 'HA Update Checker', type: 'ha-update-checker', schedule: '0 */6 * * *', desc: 'Checks for available HA updates and emails Tony when found; deduplicates within 24h' },
+    { name: 'Calendar Nav to Tesla', type: 'calendar-nav-tesla', schedule: '*/5 * * * *', desc: 'Sends meeting locations to vehicle navigation 15 min before events' },
+    { name: 'Pool Temp Monitor', type: 'pool-temp-monitor', schedule: '*/30 * * * *', desc: 'Alerts household members when pool drops below 82°F' },
+    { name: 'Spa Mode 12 Hour Alert', type: 'spa-mode-alert', schedule: '*/30 * * * *', desc: 'Alerts household members when pool has been left on SPA mode for more than 12 hours' },
+    { name: 'HA Update Checker', type: 'ha-update-checker', schedule: '0 */6 * * *', desc: 'Checks for available HA updates and emails admin when found; deduplicates within 24h' },
     { name: 'Gym Timer & Temperature', type: 'gym-thermostat', schedule: '*/15 * * * *', desc: 'AC on 6 AM–3 PM daily at 68°F cool / 64°F heat. Alerts if temp out of range.' },
     { name: 'Theater Timer & Temperature', type: 'theater-thermostat', schedule: '*/15 * * * *', desc: 'Heat 68°F / Cool 72°F (dual auto) from 10 AM–11 PM daily. Off otherwise. Alerts if temp out of range.' },
-    { name: 'AV Closet Temperature Monitor', type: 'av-closet-temp-monitor', schedule: '*/10 * * * *', desc: 'Checks AV Closet temp every 10 min. Emails Tony, Sandra & Jesse over 90°F; WhatsApps Tony over 100°F.' },
+    { name: 'AV Closet Temperature Monitor', type: 'av-closet-temp-monitor', schedule: '*/10 * * * *', desc: 'Checks AV Closet temp every 10 min. Emails household admins over 90°F; sends WhatsApp alert over 100°F.' },
     { name: 'Fountains Off at 9 PM', type: 'energy-fountains-off', schedule: '0 21 * * *', desc: 'Turns off all fountain lights at 9:00 PM PT every night' },
     { name: 'Closet Light Timer', type: 'energy-closet-timer', schedule: '*/5 * * * *', desc: 'Turns off any closet light left on for more than 30 minutes' },
     // Guest bathroom light timer configuration;

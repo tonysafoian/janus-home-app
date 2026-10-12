@@ -292,7 +292,7 @@ export const OUTSIDER_BLOCKED_TOOLS = new Set([
 
 export const ALL_TOOLS = [
   { type: "function", function: { name: "send_email", description: "Send an email from assistant@example.com. ADMIN ONLY.", parameters: { type: "object", properties: { to: { type: "string" }, subject: { type: "string" }, body: { type: "string" } }, required: ["to", "subject", "body"], additionalProperties: false } } },
-  { type: "function", function: { name: "gmail_search", description: "Search Tony's Gmail inbox using Gmail search syntax. ADMIN ONLY.", parameters: { type: "object", properties: { query: { type: "string" }, max_results: { type: "number" } }, required: ["query"], additionalProperties: false } } },
+  { type: "function", function: { name: "gmail_search", description: "Search the admin Gmail inbox using Gmail search syntax. ADMIN ONLY.", parameters: { type: "object", properties: { query: { type: "string" }, max_results: { type: "number" } }, required: ["query"], additionalProperties: false } } },
   { type: "function", function: { name: "send_whatsapp", description: "Send a WhatsApp message via WATI.", parameters: { type: "object", properties: { to: { type: "string" }, message: { type: "string" } }, required: ["to", "message"], additionalProperties: false } } },
   { type: "function", function: { name: "query_notion_database", description: "Query a Notion database.", parameters: { type: "object", properties: { database_id: { type: "string" }, filter: { type: "object" } }, required: ["database_id"], additionalProperties: false } } },
   { type: "function", function: { name: "update_notion_page", description: "Update properties on a Notion page.", parameters: { type: "object", properties: { page_id: { type: "string" }, properties: { type: "object" } }, required: ["page_id", "properties"], additionalProperties: false } } },
@@ -851,7 +851,7 @@ async function askJanusWithTools(
     + (groupContextPrompt || "");
 
   const roleAddendum = role === "admin"
-    ? `\n\nThe current user is the ADMIN (Tony). You have full access to all tools and data. No restrictions. Trust conversation context fully — when the user references something just discussed, act on it immediately using that context. Do not ask clarifying questions when the answer is obvious from recent messages.`
+    ? `\n\nThe current user is the ADMIN. You have full access to all tools and data. No restrictions. Trust conversation context fully — when the user references something just discussed, act on it immediately using that context. Do not ask clarifying questions when the answer is obvious from recent messages.`
     : role === "outsider"
     ? `\n\nThe current user is an OUTSIDER. You are a PRIVATE household assistant. Do NOT reveal personal information. Keep responses to 1-2 sentences. When in doubt about intent, ask before acting.`
     : role === "member"

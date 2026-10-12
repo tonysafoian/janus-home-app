@@ -24,16 +24,17 @@ CUSTOM_DB_URL=$(jq -r '.database_url // empty' "$CONFIG_PATH" 2>/dev/null || tru
 
 # Dynamically export all options from options.json as uppercase environment variables
 if [ -f "$CONFIG_PATH" ]; then
-    while IFS="=" read -r opt_key opt_val; do
-        if [ -n "$opt_key" ] && [ -n "$opt_val" ] && [ "$opt_val" != "null" ]; then
+    for opt_key in $(jq -r 'keys[]' "$CONFIG_PATH" 2>/dev/null); do
+        opt_val=$(jq -r -c --arg k "$opt_key" '.[$k] | (fromjson? // .) | if type == "object" then tojson else tostring end' "$CONFIG_PATH" 2>/dev/null)
+        if [ -n "$opt_val" ] && [ "$opt_val" != "null" ]; then
             UPPER_KEY=$(echo "$opt_key" | tr '[:lower:]' '[:upper:]')
             export "$UPPER_KEY"="$opt_val"
         fi
-    done < <(jq -r 'to_entries[] | "\(.key)=\(.value)"' "$CONFIG_PATH" 2>/dev/null)
+    done
 fi
 
 echo "===================================================="
-echo " 🏛️ Starting Janus Home Automation (v1.0.17)"
+echo " 🏛️ Starting Janus Home Automation (v1.0.18)"
 echo "===================================================="
 
 # Set up database

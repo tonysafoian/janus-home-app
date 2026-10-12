@@ -144,7 +144,7 @@ const OUI_MAP: OuiEntry[] = [
   { prefix: '00:4b:12', vendor: 'Emporia', category: 'Electricity Monitoring', subcategory: 'Electricity Monitoring' },
   { prefix: '6c:c8:40', vendor: 'Emporia', category: 'Electricity Monitoring', subcategory: 'Electricity Monitoring' },
   { prefix: '7c:1e:b3', vendor: '2N', category: 'Smart Gate Devices', subcategory: 'Smart Gate Devices' },
-  { prefix: '4c:bb:47', vendor: 'NVIDIA', category: "Tony's Systems", subcategory: "Tony's Systems" },
+  { prefix: '4c:bb:47', vendor: 'NVIDIA', category: "Admin Systems", subcategory: "Admin Systems" },
   { prefix: 'ac:3a:7a', vendor: 'Roku', category: 'Smart TVs & Streaming', subcategory: 'Smart TVs & Streaming' },
   { prefix: 'b0:09:da', vendor: 'Ring', category: 'Security Cameras', subcategory: 'Security Cameras' },
   { prefix: '44:61:32', vendor: 'Ecobee', category: 'Thermostats', subcategory: 'Thermostats' },
@@ -193,12 +193,12 @@ function classifyByFields(vendor: string | null, deviceType: string | null, osTy
     return { category: 'Smart Gate Devices', subcategory: 'Access Control', vendor: detectVendorName(vendor) || 'Unknown' };
   }
 
-  if (/\btony\b/i.test(haystack)) {
-    return { category: "Tony's Systems", subcategory: "Tony's Systems", vendor: detectVendorName(vendor) || vendor || 'Unknown' };
+  if (/\badmin\b/i.test(haystack) || /\btony\b/i.test(haystack)) {
+    return { category: "Admin Systems", subcategory: "Admin Systems", vendor: detectVendorName(vendor) || vendor || 'Unknown' };
   }
 
   if (/nvidia/i.test(haystack)) {
-    return { category: "Tony's Systems", subcategory: "Tony's Systems", vendor: 'NVIDIA' };
+    return { category: "Admin Systems", subcategory: "Admin Systems", vendor: 'NVIDIA' };
   }
 
   if (/iphone/i.test(haystack)) {

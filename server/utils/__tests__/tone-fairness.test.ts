@@ -194,7 +194,7 @@ describe("Snapshot regression — SOUL tone anchors", () => {
   // drift. The point is "this concept still appears in Tony's line",
   // not "this exact regex matches a specific layout."
   const ANCHORS: Array<[string, RegExp]> = [
-    ["admin_direct_data", /admin[*:\s/]+direct[^.]*data-first/i],
+    ["admin_direct_data", /admin[^.\n]*direct[^.]*data-first/i],
     ["member_warm_efficient", /household members[*:\s]+warm[^.]*efficient/i],
     ["kids_age_appropriate", /\bage-appropriate[^.]*playful[^.]*simple/i],
     ["staff_task_low_context", /\btask-oriented[^.]*low-context/i],

@@ -52,12 +52,26 @@ export function clearAuthCookie(res: Response): void {
 }
 
 export function getAuthUser(req: Request): AuthUser | null {
+  // Check cron secret header
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret && req.headers['x-cron-secret'] === cronSecret) {
+    return {
+      userId: 'system',
+      email: 'cron@local',
+      displayName: 'Janus Cron',
+      avatarUrl: null,
+      roles: ['admin'],
+      approvalStatus: 'approved',
+    };
+  }
+
   // Check Home Assistant Ingress identity headers
+  const isHAEnvironment = !!(process.env.SUPERVISOR_TOKEN || req.headers['x-ingress-path']);
   const haUserId = (req.headers['x-remote-user-id'] as string) || (req.headers['x-ingress-user-id'] as string);
-  if (haUserId) {
+  if (isHAEnvironment && haUserId) {
     const haUserName = (req.headers['x-remote-user-name'] as string) || (req.headers['x-remote-user-display-name'] as string) || 'HA User';
     const haAdminHeader = req.headers['x-remote-user-is-admin'];
-    const isAdmin = String(haAdminHeader).toLowerCase() === 'true' || haAdminHeader === '1';
+    const isAdmin = haAdminHeader === undefined || haAdminHeader === '' || (String(haAdminHeader).toLowerCase() !== 'false' && haAdminHeader !== '0');
     return {
       userId: `ha:${haUserId}`,
       email: `${haUserName.toLowerCase().replace(/[^a-z0-9]/g, '.')}@homeassistant.local`,

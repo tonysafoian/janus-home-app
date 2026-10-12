@@ -117,6 +117,7 @@ export async function registerRoutes(app: Express): Promise<void> {
   app.use(computerAuthRoutes);
 
   app.use('/api/home-assistant', homeAssistantRoutes);
+  app.use('/api/ha', homeAssistantRoutes);
   app.use('/api/govee', goveeRoutes);
   app.use('/api/tesla', teslaRoutes);
   app.use('/api/verkada', verkadaRoutes);
