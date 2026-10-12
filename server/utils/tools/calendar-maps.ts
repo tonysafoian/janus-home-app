@@ -473,8 +473,8 @@ export async function executeGetEnvironmentData(): Promise<string> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) return JSON.stringify({ error: "Google Maps API key not configured" });
 
-  const HOME_LAT = 34.0831;
-  const HOME_LNG = -118.4104;
+  const HOME_LAT = Number(process.env.HOME_LAT) || 34.0522;
+  const HOME_LNG = Number(process.env.HOME_LNG) || -118.2437;
 
   try {
     const [aqRes, pollenRes] = await Promise.all([

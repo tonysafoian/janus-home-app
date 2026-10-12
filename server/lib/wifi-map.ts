@@ -87,13 +87,14 @@ export function resolveWifiSource(
   normalizedMac: string | null,
   ip: string | null | undefined,
   ruckusByMac: ReadonlyMap<string, RuckusObservation>,
+  subnetMap: ReadonlyArray<{ cidr: string; label: string }> = DEFAULT_SUBNET_MAP,
 ): { label: string | null; source: WifiSource; ruckus: RuckusObservation | null } {
   const ruckus = normalizedMac ? (ruckusByMac.get(normalizedMac) ?? null) : null;
   const ruckusSsid = ruckus && ruckus.ssids.length > 0 ? ruckus.ssids[0] : null;
   if (ruckusSsid) {
     return { label: ruckusSsid, source: 'ruckus', ruckus };
   }
-  const subnetLabel = resolveSubnetLabel(ip);
+  const subnetLabel = resolveSubnetLabel(ip, subnetMap);
   if (subnetLabel) {
     return { label: subnetLabel, source: 'subnet', ruckus };
   }

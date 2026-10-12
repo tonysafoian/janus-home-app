@@ -65,6 +65,7 @@ function invoke(method: string, path: string, headers: Record<string, string> = 
 describe('Demo Auth Endpoint', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.ENABLE_DEMO_LOGIN = 'true';
   });
 
   it('successfully generates a demo admin token and sets auth cookie', async () => {

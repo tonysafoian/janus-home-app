@@ -224,7 +224,7 @@ const PRINTERS = [
     ],
   },
   {
-    name: "Tony's Office Printer",
+    name: "Office Printer",
     statusEntity: 'sensor.hl_l2460dw_status',
     cartridges: [
       { color: 'Black', entity: 'sensor.hl_l2460dw_black_toner_remaining' },
@@ -406,7 +406,7 @@ router.post('/api/speedtest-pull-from-ha', requireAuth, async (req: any, res: an
     const ul = states[SPEEDTEST_ENTITIES.upload];
     const pg = states[SPEEDTEST_ENTITIES.ping];
     if (!dl || !ul || !pg) {
-      return res.status(503).json({
+      return res.json({
         skipped: true,
         reason: 'ha_speedtest_sensors_missing',
         missing: [
@@ -1628,11 +1628,11 @@ router.post('/api/av-closet-temp-monitor', requireAuth, async (req: any, res: an
           cooldownMs: AV_CLOSET_DEDUP_HOURS * 60 * 60 * 1000,
           auditEdgeFunction: 'av-closet-temp-monitor',
         });
-        actions.push(`WhatsApp alert sent to Tony (>${AV_CLOSET_CRITICAL_TEMP}${unit})`);
+        actions.push(`WhatsApp alert sent to admin (>${AV_CLOSET_CRITICAL_TEMP}${unit})`);
       } else if (recent.length > 0) {
         actions.push(`Critical alert suppressed (cooldown active)`);
       } else {
-        actions.push(`Critical threshold met but no WhatsApp number resolved for Tony`);
+        actions.push(`Critical threshold met but no WhatsApp number resolved for admin`);
       }
     }
 
@@ -2909,7 +2909,7 @@ router.post('/api/ha-locks-monitor', async (_req: any, res: any) => {
         try {
           await sendWhatsApp(msg);
           alertSent = true;
-          console.log('[ha-locks-monitor] WhatsApp alert sent to Tony.');
+          console.log('[ha-locks-monitor] WhatsApp alert sent to admin.');
         } catch (waErr: any) {
           console.error('[ha-locks-monitor] WhatsApp send failed:', waErr.message);
         }

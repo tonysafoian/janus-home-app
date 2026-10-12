@@ -1,0 +1,1 @@
+import{I as e}from"./index-CTbhKvDy.js";function t(){let{role:t,isAdmin:n,loading:r}=e();return{role:t,isAdmin:n,loading:r}}export{t};

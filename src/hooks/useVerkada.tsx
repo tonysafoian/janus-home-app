@@ -21,6 +21,7 @@ import {
   getConnectionStatus,
 } from '@/lib/api/verkada';
 import type { ActivitySummary, WebhookHealth, SightingHealth, VehicleProfilesResponse, VehicleSightings, VerkadaConnectionStatus } from '@/lib/api/verkada';
+import { apiClient } from '@/lib/apiClient';
 import { toast } from '@/hooks/use-toast';
 
 export function useVerkadaCameras() {

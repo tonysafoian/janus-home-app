@@ -11,7 +11,7 @@ import {
  *
  * Runs daily at 9:00 AM PT (wired in server/routes/cron.ts). Scans
  * tesla_tokens and google_tokens for rows whose token_expires_at is
- * within the next 24h, and WhatsApps the admin alert phone so Tony can
+ * within the next 24h, and WhatsApps the admin alert phone so the admin can
  * re-auth before the 401 storm hits.
  *
  * Dedup: token_expiry_alert_dedup row per (user_id, kind) is checked

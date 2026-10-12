@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { storage } from '../storage';
-import { requireAuth, getAuthUser } from '../auth';
+import { getAuthUser } from '../auth.js';
+import { requireAuth } from '../middleware/auth.js';
 import { logAudit } from '../lib/auditLog.js';
 import { sendWhatsApp, sendGmailRaw, getSaKey, logEmail } from '../lib/helpers';
 
@@ -160,8 +161,8 @@ router.post('/api/shopping-cart/clear', requireAuth, async (req: any, res: any) 
   }
 });
 
-const TONY_EMAIL = 'admin@example.com';
-const STAFF_RECIPIENTS = ['staff2@example.com', 'staff@example.com'];
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || process.env.ASSISTANT_EMAIL || 'admin@example.com';
+const STAFF_RECIPIENTS = (process.env.STAFF_EMAILS || 'staff@example.com').split(',').map(s => s.trim()).filter(Boolean);
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me';
 
 const PACKAGE_SEARCH_QUERIES = [
@@ -217,7 +218,7 @@ async function archiveMessage(token: string, messageId: string): Promise<void> {
 
 router.post('/api/package-arrival-monitor', requireAuth, async (req: any, res: any) => {
   try {
-    const token = await getGmailAccessToken(TONY_EMAIL);
+    const token = await getGmailAccessToken(ADMIN_EMAIL);
     const db = storage;
     const allMessageIds = new Set<string>();
     for (const query of PACKAGE_SEARCH_QUERIES) {
@@ -237,11 +238,11 @@ router.post('/api/package-arrival-monitor', requireAuth, async (req: any, res: a
       const details = await getMessageDetails(token, messageId);
       console.log(`Processing package email: "${details.subject}" from ${details.from}`);
 
-      // 1. WhatsApp Tony
+      // 1. WhatsApp Admin
       const waMessage = `📦 *Package notification*\n\n${details.subject}\nFrom: ${details.from}\n\n${details.snippet}`;
       await sendWhatsApp(waMessage).catch(e => console.error('WhatsApp failed:', e));
 
-      // 2. Email Sandra & Jesse
+      // 2. Email household members / staff
       const staffSubject = `📦 Package Alert: ${details.subject}`;
       const staffBody = `Hi,\n\nA package notification was received:\n\nSubject: ${details.subject}\nFrom: ${details.from}\n\n${details.snippet}\n\n— Janus (automated)`;
       await (async () => {
@@ -257,7 +258,7 @@ router.post('/api/package-arrival-monitor', requireAuth, async (req: any, res: a
         }
       })().catch(e => console.error('Staff email phase failed:', e));
 
-      // 3. Archive the email from Tony's inbox
+      // 3. Archive the email from admin inbox
       await archiveMessage(token, messageId).catch(e => console.error('Archive failed:', e));
       await db.query(
         `INSERT INTO system_audit_log (edge_function, category, event_type, severity, actor_id, actor_name, actor_role, channel, summary, detail, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,

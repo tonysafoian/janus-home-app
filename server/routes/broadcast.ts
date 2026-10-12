@@ -897,7 +897,7 @@ router.post("/school-morning", async (req: Request, res: Response) => {
       }
     }
 
-    // WhatsApp alert: if any failure occurred (partial or full), alert Tony
+    // WhatsApp alert: if any failure occurred (partial or full), alert admin
     let whatsappAlert = false;
     if (!broadcastOk) {
       const alertPhone = await getAlertPhoneNumber();
@@ -918,7 +918,7 @@ router.post("/school-morning", async (req: Request, res: Response) => {
         fallbackNote;
       whatsappAlert = await sendWhatsAppTo(alertPhone, alertMsg);
       if (whatsappAlert) {
-        console.log(`[broadcast] WhatsApp alert sent to Tony for slot ${slot}`);
+        console.log(`[broadcast] WhatsApp alert sent to admin for slot ${slot}`);
       } else {
         console.warn(`[broadcast] WhatsApp alert failed for slot ${slot}`);
       }

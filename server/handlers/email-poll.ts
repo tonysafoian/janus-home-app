@@ -111,27 +111,27 @@ try {
 }
 
 const JANUS_EMAIL = "assistant@example.com";
-const TONY_EMAIL = "admin@example.com";
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || process.env.ASSISTANT_EMAIL || "admin@example.com";
 
-// Fallback for Tony when the household_members table is empty/unreachable.
+// Fallback for Admin when the household_members table is empty/unreachable.
 // All other users now resolve via resolveEmailIdentity() against household_members.
-const TONY_FALLBACK: ResolvedIdentity = {
+const ADMIN_FALLBACK: ResolvedIdentity = {
   userId: "77d99e2b-d9b6-4c2a-a170-6a6da473c1d2",
-  displayName: "Tony",
+  displayName: "Admin",
   role: "admin",
   source: "outsider", // marker that fallback was used
 };
 
-let _cachedTonyIdentity: ResolvedIdentity | null = null;
-async function getTonyIdentity(): Promise<ResolvedIdentity> {
-  if (_cachedTonyIdentity) return _cachedTonyIdentity;
+let _cachedAdminIdentity: ResolvedIdentity | null = null;
+async function getAdminIdentity(): Promise<ResolvedIdentity> {
+  if (_cachedAdminIdentity) return _cachedAdminIdentity;
   try {
-    const id = await resolveEmailIdentity(TONY_EMAIL);
-    if (id.role === "admin") { _cachedTonyIdentity = id; return id; }
+    const id = await resolveEmailIdentity(ADMIN_EMAIL);
+    if (id.role === "admin") { _cachedAdminIdentity = id; return id; }
   } catch (e) {
-    console.error("[email-poll] getTonyIdentity failed, using fallback:", e);
+    console.error("[email-poll] getAdminIdentity failed, using fallback:", e);
   }
-  return TONY_FALLBACK;
+  return ADMIN_FALLBACK;
 }
 
 let _currentCallerEmail = "";
@@ -449,7 +449,7 @@ export const ALL_TOOLS = [
   { type: "function", function: { name: "check_generator_status", description: "Check generator.", parameters: { type: "object", properties: {}, additionalProperties: false } } },
   { type: "function", function: { name: "query_activity_log", description: "Recent activity from Janus's central app-activity log (home, network, ball, security, automations, logins, and more). Pass an optional keyword to filter.", parameters: { type: "object", properties: { event_type: { type: "string", description: "Optional keyword to filter the feed" }, hours: { type: "number" } }, additionalProperties: false } } },
   LOAD_SKILL_TOOL,
-  { type: "function", function: { name: "archive_email", description: "Archive the current email in Tony's inbox. Use during triage to archive low-priority emails.", parameters: { type: "object", properties: {}, additionalProperties: false } } },
+  { type: "function", function: { name: "archive_email", description: "Archive the current email in the admin inbox. Use during triage to archive low-priority emails.", parameters: { type: "object", properties: {}, additionalProperties: false } } },
 ];
 
 export const ADMIN_ONLY_TOOLS = new Set(["send_email", "gmail_search", "batch_update_notion_pages", "query_system_health", "delete_calendar_event"]);
@@ -460,7 +460,7 @@ function getToolsForRole(role: string) {
 }
 
 function getRoleAddendum(role: string): string {
-  if (role === "admin") return "\n\nThe current user is the ADMIN (Tony). Full access to all tools.";
+  if (role === "admin") return "\n\nThe current user is the ADMIN. Full access to all tools.";
   return "\n\nThe current user is a MEMBER.";
 }
 
@@ -1047,10 +1047,9 @@ export async function handleEmailPoll(req: Request, res: Response) {
 
         // Forwarded transactional guard: file-and-skip when the inbound looks
         // like a forwarded receipt/confirmation/etc. with no actual ask. This
-        // stops Janus from auto-replying "I'm Janus — I run the house at Club
-        // 34. What can I help you with?" to vendors on threads that Tony
+        // stops Janus from auto-replying to vendors on threads that the admin
         // forwarded purely to file. Applies to every role (admin/member/
-        // outsider) — if Tony forwards a receipt to himself + Janus, we don't
+        // outsider) — if admin forwards a receipt to himself + Janus, we don't
         // want a reply either. Only suppresses when the sender clearly added
         // no question and the body matches transactional patterns.
         const fwdGuard = classifyForwardedEmail({ subject, body: combinedBodyText });
@@ -1072,15 +1071,15 @@ export async function handleEmailPoll(req: Request, res: Response) {
           const isCoordinationReply = threadMessages.length > 1 && janusInitiated;
 
           if (isCoordinationReply) {
-            const tonyId = await getTonyIdentity();
+            const adminId = await getAdminIdentity();
             const threadContext = buildThreadContext(threadMessages, combinedBodyText);
-            _currentCallerEmail = TONY_EMAIL;
+            _currentCallerEmail = ADMIN_EMAIL;
             const { reply, toolCalls } = await askJanusWithTools(
               fromEmail, fromName, subject, threadContext + combinedBodyText,
-              "admin", tonyId.userId,
+              "admin", adminId.userId,
             );
             await sendReply(accessToken, fromEmail, subject, reply, threadId, messageIdHeader || latestMsgId, ccRecipients);
-            await logJanusConversation(tonyId.userId, `${fromName} (coordination)`, "coordination", `[${subject}] ${combinedBodyText}`, reply, toolCalls, "email");
+            await logJanusConversation(adminId.userId, `${fromName} (coordination)`, "coordination", `[${subject}] ${combinedBodyText}`, reply, toolCalls, "email");
             await logJanusEmailDecision({
               fromEmail, fromName, subject, threadId, threadLength: threadMessages.length,
               isJanusInitiatedThread: janusInitiated, identity, route: "coordination-reply",
@@ -1167,14 +1166,14 @@ export async function handleEmailPoll(req: Request, res: Response) {
       }
     }
 
-    let tonyTriaged = 0;
+    let adminTriaged = 0;
     try {
-      const tonyToken = await getAccessToken(saKey, TONY_EMAIL);
-      const tonyUnread = await listUnreadMessages(tonyToken);
-      if (tonyUnread.length > 0) {
-        for (const msg of tonyUnread.slice(0, 5)) {
+      const adminToken = await getAccessToken(saKey, ADMIN_EMAIL);
+      const adminUnread = await listUnreadMessages(adminToken);
+      if (adminUnread.length > 0) {
+        for (const msg of adminUnread.slice(0, 5)) {
           try {
-            const fullMessage = await getMessage(tonyToken, msg.id);
+            const fullMessage = await getMessage(adminToken, msg.id);
             if (!fullMessage) continue;
             const from = extractHeader(fullMessage, "From");
             const subject = extractHeader(fullMessage, "Subject");
@@ -1184,42 +1183,42 @@ export async function handleEmailPoll(req: Request, res: Response) {
             const fromName = from.replace(/<[^>]+>/, "").trim() || fromEmail;
             if (fromEmail.toLowerCase() === JANUS_EMAIL.toLowerCase()) continue;
 
-            _currentTriageToken = tonyToken;
+            _currentTriageToken = adminToken;
             _currentTriageMessageId = msg.id;
-            _currentCallerEmail = TONY_EMAIL;
+            _currentCallerEmail = ADMIN_EMAIL;
 
             const { reply: triageReply, toolCalls: triageToolCalls } = await askJanusWithTools(
               fromEmail, fromName, subject,
-              `[TRIAGE MODE] This is an email in Tony's inbox. Do NOT reply to the sender. Instead, decide what to do:\n` +
-              `1. Low-priority — archive it and send Tony a WhatsApp summary.\n` +
-              `2. Important — send Tony a WhatsApp notification.\n` +
+              `[TRIAGE MODE] This is an email in the admin's inbox. Do NOT reply to the sender. Instead, decide what to do:\n` +
+              `1. Low-priority — archive it and send admin a WhatsApp summary.\n` +
+              `2. Important — send admin a WhatsApp notification.\n` +
               `3. Spam — archive silently.\n\n` +
               `Email from: ${fromName} <${fromEmail}>\nSubject: ${subject}\n\n${bodyText.slice(0, 3000)}`,
-              "admin", (await getTonyIdentity()).userId,
+              "admin", (await getAdminIdentity()).userId,
             );
 
-            await markAsRead(tonyToken, msg.id);
-            const tonyId = await getTonyIdentity();
-            await logJanusConversation(tonyId.userId, "Tony (triage)", "admin", `[TRIAGE] [${subject}] from ${fromEmail}`, triageReply, triageToolCalls, "email-triage");
+            await markAsRead(adminToken, msg.id);
+            const adminId = await getAdminIdentity();
+            await logJanusConversation(adminId.userId, "Admin (triage)", "admin", `[TRIAGE] [${subject}] from ${fromEmail}`, triageReply, triageToolCalls, "email-triage");
             await logJanusEmailDecision({
               fromEmail, fromName, subject, threadId: undefined, threadLength: 1,
-              isJanusInitiatedThread: false, identity: tonyId, route: "triage",
+              isJanusInitiatedThread: false, identity: adminId, route: "triage",
               replyPreview: triageReply,
             });
-            tonyTriaged++;
+            adminTriaged++;
           } catch (triageErr) {
             console.error(`[Triage] Error processing message ${msg.id}:`, triageErr);
           }
         }
       }
-    } catch (tonyErr) {
-      console.error("[Triage] Failed to access Tony's inbox:", tonyErr);
+    } catch (adminErr) {
+      console.error("[Triage] Failed to access admin inbox:", adminErr);
     }
 
     _currentTriageToken = "";
     _currentTriageMessageId = "";
 
-    res.json({ processed, tonyTriaged, total: unreadMessages.length });
+    res.json({ processed, adminTriaged, total: unreadMessages.length });
   } catch (e) {
     console.error("janus-email-poll error:", e);
     await enqueueFailedJob("janus-email-poll", e);

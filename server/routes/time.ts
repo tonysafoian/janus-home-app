@@ -2244,7 +2244,7 @@ async function sendActivationEmail(worker: Record<string, unknown>, active: bool
     const subject = active ? "Your Janus Time account has been reactivated" : "Your Janus Time account has been deactivated";
     const html = active
       ? `<p>Hi ${worker.full_name}, your Janus Time account has been reactivated. You can log hours at <a href="https://example.com/time">example.com/time</a>.</p>`
-      : `<p>Hi ${worker.full_name}, your Janus Time account has been deactivated. Contact Tony if you have questions.</p>`;
+      : `<p>Hi ${worker.full_name}, your Janus Time account has been deactivated. Contact the administrator if you have questions.</p>`;
 
     const ok = await sendGmailRaw(saKey, String(worker.email), subject, html, subject, JANUS_EMAIL);
     await logEmail(active ? "time_reactivation" : "time_deactivation", subject, [String(worker.email)], html, ok ? "sent" : "failed");

@@ -58,7 +58,7 @@ const SAMPLE_INTERFACES = {
 
 const SAMPLE_SESSIONS = {
   results: [
-    { proto: "udp", srcintf: "internal", src: "192.168.1.32", sport: 59916, srcmac: "ac:80:0a:b4:a1:67", dstintf: "wan1", dst: "74.125.103.70", dport: 443, country: "United States", policy_id: 1, duration: 59, snaddr: "142.129.117.139", rx_bytes: 1024, tx_bytes: 2048 },
+    { proto: "udp", srcintf: "internal", src: "192.168.1.32", sport: 59916, srcmac: "ac:80:0a:b4:a1:67", dstintf: "wan1", dst: "74.125.103.70", dport: 443, country: "United States", policy_id: 1, duration: 59, snaddr: "198.51.100.1", rx_bytes: 1024, tx_bytes: 2048 },
     { proto: "tcp", srcintf: "internal", src: "192.168.1.10", sport: 443, dstintf: "wan1", dst: "1.2.3.4", dport: 443, policy_id: 1, duration: 12 },
   ],
 };
@@ -211,7 +211,7 @@ describe("getActiveSessions", () => {
       country: "United States",
       policy_id: 1,
       duration: 59,
-      snaddr: "142.129.117.139",
+      snaddr: "198.51.100.1",
     });
   });
 });

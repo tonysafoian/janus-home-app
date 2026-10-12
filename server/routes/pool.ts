@@ -384,18 +384,23 @@ const POOL_TEMP_COOLDOWN_MS = 4 * 60 * 60 * 1000;
 async function fetchCurrentPoolTemp(): Promise<number | null> {
   const haUrl = process.env.HA_URL;
   const haToken = process.env.HA_TOKEN;
-  if (!haUrl || !haToken) throw new Error('HA_URL or HA_TOKEN not configured');
+  if (!haUrl || !haToken) return null;
 
-  const url = `${haUrl.replace(/\/$/, '')}/api/states/sensor.pool_temp`;
-  const res = await fetchT(url, {
-    method: 'GET',
-    headers: { 'Authorization': `Bearer ${haToken}`, 'Content-Type': 'application/json' },
-  });
-  if (!res.ok) throw new Error(`HA state request failed (${res.status})`);
-  const data = await res.json() as Record<string, any>;
-  const val = parseFloat(data.state);
-  if (isNaN(val)) return null;
-  return val;
+  try {
+    const url = `${haUrl.replace(/\/$/, '')}/api/states/sensor.pool_temp`;
+    const res = await fetchT(url, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${haToken}`, 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as Record<string, any>;
+    const val = parseFloat(data.state);
+    if (isNaN(val)) return null;
+    return val;
+  } catch (err) {
+    console.warn('[Pool] Could not fetch pool temp sensor:', err instanceof Error ? err.message : String(err));
+    return null;
+  }
 }
 
 router.post('/temp-monitor', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
@@ -414,7 +419,11 @@ router.post('/temp-monitor', requireAuth, async (req: AuthenticatedRequest, res:
     }
 
     const currentTemp = await fetchCurrentPoolTemp();
-    const belowThreshold = currentTemp !== null && currentTemp < POOL_TEMP_THRESHOLD;
+    if (currentTemp === null) {
+      res.json({ skipped: true, reason: 'pool_temp_sensor_not_found_or_unreachable' });
+      return;
+    }
+    const belowThreshold = currentTemp < POOL_TEMP_THRESHOLD;
 
     let alertResult: Awaited<ReturnType<typeof sendMonitorAlert>> | null = null;
     if (belowThreshold) {
@@ -495,20 +504,25 @@ router.post('/temp-monitor', requireAuth, async (req: AuthenticatedRequest, res:
 async function fetchSpaPumpState(): Promise<{ state: string; last_changed: string } | null> {
   const haUrl = process.env.HA_URL;
   const haToken = process.env.HA_TOKEN;
-  if (!haUrl || !haToken) throw new Error('HA_URL or HA_TOKEN not configured');
+  if (!haUrl || !haToken) return null;
 
-  const url = `${haUrl.replace(/\/$/, '')}/api/states/switch.spa_pump`;
-  const res = await fetchT(url, {
-    method: 'GET',
-    headers: { 'Authorization': `Bearer ${haToken}`, 'Content-Type': 'application/json' },
-  });
-  if (!res.ok) throw new Error(`HA state request failed (${res.status})`);
-  const data = await res.json() as Record<string, unknown>;
-  if (!data || typeof data.state !== 'string') return null;
-  return {
-    state: data.state,
-    last_changed: typeof data.last_changed === 'string' ? data.last_changed : '',
-  };
+  try {
+    const url = `${haUrl.replace(/\/$/, '')}/api/states/switch.spa_pump`;
+    const res = await fetchT(url, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${haToken}`, 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as Record<string, unknown>;
+    if (!data || typeof data.state !== 'string') return null;
+    return {
+      state: data.state,
+      last_changed: typeof data.last_changed === 'string' ? data.last_changed : '',
+    };
+  } catch (err) {
+    console.warn('[Pool] Could not fetch spa pump state:', err instanceof Error ? err.message : String(err));
+    return null;
+  }
 }
 
 router.post('/spa-mode-monitor', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
@@ -528,7 +542,7 @@ router.post('/spa-mode-monitor', requireAuth, async (req: AuthenticatedRequest, 
 
     const spaState = await fetchSpaPumpState();
     if (!spaState) {
-      res.status(500).json({ success: false, error: 'Could not fetch Spa Pump state from HA' });
+      res.json({ skipped: true, reason: 'spa_pump_entity_not_found_or_unreachable' });
       return;
     }
 
