@@ -18,15 +18,22 @@ done
 CONFIG_PATH=/data/options.json
 
 LOG_LEVEL=$(jq -r '.log_level // "info"' "$CONFIG_PATH" 2>/dev/null || echo "info")
-ENABLE_DEMO_LOGIN=$(jq -r '.enable_demo_login // true' "$CONFIG_PATH" 2>/dev/null || echo "true")
+ENABLE_DEMO_LOGIN=$(jq -r '.enable_demo_login // false' "$CONFIG_PATH" 2>/dev/null || echo "false")
 ENABLE_MOCK_MODE=$(jq -r '.enable_mock_mode // false' "$CONFIG_PATH" 2>/dev/null || echo "false")
-GEMINI_KEY=$(jq -r '.gemini_api_key // empty' "$CONFIG_PATH" 2>/dev/null || true)
-GOOGLE_ID=$(jq -r '.google_client_id // empty' "$CONFIG_PATH" 2>/dev/null || true)
-GOOGLE_SECRET=$(jq -r '.google_client_secret // empty' "$CONFIG_PATH" 2>/dev/null || true)
 CUSTOM_DB_URL=$(jq -r '.database_url // empty' "$CONFIG_PATH" 2>/dev/null || true)
 
+# Dynamically export all options from options.json as uppercase environment variables
+if [ -f "$CONFIG_PATH" ]; then
+    while IFS="=" read -r opt_key opt_val; do
+        if [ -n "$opt_key" ] && [ -n "$opt_val" ] && [ "$opt_val" != "null" ]; then
+            UPPER_KEY=$(echo "$opt_key" | tr '[:lower:]' '[:upper:]')
+            export "$UPPER_KEY"="$opt_val"
+        fi
+    done < <(jq -r 'to_entries[] | "\(.key)=\(.value)"' "$CONFIG_PATH" 2>/dev/null)
+fi
+
 echo "===================================================="
-echo " 🏛️ Starting Janus Home Automation (v1.0.15)"
+echo " 🏛️ Starting Janus Home Automation (v1.0.16)"
 echo "===================================================="
 
 # Set up database
@@ -67,18 +74,6 @@ if [ -n "$SUPERVISOR_TOKEN" ]; then
     export HA_TOKEN="$SUPERVISOR_TOKEN"
 fi
 
-if [ -n "$GEMINI_KEY" ]; then
-    export GEMINI_API_KEY="$GEMINI_KEY"
-fi
-
-if [ -n "$GOOGLE_ID" ]; then
-    export GOOGLE_CLIENT_ID="$GOOGLE_ID"
-fi
-
-if [ -n "$GOOGLE_SECRET" ]; then
-    export GOOGLE_CLIENT_SECRET="$GOOGLE_SECRET"
-fi
-
 export PORT=5080
 export NODE_ENV=production
 export ENABLE_DEMO_LOGIN="$ENABLE_DEMO_LOGIN"
@@ -94,6 +89,17 @@ if [ -z "$JWT_SECRET" ] && [ -z "$SESSION_SECRET" ]; then
     fi
     export JWT_SECRET="$(cat "$SECRET_FILE")"
     export SESSION_SECRET="$JWT_SECRET"
+fi
+
+# Ensure persistent cron secret exists on /data
+if [ -z "$CRON_SECRET" ]; then
+    CRON_FILE=/data/cron_secret
+    if [ ! -f "$CRON_FILE" ]; then
+        echo "[janus] Generating secure cron secret on /data/cron_secret..."
+        head -c 32 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 32 > "$CRON_FILE"
+        chmod 600 "$CRON_FILE"
+    fi
+    export CRON_SECRET="$(cat "$CRON_FILE")"
 fi
 
 echo "[janus] Applying database migrations..."

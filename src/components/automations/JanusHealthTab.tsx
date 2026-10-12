@@ -3,12 +3,12 @@ import { apiClient } from '@/lib/apiClient';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { RefreshCw, CheckCircle2, AlertTriangle, XCircle, Clock, MessageSquare, Mail, MapPin, Zap, Server } from 'lucide-react';
+import { RefreshCw, CheckCircle2, AlertTriangle, XCircle, MinusCircle, Clock, MessageSquare, Mail, MapPin, Zap, Server } from 'lucide-react';
 import { format } from 'date-fns';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type CheckStatus = 'ok' | 'degraded' | 'error';
+type CheckStatus = 'ok' | 'degraded' | 'error' | 'not_configured';
 
 interface CheckResult {
   name: string;
@@ -39,7 +39,7 @@ const CATEGORIES = [
     key: 'workspace',
     label: 'Google Workspace',
     icon: Mail,
-    checks: ['gmail_tony', 'google_calendar', 'google_drive'],
+    checks: ['google_email', 'gmail_tony', 'google_calendar', 'google_drive'],
     color: 'text-green-500',
   },
   {
@@ -69,7 +69,8 @@ const CHECK_LABELS: Record<string, string> = {
   janus_chat: 'Janus Chat',
   janus_whatsapp: 'Janus WhatsApp',
   janus_email: 'Janus Email',
-  gmail_tony: 'Gmail (Primary)',
+  google_email: 'Google Email (Primary)',
+  gmail_tony: 'Google Email (Primary)',
   google_calendar: 'Google Calendar',
   google_drive: 'Google Drive',
   google_maps_routes: 'Maps Routes API',
@@ -78,6 +79,7 @@ const CHECK_LABELS: Record<string, string> = {
   firecrawl: 'Firecrawl',
   wati_whatsapp: 'WATI WhatsApp',
   elevenlabs: 'ElevenLabs Voice',
+  openrouter: 'OpenRouter AI Gateway',
   ai_gateway: 'OpenRouter AI Gateway',
   home_assistant: 'Home Assistant',
   notion: 'Notion',
@@ -88,11 +90,19 @@ const CHECK_LABELS: Record<string, string> = {
 
 function StatusIcon({ status, className = 'w-4 h-4' }: { status: CheckStatus; className?: string }) {
   if (status === 'ok') return <CheckCircle2 className={`${className} text-green-500`} />;
+  if (status === 'not_configured') return <MinusCircle className={`${className} text-muted-foreground`} />;
   if (status === 'degraded') return <AlertTriangle className={`${className} text-yellow-500`} />;
   return <XCircle className={`${className} text-destructive`} />;
 }
 
 function StatusBadge({ status }: { status: CheckStatus }) {
+  if (status === 'not_configured') {
+    return (
+      <Badge variant="outline" className="text-xs font-medium bg-muted/40 text-muted-foreground border-border/40">
+        Optional
+      </Badge>
+    );
+  }
   const map = {
     ok: 'bg-primary/10 text-primary border-primary/20',
     degraded: 'bg-muted text-muted-foreground border-border',

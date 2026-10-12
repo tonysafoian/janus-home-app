@@ -504,7 +504,7 @@ ${r.content ? `Content:\n${r.content}` : ""}`,
 Search Queries Used: ${searchQueries.join(", ")}
 `;
 
-  const synthesisSystemPrompt = `You are an expert research analyst for the household administrator — a private estate in Local Area. You have just completed a web research task.
+  const synthesisSystemPrompt = `You are an expert research analyst for the household administrator. You have just completed a web research task.
 
 Synthesize the provided research materials into a comprehensive, well-structured report. Use markdown formatting with headers, bullet points, and clear sections. Be thorough, precise, and factual — only state what the sources support.
 
@@ -518,10 +518,10 @@ Structure your report with:
 1. Executive Summary (2-3 sentences)
 2. Key Findings (bullet points with the most important discoveries)
 3. Detailed Analysis (organized by relevant subtopics)
-4. Implications & Recommendations (specific to Tony's context where applicable)
+4. Implications & Recommendations (specific to the household context where applicable)
 5. Sources (list ONLY the exact URLs from above that you referenced)
 
-Be direct and actionable. Tony is a busy executive — respect his time with clear takeaways.`;
+Be direct and actionable. Respect the administrator's time with clear takeaways.`;
 
   console.log("[Research] Synthesizing...");
   const rawReport = await callAI(synthesisSystemPrompt, synthesisContent, 6000);

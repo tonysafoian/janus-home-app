@@ -3,8 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { MapPin, Navigation, Clock, Car, AlertTriangle, Loader2 } from 'lucide-react';
 import { apiClient } from '@/lib/apiClient';
 
-const HOME_LAT = 0.0000;
-const HOME_LNG = 0.0000;
+const DEFAULT_HOME_LAT = 37.7749;
+const DEFAULT_HOME_LNG = -122.4194;
 const AT_HOME_THRESHOLD_MILES = 0.5;
 
 const VEHICLE_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444'];
@@ -96,8 +96,20 @@ export function VehicleMap({ vehicles }: { vehicles: VehicleLocation[] }) {
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapLoading, setMapLoading] = useState(true);
   const [distances, setDistances] = useState<Record<number, DistanceInfo>>({});
-  const [useLeaflet, setUseLeaflet] = useState(false);
-  const [leafletLoaded, setLeafletLoaded] = useState(false);
+  const [homeCoords, setHomeCoords] = useState<{ lat: number; lng: number }>({
+    lat: DEFAULT_HOME_LAT,
+    lng: DEFAULT_HOME_LNG,
+  });
+
+  useEffect(() => {
+    apiClient.get<{ latitude?: number; longitude?: number }>('/api/estate/config')
+      .then(cfg => {
+        if (cfg?.latitude && cfg?.longitude) {
+          setHomeCoords({ lat: cfg.latitude, lng: cfg.longitude });
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const mapInstanceRef = useRef<MapLib>(null);
   const markersRef = useRef<MapLib[]>([]);
@@ -238,7 +250,7 @@ export function VehicleMap({ vehicles }: { vehicles: VehicleLocation[] }) {
           data.rows[0].elements.forEach((el: DistanceElement, i: number) => {
             if (el.status === 'OK') {
               hasValidElement = true;
-              const straightLine = haversineMiles(HOME_LAT, HOME_LNG, vehicles[i].lat, vehicles[i].lng);
+              const straightLine = haversineMiles(homeCoords.lat, homeCoords.lng, vehicles[i].lat, vehicles[i].lng);
               newDistances[vehicles[i].id] = {
                 distance: el.distance.text,
                 duration: el.duration.text,
@@ -259,7 +271,7 @@ export function VehicleMap({ vehicles }: { vehicles: VehicleLocation[] }) {
       if (!success) {
         const newDistances: Record<number, DistanceInfo> = {};
         vehicles.forEach(v => {
-          const straightLine = haversineMiles(HOME_LAT, HOME_LNG, v.lat, v.lng);
+          const straightLine = haversineMiles(homeCoords.lat, homeCoords.lng, v.lat, v.lng);
           const atHome = straightLine <= AT_HOME_THRESHOLD_MILES;
           
           if (atHome) {
@@ -282,7 +294,7 @@ export function VehicleMap({ vehicles }: { vehicles: VehicleLocation[] }) {
         setDistances(newDistances);
       }
     })();
-  }, [vehicles]);
+  }, [vehicles, homeCoords]);
 
   // Google Maps setup useEffect
   useEffect(() => {
@@ -306,12 +318,12 @@ export function VehicleMap({ vehicles }: { vehicles: VehicleLocation[] }) {
 
     try {
       const bounds = new google.maps.LatLngBounds();
-      bounds.extend({ lat: HOME_LAT, lng: HOME_LNG });
+      bounds.extend({ lat: homeCoords.lat, lng: homeCoords.lng });
       vehicles.forEach(v => bounds.extend({ lat: v.lat, lng: v.lng }));
 
       if (!mapInstanceRef.current) {
         const mapInstance = new google.maps.Map(mapRef.current, {
-          center: { lat: HOME_LAT, lng: HOME_LNG },
+          center: { lat: homeCoords.lat, lng: homeCoords.lng },
           zoom: 12,
           styles: [
             { elementType: 'geometry', stylers: [{ color: '#1a1a2e' }] },
@@ -356,7 +368,7 @@ export function VehicleMap({ vehicles }: { vehicles: VehicleLocation[] }) {
       infoWindowsRef.current = [];
 
       const homeMarker = new google.maps.Marker({
-        position: { lat: HOME_LAT, lng: HOME_LNG },
+        position: { lat: homeCoords.lat, lng: homeCoords.lng },
         map,
         title: 'Home',
         icon: {
@@ -410,7 +422,7 @@ export function VehicleMap({ vehicles }: { vehicles: VehicleLocation[] }) {
       console.warn('Google Maps initialization failed, switching to Leaflet:', err);
       setUseLeaflet(true);
     }
-  }, [mapLoaded, useLeaflet, vehicles, distances, mapError]);
+  }, [mapLoaded, useLeaflet, vehicles, distances, mapError, homeCoords]);
 
   // Leaflet setup useEffect
   useEffect(() => {
@@ -459,7 +471,7 @@ export function VehicleMap({ vehicles }: { vehicles: VehicleLocation[] }) {
         iconAnchor: [8, 8],
       });
 
-      const homeMarker = L.marker([HOME_LAT, HOME_LNG], { icon: homeIcon }).addTo(map);
+      const homeMarker = L.marker([homeCoords.lat, homeCoords.lng], { icon: homeIcon }).addTo(map);
       homeMarker.bindPopup('<div style="color:#f59e0b;font-weight:600;font-size:13px;">Home</div>', {
         closeButton: false,
         offset: [0, -6]
@@ -467,7 +479,7 @@ export function VehicleMap({ vehicles }: { vehicles: VehicleLocation[] }) {
       leafletMarkersRef.current.push(homeMarker);
 
       // Create Custom Vehicle Markers
-      const bounds = L.latLngBounds([[HOME_LAT, HOME_LNG]]);
+      const bounds = L.latLngBounds([[homeCoords.lat, homeCoords.lng]]);
 
       vehicles.forEach((v, i) => {
         const color = VEHICLE_COLORS[i % VEHICLE_COLORS.length];
@@ -542,7 +554,7 @@ export function VehicleMap({ vehicles }: { vehicles: VehicleLocation[] }) {
       console.error('Leaflet initialization error:', err);
       setMapError(`Leaflet failed to initialize: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
-  }, [useLeaflet, leafletLoaded, vehicles, distances, mapError]);
+  }, [useLeaflet, leafletLoaded, vehicles, distances, mapError, homeCoords]);
 
   if (vehicles.length === 0) return null;
 

@@ -112,8 +112,7 @@ router.get("/api/auth/me", (req, res) => {
 });
 
 router.post("/api/auth/demo", async (req, res) => {
-  const isDev = process.env.NODE_ENV !== "production";
-  const allowDemo = isDev || process.env.ENABLE_DEMO_LOGIN === "true" || !process.env.GOOGLE_CLIENT_SECRET;
+  const allowDemo = process.env.ENABLE_DEMO_LOGIN === "true";
 
   if (!allowDemo) {
     res.status(403).json({ error: "Demo login is disabled in this environment." });
@@ -155,7 +154,7 @@ router.post("/api/auth/demo", async (req, res) => {
 router.get("/api/auth/config", (_req, res) => {
   const googleConfigured = Boolean(process.env.GOOGLE_CLIENT_ID || DEFAULT_GOOGLE_CLIENT_ID);
   const appleConfigured = Boolean(process.env.APPLE_CLIENT_ID || process.env.VITE_APPLE_CLIENT_ID);
-  const demoEnabled = process.env.ENABLE_DEMO_LOGIN !== "false";
+  const demoEnabled = process.env.ENABLE_DEMO_LOGIN === "true";
   res.json({ googleConfigured, appleConfigured, demoEnabled });
 });
 

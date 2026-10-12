@@ -59,7 +59,7 @@ export function ConnectionBadge({ conn, size = 'default' }: { conn: ConnectionMe
     ruckus_live: 'Live from Ruckus — confirmed',
     ruckus_recent: 'Last known SSID from Ruckus (feed may be stale)',
     heuristic: 'Inferred from device type / category',
-    subnet: 'Inferred from subnet (192.168.1.0/23)',
+    subnet: 'Inferred from local subnet',
     unknown: 'Source unknown',
   };
 

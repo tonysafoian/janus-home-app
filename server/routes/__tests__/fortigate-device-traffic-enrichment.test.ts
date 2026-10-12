@@ -161,12 +161,12 @@ describe("GET /api/fortigate/devices/:identifier/traffic — device-name enrichm
       { ip: "192.168.1.12", mac: "aa:bb:cc:00:00:12", hostname: "DESKTOP-XYZ" },
     ];
     ndRows = [
-      { mac_address: "aa:bb:cc:00:00:12", label: "Tony's MacBook", hostnames: ["mbp"], ip_addresses: ["192.168.1.12"], last_seen: new Date() },
+      { mac_address: "aa:bb:cc:00:00:12", label: "Admin's Laptop", hostnames: ["mbp"], ip_addresses: ["192.168.1.12"], last_seen: new Date() },
     ];
 
     const res = await deviceTraffic("192.168.1.12", "192.168.1.12");
     expect(res.status).toBe(200);
-    expect(res.body.hostname).toBe("Tony's MacBook");
+    expect(res.body.hostname).toBe("Admin's Laptop");
   });
 
   it("tier 3: falls back to the live FortiGate device-query hostname", async () => {

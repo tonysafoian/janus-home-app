@@ -166,7 +166,7 @@ export async function getAlertPhoneNumber(): Promise<string> {
       return data.value;
     }
   } catch (_) {}
-  _alertPhone = "15550000002";
+  _alertPhone = process.env.ALERT_PHONE_NUMBER || "";
   return _alertPhone;
 }
 
@@ -175,6 +175,7 @@ export async function sendWhatsApp(message: string): Promise<void> {
   const token = process.env.WATI_ACCESS_TOKEN;
   if (!endpoint || !token) return;
   const phone = await getAlertPhoneNumber();
+  if (!phone) return;
   const serverRoot = endpoint
     .replace(/\/$/, "")
     .replace(/\/api\/ext\/v3\/?$/, "")

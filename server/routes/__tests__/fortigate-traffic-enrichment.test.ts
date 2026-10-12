@@ -154,7 +154,7 @@ describe("GET /api/fortigate/traffic — device-name enrichment", () => {
 
     // network_devices: label for .12, observed hostname (no label) for .14.
     ndRows = [
-      { mac_address: "aa:bb:cc:00:00:12", label: "Tony's MacBook", hostnames: ["mbp"], ip_addresses: ["192.168.1.12"], last_seen: new Date() },
+      { mac_address: "aa:bb:cc:00:00:12", label: "Admin's Laptop", hostnames: ["mbp"], ip_addresses: ["192.168.1.12"], last_seen: new Date() },
       { mac_address: "aa:bb:cc:00:00:14", label: null, hostnames: ["living-room-tv"], ip_addresses: ["192.168.1.14"], last_seen: new Date() },
     ];
 
@@ -167,7 +167,7 @@ describe("GET /api/fortigate/traffic — device-name enrichment", () => {
     expect(res.status).toBe(200);
 
     expect(hostnameFor(res.body, "192.168.1.11")).toBe("Pool Controller");   // override
-    expect(hostnameFor(res.body, "192.168.1.12")).toBe("Tony's MacBook");    // nd.label
+    expect(hostnameFor(res.body, "192.168.1.12")).toBe("Admin's Laptop");    // nd.label
     expect(hostnameFor(res.body, "192.168.1.13")).toBe("fgt-host-13");       // FortiGate hostname
     expect(hostnameFor(res.body, "192.168.1.14")).toBe("living-room-tv");    // nd.hostname
     expect(hostnameFor(res.body, "192.168.1.15")).toBeNull();               // raw-IP fallback

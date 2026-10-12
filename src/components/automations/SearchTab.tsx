@@ -67,7 +67,7 @@ export function SearchTab() {
             <Label htmlFor="search-query">Search query</Label>
             <Input
               id="search-query"
-              placeholder="Local Area luxury estates for sale"
+              placeholder="Smart home automation best practices"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}

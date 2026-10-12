@@ -299,7 +299,8 @@ export async function executeSearchPlaces(query: string, near?: string, type?: s
   const apiKey = Deno.env.get("GOOGLE_MAPS_API_KEY");
   if (!apiKey) return "Google Maps API key not configured.";
   try {
-    const searchQuery = `${query} near ${near || "Local Area, CA"}`;
+    const nearLocation = near || Deno.env.get("HOME_LOCATION") || "";
+    const searchQuery = nearLocation ? `${query} near ${nearLocation}` : query;
     const params = new URLSearchParams({ query: searchQuery, key: apiKey });
     if (type) params.set("type", type);
     const res = await fetch(`https://maps.googleapis.com/maps/api/place/textsearch/json?${params}`);

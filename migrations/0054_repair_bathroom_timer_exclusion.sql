@@ -4,7 +4,7 @@
 -- clearing the list) remain untouched because this migration runs only once.
 
 UPDATE family_automations
-SET config = jsonb_set(COALESCE(config, '{}'::jsonb), '{excluded_terms}', '["enzo"]'::jsonb, true),
+SET config = jsonb_set(COALESCE(config, '{}'::jsonb), '{excluded_terms}', '[]'::jsonb, true),
     updated_at = NOW()
 WHERE name = 'Bathroom Light Timer'
   AND COALESCE(jsonb_array_length(

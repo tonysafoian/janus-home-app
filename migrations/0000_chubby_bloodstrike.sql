@@ -81,7 +81,8 @@ CREATE TABLE "failed_jobs" (
 	"status" text DEFAULT 'pending' NOT NULL,
 	"next_retry_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"resolved_at" timestamp with time zone
+	"resolved_at" timestamp with time zone,
+	"last_attempted_at" timestamp with time zone
 );
 --> statement-breakpoint
 CREATE TABLE "google_tokens" (

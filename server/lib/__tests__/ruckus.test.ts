@@ -87,7 +87,7 @@ const SAMPLE_CLIENTS_WRAPPED_XML = `
 <ajax-response>
   <response type="object" id="client-info-stats">
     <apstamgr-stat>
-      <client mac="00:9b:08:ef:39:f1" ssid="34_AV" ap-name="Garage Wap" ap="80:f0:cf:09:b6:30" vlan="1" received-signal-strength="-33" hostname="Tonys-iPad" ip="192.168.1.170" dvctype="Tablet" model="Amazon Kindle" wlan-id="3"/>
+      <client mac="00:9b:08:ef:39:f1" ssid="34_AV" ap-name="Garage Wap" ap="80:f0:cf:09:b6:30" vlan="1" received-signal-strength="-33" hostname="Admin-iPad" ip="192.168.1.170" dvctype="Tablet" model="Amazon Kindle" wlan-id="3"/>
       <client mac="62:e2:47:16:0a:d7" ssid="34" ap-name="Glam WAP" received-signal-strength="-63"/>
     </apstamgr-stat>
   </response>
@@ -395,7 +395,7 @@ describe("AP/client parser — real firmware apstamgr-stat wrapper", () => {
     expect(clients).toHaveLength(2);
     expect(clients[0].mac).toBe("00:9b:08:ef:39:f1");
     expect(clients[0].ssid).toBe("34_AV");
-    expect(clients[0].hostname).toBe("Tonys-iPad");
+    expect(clients[0].hostname).toBe("Admin-iPad");
     expect(clients[0].ip).toBe("192.168.1.170");
     expect(clients[0].signal).toBe(-33);
     expect(clients[1].ssid).toBe("34");

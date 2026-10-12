@@ -70,7 +70,7 @@ export function TeslaBatteryMonitorCard() {
             <div>
               <CardTitle className="text-base">Tesla Battery Monitor</CardTitle>
               <CardDescription>
-                Emails jesse-b@ &amp; sandra-w@ when range ≤ 100 mi; WhatsApps Jesse every 5 mi below 50 mi
+                Emails contacts when range ≤ 100 mi; WhatsApps alert recipient every 5 mi below 50 mi
               </CardDescription>
             </div>
           </div>

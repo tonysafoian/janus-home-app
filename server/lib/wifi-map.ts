@@ -12,14 +12,14 @@
  * This module is now only a thin subnet-based fallback for the small
  * set of cases where Ruckus has no observation yet (cold start, wired
  * devices, or a client that has never associated since the last
- * controller reboot). Subnet matching cannot distinguish 34 from 34_AV,
- * so it only labels devices on the trusted 192.168.1.0/23 LAN as "34" and
- * everything else stays unlabeled.
+ * controller reboot).
  */
 
-export const DEFAULT_SUBNET_MAP: ReadonlyArray<{ cidr: string; label: string }> = Object.freeze([
-  { cidr: '192.168.1.0/23', label: '34' },
-]);
+export const DEFAULT_SUBNET_MAP: ReadonlyArray<{ cidr: string; label: string }> = Object.freeze(
+  process.env.LAN_SUBNET_CIDR
+    ? [{ cidr: process.env.LAN_SUBNET_CIDR, label: process.env.LAN_SUBNET_LABEL || 'LAN' }]
+    : []
+);
 
 // --- CIDR helpers ---------------------------------------------------------
 

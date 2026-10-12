@@ -4,7 +4,7 @@ import { query } from "../lib/db.js";
 import { logAudit } from "../lib/auditLog.js";
 import { enqueueFailedJob, sendAutomationFailureAlert } from "../utils/janus-tools.js";
 
-type CheckStatus = "ok" | "degraded" | "error";
+type CheckStatus = "ok" | "degraded" | "error" | "not_configured";
 
 interface CheckResult {
   name: string;
@@ -41,6 +41,9 @@ async function runCheck(
     let message: string | undefined;
     if (!msg) {
       status = latency_ms > 3000 ? "degraded" : "ok";
+    } else if (msg.startsWith("not_configured:")) {
+      status = "not_configured";
+      message = msg.slice("not_configured:".length).trim();
     } else if (msg.startsWith("degraded:")) {
       status = "degraded";
       message = msg.slice("degraded:".length).trim();
@@ -82,7 +85,7 @@ async function checkJanusChat(signal: AbortSignal): Promise<string | null> {
 async function checkJanusWhatsApp(signal: AbortSignal): Promise<string | null> {
   const endpoint = process.env.WATI_API_ENDPOINT;
   const token = process.env.WATI_ACCESS_TOKEN;
-  if (!endpoint || !token) return "Missing WATI_API_ENDPOINT or WATI_ACCESS_TOKEN";
+  if (!endpoint || !token) return "not_configured: Missing WATI_API_ENDPOINT or WATI_ACCESS_TOKEN";
 
   const serverRoot = endpoint
     .replace(/\/$/, "")
@@ -105,11 +108,12 @@ async function checkJanusWhatsApp(signal: AbortSignal): Promise<string | null> {
 
 async function checkJanusEmail(signal: AbortSignal): Promise<string | null> {
   const saKeyRaw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
-  if (!saKeyRaw) return "Missing GOOGLE_SERVICE_ACCOUNT_KEY";
+  if (!saKeyRaw) return "not_configured: Missing GOOGLE_SERVICE_ACCOUNT_KEY";
 
+  const assistantEmail = process.env.ASSISTANT_EMAIL || "assistant@example.com";
   const token = await getGoogleServiceToken(
     ["https://mail.google.com/"],
-    "assistant@example.com",
+    assistantEmail,
   );
 
   const res = await fetch(
@@ -124,13 +128,14 @@ async function checkJanusEmail(signal: AbortSignal): Promise<string | null> {
   return null;
 }
 
-async function checkGmailTony(signal: AbortSignal): Promise<string | null> {
+async function checkGoogleEmailAdmin(signal: AbortSignal): Promise<string | null> {
   const saKeyRaw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
-  if (!saKeyRaw) return "Missing GOOGLE_SERVICE_ACCOUNT_KEY";
+  if (!saKeyRaw) return "not_configured: Missing GOOGLE_SERVICE_ACCOUNT_KEY";
 
+  const adminEmail = process.env.ADMIN_EMAIL || "admin@example.com";
   const token = await getGoogleServiceToken(
     ["https://mail.google.com/"],
-    "admin@example.com",
+    adminEmail,
   );
 
   const res = await fetch(
@@ -140,22 +145,23 @@ async function checkGmailTony(signal: AbortSignal): Promise<string | null> {
 
   if (!res.ok) {
     const body: ApiErrorBody = await res.json().catch(() => ({}));
-    return extractErrorMessage(body, `Gmail tony@ returned ${res.status}`);
+    return extractErrorMessage(body, `Gmail admin returned ${res.status}`);
   }
   return null;
 }
 
 async function checkGoogleCalendar(signal: AbortSignal): Promise<string | null> {
   const saKeyRaw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
-  if (!saKeyRaw) return "Missing GOOGLE_SERVICE_ACCOUNT_KEY";
+  if (!saKeyRaw) return "not_configured: Missing GOOGLE_SERVICE_ACCOUNT_KEY";
 
+  const adminEmail = process.env.ADMIN_EMAIL || "admin@example.com";
   const token = await getGoogleServiceToken(
     ["https://www.googleapis.com/auth/calendar.readonly"],
-    "admin@example.com",
+    adminEmail,
   );
 
   const res = await fetch(
-    "https://www.googleapis.com/calendar/v3/calendars/admin@example.com/events?maxResults=1",
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(adminEmail)}/events?maxResults=1`,
     { headers: { Authorization: `Bearer ${token}` }, signal },
   );
 
@@ -168,11 +174,12 @@ async function checkGoogleCalendar(signal: AbortSignal): Promise<string | null> 
 
 async function checkGoogleDrive(signal: AbortSignal): Promise<string | null> {
   const saKeyRaw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
-  if (!saKeyRaw) return "Missing GOOGLE_SERVICE_ACCOUNT_KEY";
+  if (!saKeyRaw) return "not_configured: Missing GOOGLE_SERVICE_ACCOUNT_KEY";
 
+  const adminEmail = process.env.ADMIN_EMAIL || "admin@example.com";
   const token = await getGoogleServiceToken(
     ["https://www.googleapis.com/auth/drive.readonly"],
-    "admin@example.com",
+    adminEmail,
   );
 
   const res = await fetch(
@@ -189,7 +196,7 @@ async function checkGoogleDrive(signal: AbortSignal): Promise<string | null> {
 
 async function checkGoogleMapsRoutes(signal: AbortSignal): Promise<string | null> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) return "Missing GOOGLE_MAPS_API_KEY";
+  if (!apiKey) return "not_configured: Missing GOOGLE_MAPS_API_KEY";
 
   const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${HOME_LAT},${HOME_LNG}&destinations=34.05,${HOME_LNG}&units=imperial&key=${apiKey}`;
   const res = await fetch(url, { signal });
@@ -202,7 +209,7 @@ async function checkGoogleMapsRoutes(signal: AbortSignal): Promise<string | null
 
 async function checkGoogleAirQuality(signal: AbortSignal): Promise<string | null> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) return "Missing GOOGLE_MAPS_API_KEY";
+  if (!apiKey) return "not_configured: Missing GOOGLE_MAPS_API_KEY";
 
   const res = await fetch(
     `https://airquality.googleapis.com/v1/currentConditions:lookup?key=${apiKey}`,
@@ -223,7 +230,7 @@ async function checkGoogleAirQuality(signal: AbortSignal): Promise<string | null
 
 async function checkGooglePollen(signal: AbortSignal): Promise<string | null> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) return "Missing GOOGLE_MAPS_API_KEY";
+  if (!apiKey) return "not_configured: Missing GOOGLE_MAPS_API_KEY";
 
   const res = await fetch(
     `https://pollen.googleapis.com/v1/forecast:lookup?key=${apiKey}&location.latitude=${HOME_LAT}&location.longitude=${HOME_LNG}&days=1`,
@@ -239,7 +246,7 @@ async function checkGooglePollen(signal: AbortSignal): Promise<string | null> {
 
 async function checkFirecrawl(signal: AbortSignal): Promise<string | null> {
   const apiKey = process.env.FIRECRAWL_API_KEY;
-  if (!apiKey) return "Missing FIRECRAWL_API_KEY";
+  if (!apiKey) return "not_configured: Missing FIRECRAWL_API_KEY";
 
   const res = await fetch("https://api.firecrawl.dev/v1/search", {
     method: "POST",
@@ -260,7 +267,7 @@ async function checkFirecrawl(signal: AbortSignal): Promise<string | null> {
 
 async function checkElevenLabs(signal: AbortSignal): Promise<string | null> {
   const apiKey = process.env.ELEVENLABS_API_KEY;
-  if (!apiKey) return "Missing ELEVENLABS_API_KEY";
+  if (!apiKey) return "not_configured: Missing ELEVENLABS_API_KEY";
 
   const res = await fetch("https://api.elevenlabs.io/v1/user", {
     headers: { "xi-api-key": apiKey },
@@ -278,7 +285,7 @@ async function checkElevenLabs(signal: AbortSignal): Promise<string | null> {
 
 async function checkOpenRouter(signal: AbortSignal): Promise<string | null> {
   const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) return "Missing OPENROUTER_API_KEY";
+  if (!apiKey) return "not_configured: Missing OPENROUTER_API_KEY";
 
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -304,7 +311,7 @@ async function checkOpenRouter(signal: AbortSignal): Promise<string | null> {
 async function checkHomeAssistant(signal: AbortSignal): Promise<string | null> {
   const haUrl = process.env.HA_URL;
   const haToken = process.env.HA_TOKEN;
-  if (!haUrl || !haToken) return "degraded: Not configured (HA_URL or HA_TOKEN missing)";
+  if (!haUrl || !haToken) return "not_configured: HA_URL or HA_TOKEN missing";
 
   const res = await fetch(`${haUrl}/api/`, {
     headers: { Authorization: `Bearer ${haToken}` },
@@ -317,7 +324,7 @@ async function checkHomeAssistant(signal: AbortSignal): Promise<string | null> {
 
 async function checkNotion(signal: AbortSignal): Promise<string | null> {
   const apiKey = process.env.NOTION_API_KEY;
-  if (!apiKey) return "Missing NOTION_API_KEY";
+  if (!apiKey) return "not_configured: Missing NOTION_API_KEY";
 
   const res = await fetch("https://api.notion.com/v1/users/me", {
     headers: {
@@ -347,7 +354,7 @@ const checkDefs: Array<[string, (signal: AbortSignal) => Promise<string | null>]
   ["janus_chat", checkJanusChat],
   ["janus_whatsapp", checkJanusWhatsApp],
   ["janus_email", checkJanusEmail],
-  ["gmail_tony", checkGmailTony],
+  ["google_email", checkGoogleEmailAdmin],
   ["google_calendar", checkGoogleCalendar],
   ["google_drive", checkGoogleDrive],
   ["google_maps_routes", checkGoogleMapsRoutes],

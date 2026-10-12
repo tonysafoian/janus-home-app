@@ -13,14 +13,18 @@ import { sanitizeDeviceName } from '@/lib/nameSanitizer';
 // Exact entity IDs confirmed from Home Assistant Watts Home integration
 const WATTS_ENTITY_IDS = [
   'climate.floors',
+  'climate.primary_bench_1',
+  'climate.primary_bench_2',
   'climate.tonys_bench',
   'climate.lanas_bench',
 ];
 
 const DISPLAY_NAMES: Record<string, string> = {
-  'climate.floors':      'Floors',
-  'climate.tonys_bench': 'Primary Bench 1',
-  'climate.lanas_bench': 'Primary Bench 2',
+  'climate.floors':          'Floors',
+  'climate.primary_bench_1': 'Primary Bench 1',
+  'climate.primary_bench_2': 'Primary Bench 2',
+  'climate.tonys_bench':     'Primary Bench 1',
+  'climate.lanas_bench':     'Primary Bench 2',
 };
 
 type HvacMode = 'heat' | 'off';
@@ -335,7 +339,14 @@ export function WattsHeatersCard() {
   const { entities, loading, refetch } = useHAEntities('climate');
 
   const wattsEntities = useMemo(
-    () => entities.filter(e => WATTS_ENTITY_IDS.includes(e.entity_id)),
+    () => {
+      const explicit = entities.filter(e => WATTS_ENTITY_IDS.includes(e.entity_id));
+      if (explicit.length > 0) return explicit;
+      return entities.filter(e =>
+        /floor|bench|radiant|bath.*heater/i.test(e.entity_id) ||
+        /floor|bench|radiant/i.test(String(e.attributes?.friendly_name || ''))
+      );
+    },
     [entities],
   );
 

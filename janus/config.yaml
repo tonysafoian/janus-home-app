@@ -1,8 +1,9 @@
 name: "Janus"
-version: "1.0.15"
+version: "1.0.16"
 slug: "janus"
 description: "AI-orchestrated residential estate operating system and command deck."
 url: "https://github.com/tonysafoian/janus-home-app"
+image: "ghcr.io/tonysafoian/janus-addon-{arch}"
 arch:
   - aarch64
   - amd64
@@ -19,13 +20,39 @@ hassio_role: "default"
 host_network: false
 options:
   log_level: "info"
-  enable_demo_login: true
+  enable_demo_login: false
   enable_mock_mode: false
 schema:
   log_level: "list(trace|debug|info|notice|warning|error|fatal)?"
   enable_demo_login: "bool?"
   enable_mock_mode: "bool?"
+  openrouter_api_key: "password?"
   gemini_api_key: "password?"
   google_client_id: "str?"
   google_client_secret: "password?"
+  google_service_account_key: "password?"
+  google_maps_api_key: "password?"
+  perplexity_api_key: "password?"
+  firecrawl_api_key: "password?"
+  elevenlabs_api_key: "password?"
+  fal_api_key: "password?"
+  resend_api_key: "password?"
+  wati_api_key: "password?"
+  wati_access_token: "password?"
+  wati_tenant_id: "str?"
+  wati_api_endpoint: "str?"
+  fortigate_base_url: "str?"
+  fortigate_api_token: "password?"
+  ruckus_base_url: "str?"
+  ruckus_username: "str?"
+  ruckus_password: "password?"
+  iaqualink_api_key: "password?"
+  iaqualink_username: "str?"
+  iaqualink_password: "password?"
+  notion_api_key: "password?"
+  tesla_client_id: "str?"
+  tesla_client_secret: "password?"
+  govee_api_key: "password?"
   database_url: "str?"
+  app_domain: "str?"
+  admin_email: "str?"

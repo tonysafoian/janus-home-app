@@ -120,7 +120,7 @@ try {
   JANUS_SYSTEM_PROMPT = "You are Janus, the AI assistant for Janus.";
 }
 
-const JANUS_NUMBER = "15550000004";
+const JANUS_NUMBER = process.env.WATI_PHONE_NUMBER || "";
 const COOLDOWN_SECONDS = 30;
 
 function sanitizeReplyForWhatsApp(text: string): string {
@@ -1174,7 +1174,7 @@ export async function handleWhatsApp(req: Request, res: Response) {
     }
 
     const normalizedFrom = fromNumber.replace(/[^\d]/g, "");
-    if (normalizedFrom === JANUS_NUMBER) { res.json({ ok: true, skipped: "self" }); return; }
+    if (JANUS_NUMBER && normalizedFrom === JANUS_NUMBER) { res.json({ ok: true, skipped: "self" }); return; }
 
     const cooldownId = isGroup ? `group:${groupId}` : normalizedFrom;
     const channel = isGroup ? "whatsapp-group" : "whatsapp";

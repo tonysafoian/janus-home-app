@@ -16,6 +16,7 @@ import GoAccessGoogleCard from '@/components/settings/GoAccessGoogleCard';
 import PlatformCredentialsCard from '@/components/settings/PlatformCredentialsCard';
 import BrandingSettingsCard from '@/components/settings/BrandingSettingsCard';
 import HouseholdMembersCard from '@/components/settings/HouseholdMembersCard';
+import EntityMappingsCard from '@/components/settings/EntityMappingsCard';
 import { hardReload } from '@/lib/errorReporter';
 
 export default function Settings() {
@@ -216,6 +217,9 @@ export default function Settings() {
 
         {/* Household & Family Members */}
         <HouseholdMembersCard />
+
+        {/* Device & Entity Mappings */}
+        <EntityMappingsCard />
 
         {/* Home Assistant Configuration */}
         <Card>

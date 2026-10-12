@@ -1884,7 +1884,7 @@ router.get('/api/fortigate/wifi-networks', requireAuth, requireAdmin, async (_re
         const ip = extractIpAddress(d);
 
         // Resolve in precedence order: fresh Ruckus observation by MAC
-        // (authoritative) → subnet fallback (192.168.1.0/23 only) →
+        // (authoritative) → subnet fallback (inferred LAN subnet) →
         // Unknown. Both sides of the MAC key must go through
         // normalizeMac() so FortiGate's hyphen-separated MACs match the
         // colon-separated ingest rows.

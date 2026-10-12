@@ -195,7 +195,7 @@ export function WeatherStrip() {
         <div className="w-full border-b border-border/40 bg-background/80 backdrop-blur-xl">
           <div className="container py-2 space-y-1.5">
             {weatherAlerts.map((alert) => {
-              // NWS alerts page filtered to our location (Los Angeles county / 90210)
+              // NWS alerts page filtered to local coordinates
               const alertUrl = `https://forecast.weather.gov/MapClick.php?lat=${LAT}&lon=${LON}`;
               
               return (

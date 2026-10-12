@@ -39,6 +39,7 @@ import storageCompatRoutes from './routes/storage-compat';
 import updatesAutogenRoutes from './routes/updates-autogen';
 import irrigationRoutes from './routes/irrigation';
 import timeRoutes from './routes/time';
+import estateRoutes from './routes/estate';
 import { rejectWorkers } from './middleware/auth.js';
 
 const SUPABASE_COMPAT_MAP: Record<string, string> = {
@@ -138,6 +139,8 @@ export async function registerRoutes(app: Express): Promise<void> {
   app.use('/api/goaccess', goaccessRoutes);
   app.use('/api/electricity', electricityRoutes);
   app.use('/api/water', waterRoutes);
+  app.use('/api/estate', estateRoutes);
+  app.use('/api', estateRoutes);
   app.use('/api/v1/external', externalRoutes);
   app.use(deployRoutes);
 

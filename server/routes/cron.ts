@@ -4,6 +4,7 @@ import { generateCorrelationId } from '../lib/correlation';
 import { runVerkadaWebhookHealthCheck } from '../scheduledTasks';
 import { pingTunnel as pingRuckusTunnel } from '../lib/ruckus';
 import { pingTunnel as pingFortigateTunnel } from '../lib/fortigate';
+import { getEstateTimezone } from '../lib/estateConfig';
 
 // NOTE (2026-05-17): checkAndRemovePgCronJobs() and the 15-min runDatabaseSync
 // cron used to manage a separate Supabase-hosted PROD_DATABASE_URL. That
@@ -77,10 +78,23 @@ export function initCronJobs(): void {
     return;
   }
   console.log(`[cron] Initializing scheduled jobs... (${isProduction ? 'production' : 'dev+ENABLE_CRON'})`);
+  const tz = getEstateTimezone();
 
-  cron.schedule('*/30 * * * * *', () => {
-    triggerRoute('/api/janus/email-poll');
-  });
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+    cron.schedule('*/30 * * * * *', () => {
+      triggerRoute('/api/janus/email-poll');
+    });
+
+    cron.schedule('0 14 * * *', () => {
+      console.log('[cron] Running daily entertainment sync (6:00 AM PST)');
+      triggerRoute('/api/entertainment-sync', { action: 'all' });
+    }, { timezone: 'UTC' });
+
+    cron.schedule('15 14 * * *', () => {
+      console.log('[cron] Running daily media sync (6:15 AM PST)');
+      triggerRoute('/api/media-sync', { action: 'all' });
+    }, { timezone: 'UTC' });
+  }
 
   cron.schedule('*/30 * * * * *', () => {
     triggerRoute('/api/janus/reminder-dispatch');
@@ -90,58 +104,37 @@ export function initCronJobs(): void {
     triggerRoute('/api/janus/health-check');
   });
 
-  cron.schedule('0 14 * * *', () => {
-    console.log('[cron] Running daily entertainment sync (6:00 AM PST)');
-    triggerRoute('/api/entertainment-sync', { action: 'all' });
-  }, { timezone: 'UTC' });
-
-  cron.schedule('15 14 * * *', () => {
-    console.log('[cron] Running daily media sync (6:15 AM PST)');
-    triggerRoute('/api/media-sync', { action: 'all' });
-  }, { timezone: 'UTC' });
-
   cron.schedule('*/15 * * * *', () => {
     triggerRoute('/api/internet-health-monitor');
   }, { timezone: 'UTC' });
 
-  cron.schedule('*/15 * * * *', () => {
-    triggerRoute('/api/fortigate-health-snapshot');
-  }, { timezone: 'UTC' });
+  if (process.env.FORTIGATE_BASE_URL) {
+    cron.schedule('*/15 * * * *', () => {
+      triggerRoute('/api/fortigate-health-snapshot');
+    }, { timezone: 'UTC' });
 
-  // WAN throughput history sampler — inserts one row per minute into
-  // wan_throughput_history for the WAN History sparkline panel.
-  cron.schedule('* * * * *', () => {
-    triggerRoute('/api/fortigate-wan-snapshot');
-  }, { timezone: 'UTC' });
+    cron.schedule('* * * * *', () => {
+      triggerRoute('/api/fortigate-wan-snapshot');
+    }, { timezone: 'UTC' });
 
-  // Wireless observability snapshot (Ruckus controller). Every 5 min
-  // we record AP/SSID/client counts + per-AP states to wireless_snapshots
-  // and emit derived ap_joined/ap_disconnected/ap_unknown/ssid_clients_drop
-  // /telemetry_stale events to wireless_events. Diagnostics surface at
-  // /api/wireless/diagnostics and in the Admin Wireless Diagnostics tab.
-  cron.schedule('*/5 * * * *', () => {
-    triggerRoute('/api/wireless-snapshot');
-  }, { timezone: 'UTC' });
+    cron.schedule('*/2 * * * *', () => {
+      pingFortigateTunnel();
+    });
+  }
 
-  // Keep the Ruckus Cloudflare Tunnel warm. The origin TCP/TLS session
-  // goes idle between the 5-min wireless polls, so the first poll after
-  // idle eats a 10-12s cold start (and often fails, tripping the breaker).
-  // A cheap unauthenticated GET every 2 min keeps the socket hot so real
-  // polls stay sub-second. Best-effort: pingTunnel() swallows its own
-  // errors and writes no audit row, so we don't route it through
-  // triggerRoute() (which would add audit noise on every tick).
-  cron.schedule('*/2 * * * *', () => {
-    pingRuckusTunnel();
-  });
+  if (process.env.RUCKUS_BASE_URL) {
+    cron.schedule('*/5 * * * *', () => {
+      triggerRoute('/api/wireless-snapshot');
+    }, { timezone: 'UTC' });
 
-  // Keep the FortiGate Cloudflare Tunnel warm too — same cold-tunnel
-  // problem as Ruckus above: the origin TCP/TLS session goes idle between
-  // polls, so the first FortiGate poll (interfaces, SD-WAN health, WAN
-  // stats) after a quiet period is slow or fails. Best-effort and silent,
-  // called directly (not via triggerRoute) to avoid audit noise.
-  cron.schedule('*/2 * * * *', () => {
-    pingFortigateTunnel();
-  });
+    cron.schedule('*/2 * * * *', () => {
+      pingRuckusTunnel();
+    });
+
+    cron.schedule('*/15 * * * *', () => {
+      triggerRoute('/api/wireless-snapshot-watchdog');
+    });
+  }
 
   // Seed network_devices from HA device_tracker.* entities (MAC + hostname)
   // so the WiFi Clients inventory is populated even before Ruckus/FortiGate
@@ -181,89 +174,72 @@ export function initCronJobs(): void {
   }, { timezone: 'UTC' });
 
   // Door locks & battery monitor — checks lock states, battery telemetry, and
-  // Crestron connection status every 4 hours. Alerts via WhatsApp if any lock
-  // is jammed, offline, or battery drops below 20%.
+  // connection status every 4 hours.
   cron.schedule('0 */4 * * *', () => {
     triggerRoute('/api/ha-locks-monitor');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
-  // Google Assistant SDK health check — probes the service every 15 min and
-  // sends a WhatsApp alert if the integration is down (deduplicated to 6 hrs).
-  cron.schedule('*/15 * * * *', () => {
-    triggerRoute('/api/google-assistant-sdk-monitor');
-  }, { timezone: 'UTC' });
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+    // Google Assistant SDK health check — probes the service every 15 min
+    cron.schedule('*/15 * * * *', () => {
+      triggerRoute('/api/google-assistant-sdk-monitor');
+    }, { timezone: 'UTC' });
+  }
 
   // Thermostat monitor — polls all climate entities, logs to thermostat_logs,
-  // enforces Gym AC 6 AM–3 PM PT schedule, alerts if temp out of range.
+  // alerts if temp out of range.
   cron.schedule('*/15 * * * *', () => {
     triggerRoute('/api/thermostat-monitor');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
-  // Energy Savings: fountains off at 9:00 PM PT nightly.
+  // Energy Savings: fountains off nightly.
   cron.schedule('0 21 * * *', () => {
     triggerRoute('/api/energy/fountains-off');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
-  // Energy Savings: closet (30 min) & bathroom (15 min / Primary 1 hr)
-  // light timers — checks every 5 minutes using HA last_changed.
+  // Energy Savings: light timers — checks every 5 minutes using HA last_changed.
   cron.schedule('*/5 * * * *', () => {
     triggerRoute('/api/energy/light-timers');
   }, { timezone: 'UTC' });
 
-  // AV Closet temp monitor — reads the Govee AV Closet temperature sensor every
-  // 10 min; emails Tony/Sandra/Jesse over 90°F, WhatsApps Tony over 100°F.
-  cron.schedule('*/10 * * * *', () => {
-    triggerRoute('/api/av-closet-temp-monitor');
-  }, { timezone: 'America/Los_Angeles' });
+  // AV Closet temp monitor — reads temperature sensor if configured
+  if (process.env.GOVEE_API_KEY || process.env.ENABLE_AV_CLOSET_MONITOR === 'true') {
+    cron.schedule('*/10 * * * *', () => {
+      triggerRoute('/api/av-closet-temp-monitor');
+    }, { timezone: tz });
+  }
 
-  // Thermostat freshness monitor — alerts via WhatsApp if no rows have been
-  // written to thermostat_logs in the last 30 minutes during operating hours
-  // (6 AM – midnight PT). Deduplicated to one alert per stale incident.
+  // Thermostat freshness monitor — alerts if no rows have been
+  // written to thermostat_logs in the last 30 minutes during operating hours.
   cron.schedule('*/15 * * * *', () => {
     triggerRoute('/api/thermostat-freshness-monitor');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
-  // Pool temp freshness monitor — alerts via WhatsApp if no successful
-  // pool_temp_check audit entries have been written within the threshold
-  // window during pool hours (6 AM – 11 PM PT). Deduplicated to one alert
-  // per stale incident with a recovery entry when data resumes.
+  // Pool temp freshness monitor — alerts if no successful pool_temp_check
+  // audit entries have been written within the threshold window during pool hours.
   cron.schedule('*/15 * * * *', () => {
     triggerRoute('/api/pool-temp-freshness-monitor');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
-  // Wireless snapshot pipeline watchdog — alerts (actionable audit row) if
-  // the /api/wireless-snapshot heartbeat (wireless_snapshot_ok) hasn't been
-  // seen in >20 min (≈4 missed 5-min cycles). Deduped to one alert per
-  // 60-min window. Surfaces in Admin → Actionable Alerts.
-  cron.schedule('*/15 * * * *', () => {
-    triggerRoute('/api/wireless-snapshot-watchdog');
-  });
-
-  // Speed test pull from Home Assistant — reads sensor.speedtest_download/
-  // upload/ping every 15 min and writes a speed_tests row when the sensor
-  // last_changed is newer than the most recent stored row. Replaces the
-  // brittle HA-side push automation that used to POST to /api/speedtest-
-  // ingest (the table sat empty for weeks when that automation rotted).
+  // Speed test pull from Home Assistant
   cron.schedule('*/15 * * * *', () => {
     triggerRoute('/api/speedtest-pull-from-ha');
   }, { timezone: 'UTC' });
 
-  // Speed test freshness monitor — alerts via WhatsApp if no rows have
-  // been inserted into speed_tests within the threshold window. Runs 24/7
-  // since the HA speedtest automation does not have an operating-hours gate.
+  // Speed test freshness monitor
   cron.schedule('*/15 * * * *', () => {
     triggerRoute('/api/speed-test-freshness-monitor');
   }, { timezone: 'UTC' });
 
   cron.schedule('30 8 * * 1,3,5', () => {
-    console.log('[cron] Running Morning Sauna automation (8:30 AM PT Mon/Wed/Fri)');
+    console.log('[cron] Running Morning Sauna automation (8:30 AM Mon/Wed/Fri)');
     triggerRoute('/api/automation/morning-sauna');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
   cron.schedule('50 8 * * 2,4', () => {
-    console.log('[cron] Running Morning Sauna automation (8:50 AM PT Tue/Thu)');
+    console.log('[cron] Running Morning Sauna automation (8:50 AM Tue/Thu)');
     triggerRoute('/api/automation/morning-sauna');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
   cron.schedule('0 9 * * 1,3,5', () => {
     console.log('[cron] Stopping Morning Sauna after 30 minutes (9:00 AM PT Mon/Wed/Fri)');
@@ -277,164 +253,156 @@ export function initCronJobs(): void {
 
   cron.schedule('*/30 * * * *', () => {
     triggerRoute('/api/pool/temp-monitor');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
   cron.schedule('*/30 * * * *', () => {
     triggerRoute('/api/pool/spa-mode-monitor');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
   // ── Grocery weekly cycle ────────────────────────────────────────────────
-  // Sat 00:00 PT — open the Sat→Fri cart cycle (idempotent)
+  // Sat 00:00 — open the Sat→Fri cart cycle (idempotent)
   cron.schedule('0 0 * * 6', () => {
-    console.log('[cron] Grocery: opening weekly cycle (Sat 00:00 PT)');
+    console.log('[cron] Grocery: opening weekly cycle');
     triggerRoute('/cron/open-cycle');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
-  // Tue 16:00 PT — open-reminder notification (cart is open for next week)
+  // Tue 16:00 — open-reminder notification (cart is open for next week)
   cron.schedule('0 16 * * 2', () => {
-    console.log('[cron] Grocery: sending open-reminder notification (Tue 16:00 PT)');
+    console.log('[cron] Grocery: sending open-reminder notification');
     triggerRoute('/cron/open-reminder');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
-  // Thu 16:00 PT — last-call notification (cart closes tomorrow)
+  // Thu 16:00 — last-call notification (cart closes tomorrow)
   cron.schedule('0 16 * * 4', () => {
-    console.log('[cron] Grocery: sending last-call notification (Thu 16:00 PT)');
+    console.log('[cron] Grocery: sending last-call notification');
     triggerRoute('/cron/last-call');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
-  // Fri 16:00 PT — lock cart and submit to Amazon Grocery
+  // Fri 16:00 — lock cart and submit to Amazon Grocery
   cron.schedule('0 16 * * 5', () => {
-    console.log('[cron] Grocery: locking and submitting weekly order (Fri 16:00 PT)');
+    console.log('[cron] Grocery: locking and submitting weekly order');
     triggerRoute('/cron/lock-and-submit');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
-  // Mon 06:00 PT — delivery-day notification to Rina
+  // Mon 06:00 — delivery-day notification
   cron.schedule('0 6 * * 1', () => {
-    console.log('[cron] Grocery: Monday delivery follow-up (Mon 06:00 PT)');
+    console.log('[cron] Grocery: Monday delivery follow-up');
     triggerRoute('/cron/rina-monday');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
   cron.schedule('0 7 * * *', () => {
-    console.log('[cron] Running Morning Weather Email (7:00 AM PT daily)');
+    console.log('[cron] Running Morning Weather Email (7:00 AM daily)');
     triggerRoute('/api/reports/morning-weather');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
   cron.schedule('0 16 * * *', () => {
-    console.log('[cron] Running Daily EOD Summary (4:00 PM PT daily)');
+    console.log('[cron] Running Daily EOD Summary (4:00 PM daily)');
     triggerRoute('/api/reports/eod-summary');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
   cron.schedule('0 16 * * 5', () => {
-    console.log('[cron] Running Weekly Planning Email (Fridays 4:00 PM PT)');
+    console.log('[cron] Running Weekly Planning Email (Fridays 4:00 PM)');
     triggerRoute('/api/reports/weekly-planning');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
   cron.schedule('0 8 * * *', () => {
-    console.log('[cron] Running Executive Status Email (8:00 AM PT daily)');
+    console.log('[cron] Running Executive Status Email (8:00 AM daily)');
     triggerRoute('/api/reports/executive-status');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
-  cron.schedule('*/30 * * * *', () => {
-    triggerRoute('/api/calendar/conflicts');
-  }, { timezone: 'America/Los_Angeles' });
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+    cron.schedule('*/30 * * * *', () => {
+      triggerRoute('/api/calendar/conflicts');
+    }, { timezone: tz });
+  }
 
   cron.schedule('50 6 * * 1-5', () => {
-    console.log('[cron] Running School Morning Broadcast (6:50 AM PT weekdays)');
+    console.log('[cron] Running School Morning Broadcast (6:50 AM weekdays)');
     triggerRoute('/api/broadcast/school-morning');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
   cron.schedule('30 7 * * 1-5', () => {
-    console.log('[cron] Running School Morning Broadcast (7:30 AM PT weekdays)');
+    console.log('[cron] Running School Morning Broadcast (7:30 AM weekdays)');
     triggerRoute('/api/broadcast/school-morning');
-  }, { timezone: 'America/Los_Angeles' });
-
-  // CT #129: meeting-prep cron retired permanently (was disabled 2026-05-11).
+  }, { timezone: tz });
 
   cron.schedule('0 */2 * * *', () => {
     triggerRoute('/api/followup/accountability');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
-  cron.schedule('*/5 * * * *', () => {
-    console.log('[cron] Running Calendar Nav Tesla (every 5 min)');
-    triggerRoute('/api/calendar/nav-tesla');
-  }, { timezone: 'America/Los_Angeles' });
+  if (process.env.TESLA_CLIENT_ID || process.env.ENABLE_TESLA === 'true') {
+    if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+      cron.schedule('*/5 * * * *', () => {
+        triggerRoute('/api/calendar/nav-tesla');
+      }, { timezone: tz });
+    }
 
-  cron.schedule('*/30 * * * *', () => {
-    triggerRoute('/api/tesla/battery-monitor');
-  }, { timezone: 'UTC' });
+    cron.schedule('*/30 * * * *', () => {
+      triggerRoute('/api/tesla/battery-monitor');
+    }, { timezone: 'UTC' });
+  }
 
   cron.schedule('*/30 * * * *', () => {
     triggerRoute('/api/pool/rain-guard');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
-  cron.schedule('*/15 * * * *', () => {
-    runVerkadaWebhookHealthCheck().catch(err => console.error('[cron] Verkada webhook health check failed:', err));
-  }, { timezone: 'UTC' });
+  if (process.env.VERKADA_API_KEY) {
+    cron.schedule('*/15 * * * *', () => {
+      runVerkadaWebhookHealthCheck().catch(err => console.error('[cron] Verkada webhook health check failed:', err));
+    }, { timezone: 'UTC' });
 
-  // Verkada POI backfill — every 4 h, pulls the last 4-hour window of Verkada
-  // POI alert history and inserts any sightings the live webhook missed
-  // (restarts, downtime, dropped deliveries). Deduped by existing dedup_key.
-  cron.schedule('0 */4 * * *', () => {
-    triggerRoute('/api/verkada/poi-backfill');
-  }, { timezone: 'UTC' });
+    // Verkada POI backfill
+    cron.schedule('0 */4 * * *', () => {
+      triggerRoute('/api/verkada/poi-backfill');
+    }, { timezone: 'UTC' });
+  }
 
   cron.schedule('*/5 * * * *', () => {
     triggerRoute('/api/goaccess/poll');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
-  // Notion activity poller — safety net for when the Notion webhook
-  // subscription is inactive. Every 10 min it queries each active
-  // notion_sync_config database for pages edited since the last sync and
-  // records synthetic notion_webhook_events so the Activity Level chart keeps
-  // filling in. Deduplicated against notion_cached_pages; when the live
-  // webhook is healthy the poller finds nothing new.
-  cron.schedule('*/10 * * * *', () => {
-    triggerRoute('/api/notion/poll');
-  }, { timezone: 'UTC' });
+  if (process.env.NOTION_API_KEY) {
+    cron.schedule('*/10 * * * *', () => {
+      triggerRoute('/api/notion/poll');
+    }, { timezone: 'UTC' });
 
-  // Notion webhook health monitor — uses the poller as ground truth: if the
-  // poller is capturing activity but no live webhook events are arriving, the
-  // webhook subscription has silently died (it auto-disables after repeated
-  // slow deliveries — exactly what left the Activity chart empty for ~2 weeks).
-  // Also verifies the poller cron itself is still firing. Alerts via WhatsApp +
-  // audit log with incident-based dedup. Runs 24/7.
-  cron.schedule('*/15 * * * *', () => {
-    triggerRoute('/api/notion-webhook-health-monitor');
-  }, { timezone: 'UTC' });
+    cron.schedule('*/15 * * * *', () => {
+      triggerRoute('/api/notion-webhook-health-monitor');
+    }, { timezone: 'UTC' });
+  }
 
   // Electricity cost intelligence — hourly snapshot of energy stats from HA
   // for trend analysis without hammering HA on every API request.
   cron.schedule('5 * * * *', () => {
     console.log('[cron] Running hourly electricity snapshot sync');
     triggerRoute('/api/electricity/live-cost');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
-  // Per-circuit daily energy snapshot — 05:10 AM PT. Records the PRIOR
-  // LA-local day's kWh for all 89 Emporia circuits into circuit_energy_daily
+  // Per-circuit daily energy snapshot. Records the PRIOR
+  // day's kWh into circuit_energy_daily
   // so Janus owns the full history (monthly reports work forever, even past
   // HA's recorder purge window). Idempotent: re-runs upsert the same day.
   cron.schedule('10 5 * * *', () => {
     console.log('[cron] Running daily per-circuit energy snapshot (prior day)');
     triggerRoute('/api/electricity/snapshot-daily');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
-  // Daily water usage snapshot — 05:15 AM PT. Records the PRIOR LA-local day's
+  // Daily water usage snapshot. Records the PRIOR day's
   // interior gallons (FloLogic adapter) + per-zone irrigation gallons (Rain Bird
-  // runtime × GPM from HA history) into water_usage_daily → tiered LADWP $.
+  // runtime × GPM from HA history) into water_usage_daily.
   // Idempotent: re-runs upsert the same day.
   cron.schedule('15 5 * * *', () => {
     console.log('[cron] Running daily water usage snapshot (prior day)');
     triggerRoute('/api/water/snapshot-daily');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
-  // Proactive token-expiration warnings — daily 9:00 AM PT. Scans
+  // Proactive token-expiration warnings — daily 9:00 AM. Scans
   // tesla_tokens + google_tokens for rows expiring within 24h and
-  // WhatsApps the admin alert phone so Tony re-auths before the 401
-  // storm. Dedup is keyed (user_id, kind) so retries don't re-message.
+  // alerts the admin before the 401 storm.
   cron.schedule('0 9 * * *', () => {
-    console.log('[cron] Running token-expiration warnings sweep (9:00 AM PT)');
+    console.log('[cron] Running token-expiration warnings sweep (9:00 AM)');
     triggerRoute('/api/janus/token-expiration-warnings');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
   // HA Workflow Trigger Reconciler — checks every 30 min that Janus-managed
   // HA automations still exist and re-deploys any that went missing (e.g. after
@@ -445,48 +413,39 @@ export function initCronJobs(): void {
     triggerRoute('/api/ha-workflow-reconciler');
   }, { timezone: 'UTC' });
 
-
-  // Dependency security audit — daily 6:30 AM PT. Runs `npm audit --json
+  // Dependency security audit — daily 6:30 AM. Runs `npm audit --json
   // --omit=dev`, logs a vulnerability-count snapshot to the audit log, and
-  // WhatsApps the admin alert phone when NEW high/critical advisories appear
-  // (dedup keyed on the high/critical package set, 24h window). Surfaces new
-  // advisories before they pile up into a silent backlog.
+  // alerts the admin when NEW high/critical advisories appear.
   cron.schedule('30 6 * * *', () => {
-    console.log('[cron] Running dependency security audit (6:30 AM PT daily)');
+    console.log('[cron] Running dependency security audit (6:30 AM daily)');
     triggerRoute('/api/security-audit-monitor');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
-  // What's New auto-generator — daily 5:30 PM PT. Reads the GitHub commits that
-  // landed since the last run, has AI summarize them into short family-friendly
-  // changelog entries, and auto-publishes them to the /updates page. A commit
-  // SHA cursor in system_configs prevents re-summarizing the same work twice.
+  // What's New auto-generator — daily 5:30 PM.
   cron.schedule('30 17 * * *', () => {
-    console.log("[cron] Running What's New auto-generator (5:30 PM PT daily)");
+    console.log("[cron] Running What's New auto-generator (5:30 PM daily)");
     triggerRoute('/api/updates-autogen');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
   // ── Janus Time Tracking crons ───────────────────────────────────────────
 
-  // Worker daily digest — 6 PM PT Mon–Sat. Emails workers whose entries had
-  // status changes (approved/rejected) that day so they know what happened.
+  // Worker daily digest — 6 PM Mon–Sat.
   cron.schedule('0 18 * * 1-6', () => {
-    console.log('[cron] Running time worker daily digest (6 PM PT)');
+    console.log('[cron] Running time worker daily digest (6 PM)');
     triggerRoute('/api/time/cron/worker-digest');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
-  // Admin pending digest — 7 AM PT Mon–Sat. Emails the admin(s) a summary of
-  // all workers with pending entries awaiting approval.
+  // Admin pending digest — 7 AM Mon–Sat.
   cron.schedule('0 7 * * 1-6', () => {
-    console.log('[cron] Running time admin pending digest (7 AM PT)');
+    console.log('[cron] Running time admin pending digest (7 AM)');
     triggerRoute('/api/time/cron/admin-pending-digest');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
-  // Weekly close-out — 7 AM PT Monday. Emails the admin a summary of last
-  // week's hours, approved/pending totals, and who is ready to be paid.
+  // Weekly close-out — 7 AM Monday.
   cron.schedule('0 7 * * 1', () => {
-    console.log('[cron] Running time weekly close-out (Mon 7 AM PT)');
+    console.log('[cron] Running time weekly close-out (Mon 7 AM)');
     triggerRoute('/api/time/cron/weekly-closeout');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
   console.log('[cron] All scheduled jobs registered');
 }

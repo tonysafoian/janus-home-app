@@ -124,7 +124,7 @@ export function WiFiNetworksTab() {
           <h2 className="text-lg font-semibold">WiFi Networks</h2>
           <p className="text-sm text-muted-foreground">
             Devices grouped by their observed Wi-Fi SSID from the Ruckus controller,
-            falling back to the 192.168.1.0/23 subnet when Ruckus has no observation yet.
+            falling back to local subnet inference when Ruckus has no observation yet.
           </p>
         </div>
         <div className="flex items-center gap-2">

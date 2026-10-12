@@ -46,6 +46,7 @@ import {
   sanitizeGoogleFileUrls,
   enqueueFailedJob,
   sendAutomationFailureAlert,
+  getAlertPhoneNumber,
 } from "../utils/janus-tools.js";
 
 import {
@@ -870,7 +871,10 @@ export async function handleEmailPoll(req: Request, res: Response) {
 
   try {
     const saKeyRaw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
-    if (!saKeyRaw) throw new Error("GOOGLE_SERVICE_ACCOUNT_KEY is not configured");
+    if (!saKeyRaw) {
+      res.json({ ok: true, skipped: true, reason: "GOOGLE_SERVICE_ACCOUNT_KEY is not configured" });
+      return;
+    }
     const saKey: ServiceAccountKey = JSON.parse(saKeyRaw);
 
     let accessToken: string;
@@ -884,12 +888,13 @@ export async function handleEmailPoll(req: Request, res: Response) {
         try {
           const watiEndpoint = process.env.WATI_API_ENDPOINT;
           const watiToken = process.env.WATI_ACCESS_TOKEN;
-          if (watiEndpoint && watiToken) {
+          const alertPhone = await getAlertPhoneNumber();
+          if (watiEndpoint && watiToken && alertPhone) {
             const serverRoot = watiEndpoint.replace(/\/$/, "").replace(/\/api\/ext\/v3\/?$/, "").replace(/\/api\/ext\/?$/, "");
             await fetch(`${serverRoot}/api/ext/v3/conversations/messages/text`, {
               method: "POST",
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${watiToken.replace(/^Bearer\s+/i, "")}` },
-              body: JSON.stringify({ target: "15550000003", text: "🚨 *Janus Email Alert*: Gmail auth failed for assistant@example.com (401). Domain-wide delegation may have been revoked." }),
+              body: JSON.stringify({ target: alertPhone, text: "🚨 *Janus Email Alert*: Gmail auth failed (401). Domain-wide delegation may have been revoked." }),
             });
           }
         } catch {}

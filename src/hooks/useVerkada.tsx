@@ -27,11 +27,33 @@ export function useVerkadaCameras() {
   return useQuery({
     queryKey: ['verkada-cameras'],
     queryFn: async () => {
-      const result = await listCameras();
-      if (!result.success) throw new Error(result.error);
-      return result.cameras as VerkadaCamera[];
+      let verkadaCams: VerkadaCamera[] = [];
+      try {
+        const result = await listCameras();
+        if (result.success && Array.isArray(result.cameras)) {
+          verkadaCams = result.cameras as VerkadaCamera[];
+        }
+      } catch {
+        // Verkada unconfigured or errored — gracefully proceed to HA
+      }
+
+      let haCams: VerkadaCamera[] = [];
+      try {
+        const res = await apiClient.get<{ success: boolean; cameras: VerkadaCamera[] }>('/api/ha/cameras');
+        if (res?.cameras && Array.isArray(res.cameras)) {
+          haCams = res.cameras;
+        }
+      } catch {
+        // HA cameras not available
+      }
+
+      if (verkadaCams.length > 0 && haCams.length > 0) {
+        const ids = new Set(verkadaCams.map(c => c.camera_id));
+        return [...verkadaCams, ...haCams.filter(c => !ids.has(c.camera_id))];
+      }
+      return verkadaCams.length > 0 ? verkadaCams : haCams;
     },
-    staleTime: 5 * 60_000, // 5 min — camera list rarely changes
+    staleTime: 60_000,
   });
 }
 
@@ -40,12 +62,15 @@ export function useVerkadaThumbnail(cameraId: string | null) {
     queryKey: ['verkada-thumbnail', cameraId],
     queryFn: async () => {
       if (!cameraId) return null;
+      if (cameraId.startsWith('camera.')) {
+        return `/api/ha/camera_proxy/${encodeURIComponent(cameraId)}?t=${Date.now()}`;
+      }
       const result = await getCameraThumbnail(cameraId);
       if (!result.success) throw new Error(result.error);
       return result.thumbnail as string;
     },
     enabled: !!cameraId,
-    staleTime: 2 * 60 * 1000, // refresh every 2 min — thumbnails don't change frequently
+    staleTime: 2 * 60 * 1000,
     refetchInterval: 2 * 60 * 1000,
   });
 }
@@ -55,6 +80,9 @@ export function useVerkadaStreamLink(cameraId: string | null) {
     queryKey: ['verkada-stream-link', cameraId],
     queryFn: async () => {
       if (!cameraId) return null;
+      if (cameraId.startsWith('camera.')) {
+        return null;
+      }
       const result = await getCameraStreamLink(cameraId);
       if (!result.success) throw new Error(result.error);
       return result.url as string;
@@ -70,13 +98,16 @@ export function useVerkadaLivestreamThumbnail(cameraId: string | null, enabled: 
     queryKey: ['verkada-livestream-thumbnail', cameraId],
     queryFn: async () => {
       if (!cameraId) return null;
+      if (cameraId.startsWith('camera.')) {
+        return `/api/ha/camera_proxy/${encodeURIComponent(cameraId)}?t=${Date.now()}`;
+      }
       const result = await getCameraLivestreamThumbnail(cameraId);
       if (!result.success) throw new Error(result.error);
       return result.thumbnail as string;
     },
     enabled: !!cameraId && enabled,
-    staleTime: 3000,
-    refetchInterval: enabled ? 4000 : false,
+    staleTime: 2000,
+    refetchInterval: enabled ? 3000 : false,
   });
 }
 

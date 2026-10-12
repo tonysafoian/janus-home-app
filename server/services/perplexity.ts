@@ -204,7 +204,7 @@ export async function executePerplexitySearch(
 }
 
 export async function fetchSituationalAwareness(
-  location = "Local Area, CA",
+  location = process.env.HOME_LOCATION || "Local Area",
 ): Promise<string> {
   try {
     const apiKey = process.env.PERPLEXITY_API_KEY;
@@ -212,14 +212,14 @@ export async function fetchSituationalAwareness(
 
     const now = new Date();
     const dateStr = now.toLocaleDateString("en-US", {
-      timeZone: "America/Los_Angeles",
+      timeZone: process.env.TZ || process.env.TIME_ZONE || "UTC",
       weekday: "long",
       month: "long",
       day: "numeric",
       year: "numeric",
     });
 
-    const query = `What are the most important things happening right now in ${location} and Los Angeles area today (${dateStr})? Include: breaking news, weather advisories, traffic disruptions, notable local events, and any safety alerts. Be extremely concise — 3 to 5 bullet points max, one line each.`;
+    const query = `What are the most important things happening right now in ${location} today (${dateStr})? Include: breaking news, weather advisories, traffic disruptions, notable local events, and any safety alerts. Be extremely concise — 3 to 5 bullet points max, one line each.`;
 
     const result = await perplexitySearch(query);
 
@@ -259,7 +259,7 @@ export async function fetchTravelIntelligence(
 export async function fetchTroubleshootingAdvice(
   system: string,
   issue: string,
-  location = "Local Area, CA",
+  location = process.env.HOME_LOCATION || "Local Area",
 ): Promise<string> {
   try {
     const apiKey = process.env.PERPLEXITY_API_KEY;

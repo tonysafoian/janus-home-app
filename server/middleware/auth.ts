@@ -57,6 +57,17 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
     return;
   }
 
+  // Home Assistant Ingress authentication
+  const haUserId = (req.headers['x-remote-user-id'] as string) || (req.headers['x-ingress-user-id'] as string);
+  if (haUserId) {
+    const haAdminHeader = req.headers['x-remote-user-is-admin'];
+    const isAdmin = String(haAdminHeader).toLowerCase() === 'true' || haAdminHeader === '1';
+    req.userId = `ha:${haUserId}`;
+    req.userRole = isAdmin ? 'admin' : 'member';
+    next();
+    return;
+  }
+
   const authHeader = req.headers.authorization;
   const cookieToken = (req as { cookies?: Record<string, string> }).cookies?.auth_token;
 
@@ -170,6 +181,16 @@ export function requireAuthStrictAdmin(
 }
 
 export function optionalAuth(req: AuthenticatedRequest, _res: Response, next: NextFunction): void {
+  const haUserId = (req.headers['x-remote-user-id'] as string) || (req.headers['x-ingress-user-id'] as string);
+  if (haUserId) {
+    const haAdminHeader = req.headers['x-remote-user-is-admin'];
+    const isAdmin = String(haAdminHeader).toLowerCase() === 'true' || haAdminHeader === '1';
+    req.userId = `ha:${haUserId}`;
+    req.userRole = isAdmin ? 'admin' : 'member';
+    next();
+    return;
+  }
+
   const authHeader = req.headers.authorization;
   const cookieToken = (req as { cookies?: Record<string, string> }).cookies?.auth_token;
   const token = cookieToken || (authHeader?.startsWith('Bearer ') ? authHeader.replace('Bearer ', '') : null);

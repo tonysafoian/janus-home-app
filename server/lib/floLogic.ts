@@ -3,9 +3,7 @@
  * ─────────────────────────────────────────────────────────
  * FloLogic is the property's main-line flow/shutoff device. It measures REAL
  * interior gallons (everything downstream of the meter EXCEPT irrigation, which
- * Rain Bird runs on its own line). FloLogic is NOT yet integrated into Home
- * Assistant — the device sits on the LAN at 192.168.1.190 with no HA entity and
- * no wired-up cloud credentials.
+ * Rain Bird runs on its own line).
  *
  * This module defines the adapter INTERFACE the rest of the water framework
  * codes against. Today every reader returns null (data unavailable) so callers
@@ -16,14 +14,14 @@
  * TODO(flologic-integration): choose and implement ONE source —
  *   1. Cloud API: FloLogic FloProtect cloud (OAuth / API key) → daily totals
  *      and instantaneous flow. Preferred if the account exposes a usage API.
- *   2. Local: poll the device at http://192.168.1.190 on the LAN (or via an HA
+ *   2. Local: poll the device on the LAN (or via an HA
  *      REST/MQTT integration once added) → read meter totalizer + flow.
  *   Whichever is chosen, implement getInteriorUsage()/getLiveInteriorFlow()
  *   and getCurrentTotalizerGallons() to return real numbers; keep the null
  *   fallbacks so the framework degrades cleanly when the source is down.
  */
 
-export const FLOLOGIC_DEVICE_HOST = '192.168.1.190';
+export const FLOLOGIC_DEVICE_HOST = process.env.FLOLOGIC_DEVICE_HOST || '';
 
 /** Interior gallons consumed over a single LA-local calendar day. */
 export interface InteriorDailyUsage {

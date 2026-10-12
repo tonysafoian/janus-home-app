@@ -1,7 +1,7 @@
 /**
  * LADWP R-1A Residential Electric Rate Engine
  * ─────────────────────────────────────────────
- * Calibrated against 4 actual bills for account 123 456 7890
+ * Calibrated against residential tiered bills
  * Zone 1 · Bi-monthly billing · PAC Tier 3
  *
  * Encodes seasonal tiered rates, Power Access Charge,

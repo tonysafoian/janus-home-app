@@ -111,7 +111,7 @@ function invoke(method: string, path: string): Promise<MockResp> {
 const DEVICES = [
   { mac: "aa:bb:cc:11:22:33", vendor: "HP", device_type: "printer", hostname: "HP-LaserJet", ipv4_address: "10.0.50.5" },
   { mac: "a2:bb:cc:dd:ee:01", os: "iOS", device_type: "phone", ipv4_address: "192.168.1.40" },
-  { mac: "00:1c:b3:44:55:66", vendor: "Apple", os: "macOS", hostname: "Tony-MBP", ipv4_address: "192.168.1.41" },
+  { mac: "00:1c:b3:44:55:66", vendor: "Apple", os: "macOS", hostname: "Admin-Laptop", ipv4_address: "192.168.1.41" },
 ];
 
 beforeEach(() => {

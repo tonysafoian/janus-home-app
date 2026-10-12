@@ -436,7 +436,7 @@ export function AdminApiContent() {
       label: 'Invoke a generic tool',
       code: `curl -X POST -H "x-api-key: $EXTERNAL_API_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"query":"weather in Local Area"}' \\
+  -d '{"query":"weather today"}' \\
   ${baseUrl}/tools/perplexity_search/invoke`,
     },
   ];

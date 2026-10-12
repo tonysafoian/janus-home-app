@@ -276,7 +276,7 @@ function MovieDetailSheet({ item, open, onClose }: { item: MediaItem; open: bool
             <div className="flex items-center gap-2 mb-3">
               <Ticket className="h-4 w-4 text-primary" />
               <h3 className="text-sm font-semibold">Showtimes Near Us</h3>
-              <span className="text-xs text-muted-foreground">(Local Area / Brentwood)</span>
+              <span className="text-xs text-muted-foreground">(Nearby Theaters)</span>
             </div>
 
             {isLoading ? (

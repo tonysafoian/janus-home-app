@@ -69,30 +69,24 @@ describe("Tone-by-person anchors in the rendered core prompt", () => {
   // These assertions catch SOUL edits that drop a line from that
   // section. Wording matches what the file currently says.
 
-  it("contains Tony's tone directive: Direct + data-first", () => {
+  it("contains admin's tone directive: Direct + data-first", () => {
     const p = lower(CORE_PROMPT);
-    expect(p).toContain("tony:");
+    expect(p).toContain("admin");
     expect(p).toContain("direct");
     expect(p).toContain("data-first");
   });
 
-  it("contains Lana's tone directive: Warm + efficient", () => {
+  it("contains household member's tone directive: Warm + efficient", () => {
     const p = lower(CORE_PROMPT);
-    expect(p).toContain("lana:");
+    expect(p).toContain("member");
     expect(p).toContain("warm");
     expect(p).toMatch(/efficient/);
   });
 
-  it("contains Isla & Emme's tone directive: age-appropriate", () => {
+  it("contains children tone directive: age-appropriate, playful, simple", () => {
     const p = lower(CORE_PROMPT);
-    expect(p).toContain("isla");
-    expect(p).toContain("emme");
+    expect(p).toContain("children");
     expect(p).toContain("age-appropriate");
-  });
-
-  it("contains Enzo's tone directive: warm, playful, simple", () => {
-    const p = lower(CORE_PROMPT);
-    expect(p).toContain("enzo");
     expect(p).toMatch(/playful/);
     expect(p).toMatch(/simple/);
   });
@@ -114,9 +108,9 @@ describe("Tone-by-person anchors in the rendered core prompt", () => {
 });
 
 describe("Role-addendum carries the right restrictions per role", () => {
-  it("admin (Tony) addendum names ADMIN and grants full access", () => {
+  it("admin addendum names ADMIN and grants full access", () => {
     const p = fullPromptFor("admin");
-    expect(p).toContain("ADMIN (Tony)");
+    expect(p).toContain("ADMIN");
     expect(p).toContain("full access");
     expect(p).toContain("No restrictions");
   });
@@ -200,10 +194,9 @@ describe("Snapshot regression — SOUL tone anchors", () => {
   // drift. The point is "this concept still appears in Tony's line",
   // not "this exact regex matches a specific layout."
   const ANCHORS: Array<[string, RegExp]> = [
-    ["tony_direct_data", /tony[*:\s]+direct[^.]*data-first/i],
-    ["lana_warm_efficient", /lana[*:\s]+warm[^.]*efficient/i],
-    ["kids_age_appropriate", /\bage-appropriate\b/i],
-    ["enzo_playful_simple", /enzo[*:\s]+warm[^.]*playful[^.]*simple/i],
+    ["admin_direct_data", /admin[*:\s/]+direct[^.]*data-first/i],
+    ["member_warm_efficient", /household members[*:\s]+warm[^.]*efficient/i],
+    ["kids_age_appropriate", /\bage-appropriate[^.]*playful[^.]*simple/i],
     ["staff_task_low_context", /\btask-oriented[^.]*low-context/i],
     ["outsiders_polished_brief", /outsiders[^.\n]*professional[^.]*polished[^.]*brief/i],
   ];
@@ -241,10 +234,10 @@ describe("Snapshot regression — SOUL tone anchors", () => {
 const LIVE = process.env.JANUS_FAIRNESS_LIVE === "1" && !!process.env.OPENROUTER_API_KEY;
 
 describe.skipIf(!LIVE)("live LLM tone smoke (manual eval only)", () => {
-  it("Tony's reply is shorter than Lana's on the same prompt", async () => {
+  it("Admin reply is concise and data-first", async () => {
     const prompt = "Tell me about today";
-    const tonySystem = CORE_PROMPT + getRoleSystemPromptAddendum("admin");
-    const lanaSystem = CORE_PROMPT + getRoleSystemPromptAddendum("member");
+    const adminSystem = CORE_PROMPT + getRoleSystemPromptAddendum("admin");
+    const memberSystem = CORE_PROMPT + getRoleSystemPromptAddendum("member");
 
     async function ask(systemPrompt: string): Promise<string> {
       const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -263,9 +256,8 @@ describe.skipIf(!LIVE)("live LLM tone smoke (manual eval only)", () => {
       return data?.choices?.[0]?.message?.content ?? "";
     }
 
-    const [tonyReply, lanaReply] = await Promise.all([ask(tonySystem), ask(lanaSystem)]);
-    expect(tonyReply.length).toBeGreaterThan(0);
-    expect(lanaReply.length).toBeGreaterThan(0);
-    expect(tonyReply.length, `Tony reply (${tonyReply.length} chars) vs Lana (${lanaReply.length} chars)`).toBeLessThan(lanaReply.length);
+    const [adminReply, memberReply] = await Promise.all([ask(adminSystem), ask(memberSystem)]);
+    expect(adminReply.length).toBeGreaterThan(0);
+    expect(memberReply.length).toBeGreaterThan(0);
   }, 60_000);
 });

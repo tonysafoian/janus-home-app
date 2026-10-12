@@ -3634,7 +3634,7 @@ async function getAlertPhoneNumber() {
     }
   } catch (_) {
   }
-  _alertPhone = "15550000002";
+  _alertPhone = "           ";
   return _alertPhone;
 }
 async function sendWhatsApp(message) {
@@ -4181,7 +4181,7 @@ async function executePerplexitySearch(query3, deep = false) {
     return `Perplexity search error: ${errMsg}`;
   }
 }
-async function fetchSituationalAwareness(location = "Local Area, CA") {
+async function fetchSituationalAwareness(location = "Local Area   , CA") {
   try {
     const apiKey = process.env.PERPLEXITY_API_KEY;
     if (!apiKey) return "";
@@ -4216,7 +4216,7 @@ async function fetchTravelIntelligence(destination, departureDate, returnDate) {
     return "";
   }
 }
-async function fetchTroubleshootingAdvice(system, issue, location = "Local Area, CA") {
+async function fetchTroubleshootingAdvice(system, issue, location = "Local Area   , CA") {
   try {
     const apiKey = process.env.PERPLEXITY_API_KEY;
     if (!apiKey) return "";
@@ -5731,7 +5731,7 @@ var init_janus_tools = __esm({
       "metadata",
       "actionable"
     ]);
-    FALLBACK_ALERT_PHONE = "15550000001";
+    FALLBACK_ALERT_PHONE = "           ";
     _cachedAlertPhone = null;
     _alertPhoneFetchedAt = 0;
     ALERT_PHONE_CACHE_TTL = 10 * 6e4;
@@ -10207,7 +10207,7 @@ async function executeSearchPlaces(query3, near, type) {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) return "Google Maps API key not configured.";
   try {
-    const searchQuery = `${query3} near ${near || "Local Area, CA"}`;
+    const searchQuery = `${query3} near ${near || "Local Area   , CA"}`;
     const params = new URLSearchParams({ query: searchQuery, key: apiKey });
     if (type) params.set("type", type);
     const res = await fetch(`https://maps.googleapis.com/maps/api/place/textsearch/json?${params}`);
@@ -12991,7 +12991,7 @@ var ALL_TOOLS = [
   { type: "function", function: { name: "create_notion_page", description: 'Create a new page in a Notion database. Pass simple key-value properties \u2014 the system auto-fetches the database schema and converts values to the correct Notion format. Use get_notion_database first if you need to discover property names. Example: {"Name": "My Project", "Status": "In Progress", "Due Date": "2025-04-01"}.', parameters: { type: "object", properties: { database_id: { type: "string" }, properties: { type: "object" } }, required: ["database_id", "properties"], additionalProperties: false } } },
   { type: "function", function: { name: "get_notion_database", description: "Get a Notion database schema.", parameters: { type: "object", properties: { database_id: { type: "string" } }, required: ["database_id"], additionalProperties: false } } },
   { type: "function", function: { name: "perplexity_search", description: "Search the web using Perplexity AI for synthesized, cited answers to knowledge questions. PREFERRED over web_search for: factual questions (what is, how does, why did, current status of), research topics, explanations, comparisons, and any question that benefits from a synthesized answer with citations. Use web_search instead ONLY for finding specific websites/URLs or when you need raw links to share.", parameters: { type: "object", properties: { query: { type: "string", description: "The search query \u2014 ask a clear, specific question for best results" }, deep: { type: "boolean", description: "Use deep search (sonar-pro) for complex research questions. Default false." } }, required: ["query"], additionalProperties: false } } },
-  { type: "function", function: { name: "home_troubleshoot", description: "Get troubleshooting advice for home system issues (HVAC, plumbing, electrical, pool, security, appliances, etc.). Provides likely causes, immediate steps, when to call a pro, and local service provider recommendations near Local Area.", parameters: { type: "object", properties: { system: { type: "string", description: "The home system (e.g. 'HVAC', 'pool heater', 'electrical', 'plumbing', 'garage door')" }, issue: { type: "string", description: "Description of the issue or symptoms" } }, required: ["system", "issue"], additionalProperties: false } } },
+  { type: "function", function: { name: "home_troubleshoot", description: "Get troubleshooting advice for home system issues (HVAC, plumbing, electrical, pool, security, appliances, etc.). Provides likely causes, immediate steps, when to call a pro, and local service provider recommendations near Local Area   .", parameters: { type: "object", properties: { system: { type: "string", description: "The home system (e.g. 'HVAC', 'pool heater', 'electrical', 'plumbing', 'garage door')" }, issue: { type: "string", description: "Description of the issue or symptoms" } }, required: ["system", "issue"], additionalProperties: false } } },
   { type: "function", function: { name: "web_search", description: "Search the web for links, products, URLs, and raw search results via Firecrawl. Use for finding specific websites, product links, or when you need raw URLs to share. For factual/knowledge questions, prefer perplexity_search instead.", parameters: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" } }, required: ["query"], additionalProperties: false } } },
   { type: "function", function: { name: "scrape_website", description: "Scrape a webpage and extract content as markdown.", parameters: { type: "object", properties: { url: { type: "string" } }, required: ["url"], additionalProperties: false } } },
   { type: "function", function: { name: "browse_website", description: "Open a real browser to interact with a website.", parameters: { type: "object", properties: { url: { type: "string" }, instruction: { type: "string" }, steps: { type: "array", items: { type: "object", properties: { action: { type: "string", enum: ["navigate", "act", "extract"] }, value: { type: "string" } }, required: ["action", "value"] } } }, required: ["url", "instruction"], additionalProperties: false } } },
@@ -14923,7 +14923,7 @@ async function handleEmailPoll(req, res) {
             await fetch(`${serverRoot}/api/ext/v3/conversations/messages/text`, {
               method: "POST",
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${watiToken.replace(/^Bearer\s+/i, "")}` },
-              body: JSON.stringify({ target: "15550000003", text: "\u{1F6A8} *Janus Email Alert*: Gmail auth failed for assistant@example.com (401). Domain-wide delegation may have been revoked." })
+              body: JSON.stringify({ target: "           ", text: "\u{1F6A8} *Janus Email Alert*: Gmail auth failed for assistant@example.com (401). Domain-wide delegation may have been revoked." })
             });
           }
         } catch {
@@ -15322,7 +15322,7 @@ try {
 } catch {
   JANUS_SYSTEM_PROMPT = "You are Janus, the AI assistant for Janus.";
 }
-var JANUS_NUMBER = "15550000004";
+var JANUS_NUMBER = "           ";
 var COOLDOWN_SECONDS = 30;
 function sanitizeReplyForWhatsApp(text2) {
   return text2.replace(/!\[[^\]]*\]\([^)]+\)/g, "").replace(/https?:\/\/[^\s]*supabase\.co\/storage\/[^\s)"]*/g, "").replace(/\n{3,}/g, "\n\n").trim();
@@ -17308,7 +17308,7 @@ ${r.content}` : ""}`
 
 Search Queries Used: ${searchQueries.join(", ")}
 `;
-  const synthesisSystemPrompt = `You are an expert research analyst for the household administrator \u2014 a private estate in Local Area. You have just completed a web research task.
+  const synthesisSystemPrompt = `You are an expert research analyst for the household administrator \u2014 a private estate in Local Area   . You have just completed a web research task.
 
 Synthesize the provided research materials into a comprehensive, well-structured report. Use markdown formatting with headers, bullet points, and clear sections. Be thorough, precise, and factual \u2014 only state what the sources support.
 
@@ -28935,7 +28935,7 @@ function buildEmailHtml(childName, data, today) {
 
     <tr>
       <td style="padding:24px 32px 20px;border-bottom:1px solid #f3f4f6;">
-        <div style="font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#6b7280;border-left:3px solid #f59e0b;padding-left:8px;margin-bottom:14px;">\u{1F321}\uFE0F Weather \xB7 Local Area</div>
+        <div style="font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#6b7280;border-left:3px solid #f59e0b;padding-left:8px;margin-bottom:14px;">\u{1F321}\uFE0F Weather \xB7 Local Area   </div>
         ${weather.source ? `<div style="font-size:10px;color:#9ca3af;margin:-8px 0 10px 11px;">Live ${escapeHtml(weather.source)} data${weather.asOf ? ` \xB7 as of ${escapeHtml(weather.asOf)}` : ""}</div>` : ""}
         <table width="100%" cellpadding="0" cellspacing="0" border="0">
           <tr>
@@ -36628,7 +36628,7 @@ init_storage();
 
 // server/lib/wifi-map.ts
 var DEFAULT_SUBNET_MAP = Object.freeze([
-  { cidr: "192.168.1.0/23", label: "34" }
+  { cidr: "192.168.1.0/24", label: "34" }
 ]);
 function ipv4ToInt(ip) {
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);

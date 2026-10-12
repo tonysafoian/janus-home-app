@@ -63,8 +63,7 @@ export async function enqueueFailedJob(
   } catch (e) { console.error("Failed to enqueue DLQ job:", e); }
 }
 
-// ─── Configurable Alert Destination ──────────────────────────────────────────
-const FALLBACK_ALERT_PHONE = "15550000001";
+const FALLBACK_ALERT_PHONE = Deno.env.get("ALERT_PHONE_NUMBER") || "";
 let _cachedAlertPhone: string | null = null;
 let _alertPhoneFetchedAt = 0;
 const ALERT_PHONE_CACHE_TTL = 10 * 60_000;

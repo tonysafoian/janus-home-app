@@ -44,11 +44,5 @@ CREATE INDEX IF NOT EXISTS idx_electricity_snapshots_at ON electricity_snapshots
 CREATE INDEX IF NOT EXISTS idx_electricity_snapshots_entity ON electricity_snapshots (entity_id, snapshot_at DESC);
 CREATE INDEX IF NOT EXISTS idx_electricity_bills_period ON electricity_bills (billing_period_start DESC);
 
--- Seed the 4 known historical bills from parsed PDFs
-INSERT INTO electricity_bills (billing_period_start, billing_period_end, ladwp_kwh, ladwp_total_usd, our_estimate_kwh, our_estimate_usd, variance_pct, raw_bill_data)
-VALUES
-  ('2025-08-18', '2025-10-21', 25840, 10141.10, 25840, NULL, NULL, '{"source":"pdf_parse","rate_schedule":"R-1A","zone":1,"tier1_rate":0.24404,"tier2_rate":0.30263,"tier3_rate":0.36109,"pac":"Tier 3","days":64}'),
-  ('2025-10-21', '2025-12-22', 20240, 6793.20, 20240, NULL, NULL, '{"source":"pdf_parse","rate_schedule":"R-1A","zone":1,"tier1_rate":0.24606,"tier2_rate":0.30463,"tier3_rate":0.30463,"pac":"Tier 3","days":62}'),
-  ('2025-12-22', '2026-02-23', 19360, 6528.50, 19360, NULL, NULL, '{"source":"pdf_parse","rate_schedule":"R-1A","zone":1,"tier1_rate":0.24747,"tier2_rate":0.30606,"tier3_rate":0.30606,"pac":"Tier 3","days":63}'),
-  ('2026-02-23', '2026-04-21', 18400, 6179.36, 18400, NULL, NULL, '{"source":"pdf_parse","rate_schedule":"R-1A","zone":1,"tier1_rate":0.24620,"tier2_rate":0.30479,"tier3_rate":0.30479,"pac":"Tier 3","days":57}')
-ON CONFLICT DO NOTHING;
+-- Historical bills seed omitted for privacy. Private seed files can be imported if desired.
+

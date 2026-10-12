@@ -52,6 +52,22 @@ export function clearAuthCookie(res: Response): void {
 }
 
 export function getAuthUser(req: Request): AuthUser | null {
+  // Check Home Assistant Ingress identity headers
+  const haUserId = (req.headers['x-remote-user-id'] as string) || (req.headers['x-ingress-user-id'] as string);
+  if (haUserId) {
+    const haUserName = (req.headers['x-remote-user-name'] as string) || (req.headers['x-remote-user-display-name'] as string) || 'HA User';
+    const haAdminHeader = req.headers['x-remote-user-is-admin'];
+    const isAdmin = String(haAdminHeader).toLowerCase() === 'true' || haAdminHeader === '1';
+    return {
+      userId: `ha:${haUserId}`,
+      email: `${haUserName.toLowerCase().replace(/[^a-z0-9]/g, '.')}@homeassistant.local`,
+      displayName: (req.headers['x-remote-user-display-name'] as string) || haUserName,
+      avatarUrl: null,
+      roles: isAdmin ? ['admin'] : ['member'],
+      approvalStatus: 'approved',
+    };
+  }
+
   const cookieToken = req.cookies?.auth_token;
   if (cookieToken) {
     const user = verifyToken(cookieToken);

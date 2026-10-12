@@ -50,7 +50,7 @@ export async function enqueueFailedJob(
   } catch (e) { console.error("Failed to enqueue DLQ job:", e); }
 }
 
-const FALLBACK_ALERT_PHONE = "15550000001";
+const FALLBACK_ALERT_PHONE = process.env.ALERT_PHONE_NUMBER || "";
 let _cachedAlertPhone: string | null = null;
 let _alertPhoneFetchedAt = 0;
 const ALERT_PHONE_CACHE_TTL = 10 * 60_000;
@@ -89,6 +89,7 @@ export async function sendAutomationFailureAlert(
   _alertCooldowns[functionName] = now;
 
   const alertPhone = await getAlertPhoneNumber();
+  if (!alertPhone) return;
   const msg = `⚠️ ${functionName} failed: ${errorSummary.slice(0, 200)}`;
   try {
     const baseUrl = `http://localhost:${process.env.PORT || 5000}`;

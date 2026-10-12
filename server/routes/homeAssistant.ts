@@ -30,16 +30,16 @@ function requireAdmin(req: AuthenticatedRequest, res: Response, next: () => void
 // Settings, encrypted at rest) takes precedence over the HA_URL/HA_TOKEN env
 // vars. Cached briefly because the proxy is hit constantly by the dashboard;
 // invalidated whenever the user saves new settings.
-interface ResolvedHACreds { haUrl: string; haToken: string; source: 'settings' | 'env' | 'supervisor' }
+export interface ResolvedHACreds { haUrl: string; haToken: string; source: 'settings' | 'env' | 'supervisor' }
 const haCredsCache = new Map<string, { creds: ResolvedHACreds | null; fetchedAt: number }>();
 const HA_CREDS_CACHE_TTL_MS = 60 * 1000;
 
-function invalidateHACredsCache(userId?: string): void {
+export function invalidateHACredsCache(userId?: string): void {
   if (userId) haCredsCache.delete(userId);
   else haCredsCache.clear();
 }
 
-async function resolveHACreds(userId: string | undefined): Promise<ResolvedHACreds | null> {
+export async function resolveHACreds(userId: string | undefined): Promise<ResolvedHACreds | null> {
   const cacheKey = userId && userId !== 'UNKNOWN' ? userId : '__env__';
   const cached = haCredsCache.get(cacheKey);
   if (cached && Date.now() - cached.fetchedAt < HA_CREDS_CACHE_TTL_MS) return cached.creds;
@@ -346,6 +346,140 @@ router.get('/states', requireAuth, (_req: AuthenticatedRequest, res: Response) =
   res.json(getEntityCache());
 });
 
+router.get('/cameras', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const creds = await resolveHACreds(req.userId);
+    if (!creds?.haUrl || !creds?.haToken) {
+      res.json({ success: true, cameras: [] });
+      return;
+    }
+
+    let states: any[] = [];
+    if (isCacheReady()) {
+      const cache = getEntityCache();
+      states = Object.values(cache);
+    } else {
+      const { status, data } = await callHA(creds.haUrl, creds.haToken, 'GET', '/api/states', undefined, { maxRetries: 1 });
+      if (status === 200 && Array.isArray(data)) {
+        states = data;
+      }
+    }
+
+    const cameras = states
+      .filter((s: any) => s.entity_id && s.entity_id.startsWith('camera.'))
+      .map((s: any) => ({
+        camera_id: s.entity_id,
+        entity_id: s.entity_id,
+        name: s.attributes?.friendly_name || s.entity_id.replace(/^camera\./, '').replace(/_/g, ' '),
+        status: s.state === 'unavailable' ? 'offline' : 'live',
+        model: s.attributes?.brand || s.attributes?.model_name || s.attributes?.model || 'Home Assistant',
+        location: s.attributes?.area_id || '',
+        thumbnail_url: `/api/ha/camera_proxy/${s.entity_id}`,
+        stream_url: `/api/ha/camera_stream/${s.entity_id}`,
+        is_ha: true,
+      }));
+
+    res.json({ success: true, cameras });
+  } catch (err) {
+    console.error('[ha-cameras] Failed to list cameras:', err);
+    res.json({ success: false, cameras: [], error: String(err) });
+  }
+});
+
+router.get('/camera_proxy/:entityId', async (req: AuthenticatedRequest, res: Response) => {
+  const entityId = req.params.entityId;
+  if (!entityId || !entityId.startsWith('camera.')) {
+    res.status(400).json({ error: 'Valid camera entityId required' });
+    return;
+  }
+  const creds = await resolveHACreds(req.userId);
+  if (!creds?.haUrl || !creds?.haToken) {
+    res.status(503).json({ error: 'Home Assistant not configured' });
+    return;
+  }
+
+  try {
+    const haUrl = creds.haUrl.replace(/\/$/, '');
+    const proxyUrl = `${haUrl}/api/camera_proxy/${encodeURIComponent(entityId)}`;
+    const haRes = await undiciFetch(proxyUrl, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${creds.haToken}`,
+      },
+    });
+
+    if (!haRes.ok) {
+      res.status(haRes.status).json({ error: `HA camera proxy returned ${haRes.status}` });
+      return;
+    }
+
+    const contentType = haRes.headers.get('content-type') || 'image/jpeg';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'no-cache, max-age=0, must-revalidate');
+
+    const buffer = Buffer.from(await haRes.arrayBuffer());
+    res.send(buffer);
+  } catch (err) {
+    console.error(`[ha-camera-proxy] Error proxying ${entityId}:`, err);
+    res.status(500).json({ error: 'Failed to fetch camera snapshot' });
+  }
+});
+
+router.get('/camera_stream/:entityId', async (req: AuthenticatedRequest, res: Response) => {
+  const entityId = req.params.entityId;
+  if (!entityId || !entityId.startsWith('camera.')) {
+    res.status(400).json({ error: 'Valid camera entityId required' });
+    return;
+  }
+  const creds = await resolveHACreds(req.userId);
+  if (!creds?.haUrl || !creds?.haToken) {
+    res.status(503).json({ error: 'Home Assistant not configured' });
+    return;
+  }
+
+  try {
+    const haUrl = creds.haUrl.replace(/\/$/, '');
+    const streamUrl = `${haUrl}/api/camera_proxy_stream/${encodeURIComponent(entityId)}`;
+    const haRes = await undiciFetch(streamUrl, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${creds.haToken}`,
+      },
+    });
+
+    if (!haRes.ok) {
+      res.status(haRes.status).json({ error: `HA camera stream returned ${haRes.status}` });
+      return;
+    }
+
+    const contentType = haRes.headers.get('content-type') || 'multipart/x-mixed-replace; boundary=--frame';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Connection', 'close');
+
+    if (haRes.body) {
+      const reader = haRes.body.getReader();
+      req.on('close', () => {
+        reader.cancel().catch(() => {});
+      });
+      const pump = async () => {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          res.write(value);
+        }
+        res.end();
+      };
+      pump().catch(() => res.end());
+    } else {
+      res.status(500).json({ error: 'No stream body available' });
+    }
+  } catch (err) {
+    console.error(`[ha-camera-stream] Error streaming ${entityId}:`, err);
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to stream camera' });
+  }
+});
+
 router.get('/govee-ids', requireAuth, (_req: AuthenticatedRequest, res: Response) => {
   res.json(getGoveeEntityIdsFromCache());
 });
@@ -531,6 +665,7 @@ router.post('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =
   const authUser = getAuthUser(req);
   const userId = authUser?.userId || req.userId || 'UNKNOWN';
   const actorName = authUser?.displayName || authUser?.email || 'UNKNOWN';
+  const isAdmin = authUser?.roles?.includes('admin') || req.userRole === 'admin';
 
   try {
     const body = req.body;
@@ -541,6 +676,10 @@ router.post('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =
     if (action === 'save-settings') {
       if (userId === 'UNKNOWN') {
         res.status(401).json({ error: 'Authentication required' });
+        return;
+      }
+      if (!isAdmin) {
+        res.status(403).json({ error: 'Admin privileges required to save Home Assistant configuration' });
         return;
       }
       const haUrlInput = typeof body.ha_url === 'string' ? body.ha_url.trim().replace(/\/$/, '') : '';
@@ -618,6 +757,10 @@ router.post('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =
     if (action === 'disconnect') {
       if (userId === 'UNKNOWN') {
         res.status(401).json({ error: 'Authentication required' });
+        return;
+      }
+      if (!isAdmin) {
+        res.status(403).json({ error: 'Admin privileges required to disconnect Home Assistant' });
         return;
       }
       const existing = await storage.getHomeAssistantSettings(userId);
@@ -800,6 +943,10 @@ router.post('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =
     }
 
     if (action === 'call-service') {
+      if (!isAdmin) {
+        res.status(403).json({ error: 'Device control requires admin privileges' });
+        return;
+      }
       const { domain: svcDomain, service, service_data } = body;
       if (!svcDomain || !service) { res.status(400).json({ error: 'domain and service required' }); return; }
       const t0 = Date.now();

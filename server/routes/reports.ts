@@ -1635,7 +1635,7 @@ function buildEmailHtml(childName: string, data: EmailData, today: string): stri
 
     <tr>
       <td style="padding:24px 32px 20px;border-bottom:1px solid #f3f4f6;">
-        <div style="font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#6b7280;border-left:3px solid #f59e0b;padding-left:8px;margin-bottom:14px;">🌡️ Weather · Local Area</div>
+        <div style="font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#6b7280;border-left:3px solid #f59e0b;padding-left:8px;margin-bottom:14px;">🌡️ Weather · ${escapeHtml(process.env.HOME_LOCATION || "Local Forecast")}</div>
         ${weather.source ? `<div style="font-size:10px;color:#9ca3af;margin:-8px 0 10px 11px;">Live ${escapeHtml(weather.source)} data${weather.asOf ? ` · as of ${escapeHtml(weather.asOf)}` : ""}</div>` : ""}
         <table width="100%" cellpadding="0" cellspacing="0" border="0">
           <tr>
@@ -1910,8 +1910,8 @@ router.post("/morning-weather", requireAuth, async (_req: Request, res: Response
       worldNews,
       dadEvents,
       momEvents,
-      emmeEvents,
-      islaEvents,
+      student1Events,
+      student2Events,
     ] =
       await Promise.all([
         fetchGoogleCurrentConditions(HOME_LAT, HOME_LNG),
@@ -1943,11 +1943,11 @@ router.post("/morning-weather", requireAuth, async (_req: Request, res: Response
     const weatherSummary = weatherData ? formatWeatherForAI(weatherData) : "";
 
     const childCalendars: Record<string, any[]> = {
-      "Student 1": emmeEvents,
-      "Student 2": islaEvents,
+      "Student 1": student1Events,
+      "Student 2": student2Events,
     };
 
-    console.log(`[Morning Email] Data fetched: weather ${weatherData ? "✓" : "✗"}, ${usNews.length} US / ${worldNews.length} world news, financial ${marketSnapshot ? "✓" : "✗"}, calendars (Admin:${dadEvents.length}, Member:${momEvents.length}, Student1:${emmeEvents.length}, Student2:${islaEvents.length})`);
+    console.log(`[Morning Email] Data fetched: weather ${weatherData ? "✓" : "✗"}, ${usNews.length} US / ${worldNews.length} world news, financial ${marketSnapshot ? "✓" : "✗"}, calendars (Admin:${dadEvents.length}, Member:${momEvents.length}, Student1:${student1Events.length}, Student2:${student2Events.length})`);
 
     const dataPromises = CHILDREN.map(child =>
       generateEmailData(
