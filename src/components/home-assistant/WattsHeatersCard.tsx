@@ -15,16 +15,12 @@ const WATTS_ENTITY_IDS = [
   'climate.floors',
   'climate.primary_bench_1',
   'climate.primary_bench_2',
-  'climate.tonys_bench',
-  'climate.lanas_bench',
 ];
 
 const DISPLAY_NAMES: Record<string, string> = {
   'climate.floors':          'Floors',
   'climate.primary_bench_1': 'Primary Bench 1',
   'climate.primary_bench_2': 'Primary Bench 2',
-  'climate.tonys_bench':     'Primary Bench 1',
-  'climate.lanas_bench':     'Primary Bench 2',
 };
 
 type HvacMode = 'heat' | 'off';

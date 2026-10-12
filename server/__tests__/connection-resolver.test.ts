@@ -23,7 +23,7 @@ function ts(offsetMs: number): Date {
 }
 
 const WIRED_DEVICE = { hostname: 'NAS-01', device_type: 'NAS', os_type: null, hardware_vendor: 'Synology', category: 'Network Infrastructure', subcategory: null };
-const PHONE_DEVICE = { hostname: 'iPhone-Tony', device_type: 'Mobile Phone', os_type: 'iOS', hardware_vendor: 'Apple', category: 'Mobile Phones & Tablets', subcategory: null };
+const PHONE_DEVICE = { hostname: 'iPhone-Admin', device_type: 'Mobile Phone', os_type: 'iOS', hardware_vendor: 'Apple', category: 'Mobile Phones & Tablets', subcategory: null };
 const UNKNOWN_DEVICE = { hostname: null, device_type: null, os_type: null, hardware_vendor: null, category: null, subcategory: null };
 const SPEAKER_DEVICE = { hostname: 'HomePod-Kitchen', device_type: null, os_type: null, hardware_vendor: 'Apple', category: 'Smart Speakers', subcategory: null };
 

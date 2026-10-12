@@ -56,7 +56,7 @@ SELECT * FROM (VALUES
   (
     'School Broadcast Reliability Upgrade',
     '- Morning school broadcasts now fall back to WhatsApp if all speakers fail
-- Automatic failure alerts sent to Tony when speaker TTS encounters errors
+- Automatic failure alerts sent to Admin when speaker TTS encounters errors
 - Configurable fallback phone number in system settings',
     'v3.5.0',
     'improvement',
@@ -75,19 +75,19 @@ SELECT * FROM (VALUES
   ),
   (
     'WhatsApp Stranger Alerts',
-    '- Instant alert to Tony when an unrecognized phone number messages Janus for the first time
+    '- Instant alert to Admin when an unrecognized phone number messages Janus for the first time
 - Notifications via both WhatsApp and email with the sender''s number and message
 - Existing abuse escalation at 3+ messages still active',
     'v3.3.0',
     'feature',
-    'Automatic — alerts sent to Tony',
+    'Automatic — alerts sent to Admin',
     '2026-03-19T00:00:00Z'::timestamptz
   ),
   (
     'Smarter Janus with New Tools',
     '- Janus can now search the web in real time using Perplexity
-- New home troubleshooting tool for diagnosing smart home issues
-- Available across both WhatsApp and email channels',
+    - New home troubleshooting tool for diagnosing smart home issues
+    - Available across both WhatsApp and email channels',
     'v3.2.0',
     'feature',
     'Ask Janus to search for something or troubleshoot a device',
@@ -96,7 +96,7 @@ SELECT * FROM (VALUES
   (
     'Package Delivery Alerts',
     '- Automatic detection of package delivery emails from carriers
-- WhatsApp notification to Tony and email alerts to household staff (Jesse & Sandra)
+- WhatsApp notification to Admin and email alerts to household staff
 - Works with major carriers including UPS, FedEx, and Amazon',
     'v3.1.0',
     'feature',

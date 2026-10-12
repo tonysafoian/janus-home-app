@@ -39,7 +39,7 @@ const CATEGORIES = [
     key: 'workspace',
     label: 'Google Workspace',
     icon: Mail,
-    checks: ['google_email', 'gmail_tony', 'google_calendar', 'google_drive'],
+    checks: ['google_email', 'google_calendar', 'google_drive'],
     color: 'text-green-500',
   },
   {
@@ -70,7 +70,6 @@ const CHECK_LABELS: Record<string, string> = {
   janus_whatsapp: 'Janus WhatsApp',
   janus_email: 'Janus Email',
   google_email: 'Google Email (Primary)',
-  gmail_tony: 'Google Email (Primary)',
   google_calendar: 'Google Calendar',
   google_drive: 'Google Drive',
   google_maps_routes: 'Maps Routes API',

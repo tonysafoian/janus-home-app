@@ -6,7 +6,7 @@ import type { NextFunction, Request, Response } from "express";
 // ---- Auth middleware mock: drive userRole via a module-level setter ----
 
 let currentRole: "admin" | "member" | "guest" = "admin";
-let currentUserId: string | undefined = "tony";
+let currentUserId: string | undefined = "admin";
 
 vi.mock("../../middleware/auth.js", () => ({
   requireAuth: (req: any, _res: Response, next: NextFunction) => {
@@ -104,7 +104,7 @@ function parseQuery(url: string): Record<string, string> {
 beforeEach(() => {
   vi.clearAllMocks();
   currentRole = "admin";
-  currentUserId = "tony";
+  currentUserId = "admin";
 });
 
 describe("/api/network-devices auth gate", () => {
@@ -126,7 +126,7 @@ describe("/api/network-devices auth gate", () => {
 describe("GET /api/network-devices list with filters", () => {
   it("forwards owner_role / trusted / unlabeled_only filters to the lib", async () => {
     libMock.listDevices.mockResolvedValue({
-      devices: [{ mac_address: "aa:bb:cc:dd:ee:ff", label: "Tony's iPhone", owner_role: "family", trusted: true, hostnames: null, ip_addresses: null, ssids: null, device_type: "phone", device_vendor: "Apple", device_model: null, owner_person_id: "tony", expected_ssid: null, notes: null, first_seen: "", last_seen: "", last_labeled_by: "tony", last_labeled_at: null }],
+      devices: [{ mac_address: "aa:bb:cc:dd:ee:ff", label: "Admin's iPhone", owner_role: "family", trusted: true, hostnames: null, ip_addresses: null, ssids: null, device_type: "phone", device_vendor: "Apple", device_model: null, owner_person_id: "admin", expected_ssid: null, notes: null, first_seen: "", last_seen: "", last_labeled_by: "admin", last_labeled_at: null }],
       total: 1,
     });
     const res = await invoke("GET", "/api/network-devices?owner_role=family&trusted=true&unlabeled_only=false");
@@ -144,8 +144,8 @@ describe("PUT /api/network-devices/:mac labels correctly", () => {
   it("forwards the patch + userId to the lib", async () => {
     libMock.labelDevice.mockResolvedValue({
       mac_address: "aa:bb:cc:dd:ee:ff",
-      label: "Lana's iPad",
-      owner_person_id: "lana",
+      label: "Family Member iPad",
+      owner_person_id: "member1",
       owner_role: "family",
       trusted: false,
       device_type: "tablet",
@@ -154,11 +154,11 @@ describe("PUT /api/network-devices/:mac labels correctly", () => {
       hostnames: null, ip_addresses: null, ssids: null,
       expected_ssid: null, notes: null,
       first_seen: "", last_seen: "",
-      last_labeled_by: "tony", last_labeled_at: "now",
+      last_labeled_by: "admin", last_labeled_at: "now",
     });
     const res = await invoke("PUT", "/api/network-devices/aa:bb:cc:dd:ee:ff", {
-      label: "Lana's iPad",
-      owner_person_id: "lana",
+      label: "Family Member iPad",
+      owner_person_id: "member1",
       owner_role: "family",
       device_type: "tablet",
     });
@@ -166,14 +166,14 @@ describe("PUT /api/network-devices/:mac labels correctly", () => {
     expect(libMock.labelDevice).toHaveBeenCalledWith(
       "aa:bb:cc:dd:ee:ff",
       expect.objectContaining({
-        label: "Lana's iPad",
-        owner_person_id: "lana",
+        label: "Family Member iPad",
+        owner_person_id: "member1",
         owner_role: "family",
         device_type: "tablet",
       }),
-      "tony",
+      "admin",
     );
-    expect(res.body.label).toBe("Lana's iPad");
+    expect(res.body.label).toBe("Family Member iPad");
   });
 });
 

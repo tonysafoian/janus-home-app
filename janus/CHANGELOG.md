@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.19
+
+- **Ingress Anti-Spoofing & HA RBAC**: Required authentic `SUPERVISOR_TOKEN` to accept `X-Remote-User-*` headers (preventing header spoofing in standalone environments); added `panel_admin: true` to `janus/config.yaml` to restrict sidebar access to Home Assistant administrators.
+- **Backend Entity Mappings Integration**: Wired backend services (`pool.ts`, `monitoring.ts`) to dynamically query `system_configs.entity_mappings` for pool heater, spa pump, pool/spa temperature sensors, speedtest sensors, and custom climate entities.
+- **Comprehensive Privacy Scrubbing**: Scrubbed all personal family and staff names across all database migrations, backend routes, UI components, and test fixtures.
+- **Deduplicated Grocery Seeds**: Applied unique constraint on grocery staple names and idempotent `WHERE NOT EXISTS` seed inserts (`0025`, `0029`, `0031`, and migration `0060`).
+- **Schema Options Synchronization**: Added `home_location`, `home_lat`, `home_lng`, `staff_emails`, `assistant_email`, `computer_admin_token`, `cron_secret`, and `enable_goaccess` to `janus/config.yaml` schema and documented them in `janus/DOCS.md`.
+
 ## 1.0.18
 
 - **Database Seed Migrations Fix**: Fixed SQL syntax and column mismatch errors in fresh database seeds (`0025`, `0029`, `0031`, and `0049`) allowing clean out-of-the-box initialization.
@@ -10,6 +18,42 @@
 - **Graceful Cron Monitors**: Handled missing pool temperature, spa pump, and speedtest entities gracefully without returning 500/503 errors on standard cron sweeps.
 - **PII Scrubbing**: Replaced remaining test/comment PII (IPs, coordinates, and personal name references in automation descriptions and prompts) with role-based and configurable values.
 - **Multi-line Option Export**: Hardened `janus/run.sh` to safely parse and export multi-line JSON secrets and service accounts without line truncation.
+
+## 1.0.17
+
+- **Dockerfile Git Fallback**: Added robust branch-fallback logic to Dockerfile for custom git ref checkouts in Home Assistant Add-on builds.
+
+## 1.0.16
+
+- **Privacy & Security Audit**: Removed personal data from database migrations, neutralized seed rosters, and converted all API credentials to masked password fields in add-on schema.
+
+## 1.0.15
+
+- **HA WebSocket Reconnection**: Enhanced WebSocket auto-reconnect and cache synchronization for Home Assistant Core entity state updates.
+
+## 1.0.14
+
+- **SSRF Hardening**: Strengthened SSRF filter boundaries to protect internal estate network endpoints while permitting Home Assistant supervisor proxying.
+
+## 1.0.13
+
+- **RBAC Refinement**: Added granular role-based permissions and approval statuses for household staff and family members.
+
+## 1.0.12
+
+- **Device & Entity Mappings Card**: Added interactive UI card in Settings for auto-discovering and mapping Home Assistant entities (power, irrigation, climate, cameras, vehicles, utility rates).
+
+## 1.0.11
+
+- **Energy & Utility Rates**: Added custom kWh electricity and water HCF rate tracking to estate configuration.
+
+## 1.0.10
+
+- **Setup Guide**: Added first-time setup and onboarding guide banner to Settings page.
+
+## 1.0.9
+
+- **Household Members Management**: Added household members management card in Settings with avatar, role, and permission controls.
 
 ## 1.0.8
 

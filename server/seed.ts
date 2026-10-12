@@ -608,36 +608,7 @@ async function seedFamilyAutomations(): Promise<void> {
     console.warn('[SEED] Could not clean up stale audit-log rows:', e);
   }
 
-  const { rows } = await query<{ cnt: number }>("SELECT count(*)::int AS cnt FROM family_automations");
-  if (rows[0]?.cnt > 0) {
-    // Table already seeded — only upsert new automations that may have been added
-    const newAutomations: Array<{ name: string; type: string; schedule: string; desc: string; config?: Record<string, unknown> }> = [
-      { name: 'Gym Timer & Temperature', type: 'gym-thermostat', schedule: '*/15 * * * *', desc: 'AC on 6 AM–3 PM daily at 68°F cool / 64°F heat. Alerts if temp out of range.' },
-      { name: 'Theater Timer & Temperature', type: 'theater-thermostat', schedule: '*/15 * * * *', desc: 'Heat 68°F / Cool 72°F (dual auto) from 10 AM–11 PM daily. Off otherwise. Alerts if temp out of range.' },
-      { name: 'Spa Mode 12 Hour Alert', type: 'spa-mode-alert', schedule: '*/30 * * * *', desc: 'Alerts household members when pool has been left on SPA mode for more than 12 hours' },
-      { name: 'AV Closet Temperature Monitor', type: 'av-closet-temp-monitor', schedule: '*/10 * * * *', desc: 'Checks AV Closet temp every 10 min. Emails household admins over 90°F; sends WhatsApp alert over 100°F.' },
-      { name: 'Fountains Off at 9 PM', type: 'energy-fountains-off', schedule: '0 21 * * *', desc: 'Turns off all fountain lights at 9:00 PM PT every night' },
-      { name: 'Closet Light Timer', type: 'energy-closet-timer', schedule: '*/5 * * * *', desc: 'Turns off any closet light left on for more than 30 minutes' },
-      // Guest bathroom light timer configuration;
-      // the list is admin-editable from the Automations page.
-      { name: 'Bathroom Light Timer', type: 'energy-bathroom-timer', schedule: '*/5 * * * *', desc: 'Turns off bathroom lights after 15 minutes — Primary Bath gets 1 hour', config: { excluded_terms: ['guest'] } },
-      { name: 'Door Locks & Battery Monitor', type: 'ha-locks', schedule: '0 */4 * * *', desc: 'Monitors Yale & Crestron door locks for low battery, offline status, and jammed locks via Home Assistant' },
-    ];
-    for (const a of newAutomations) {
-      const { rows: existing } = await query(`SELECT id FROM family_automations WHERE name = $1 LIMIT 1`, [a.name]);
-      if (existing.length === 0) {
-        await query(
-          `INSERT INTO family_automations (name, automation_type, schedule, is_active, description, config)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [a.name, a.type, a.schedule, true, a.desc, JSON.stringify(a.config ?? {})]
-        );
-        console.log(`[SEED] Inserted new automation: "${a.name}"`);
-      }
-    }
-    return;
-  }
-
-  console.log("[SEED] Seeding family_automations...");
+  console.log("[SEED] Ensuring all family_automations exist...");
   const automations: Array<{ name: string; type: string; schedule: string; desc: string; config?: Record<string, unknown> }> = [
     { name: 'Morning School & Family Wake-Up', type: 'school-broadcast', schedule: '50 6 * * 1-5', desc: 'School calendar sync + 6:50am & 7:30am wake-up broadcasts' },
     { name: 'Morning Brief Email', type: 'morning-email', schedule: '0 7 * * *', desc: 'Weather, news, markets & calendar digest' },
@@ -658,18 +629,20 @@ async function seedFamilyAutomations(): Promise<void> {
     { name: 'AV Closet Temperature Monitor', type: 'av-closet-temp-monitor', schedule: '*/10 * * * *', desc: 'Checks AV Closet temp every 10 min. Emails household admins over 90°F; sends WhatsApp alert over 100°F.' },
     { name: 'Fountains Off at 9 PM', type: 'energy-fountains-off', schedule: '0 21 * * *', desc: 'Turns off all fountain lights at 9:00 PM PT every night' },
     { name: 'Closet Light Timer', type: 'energy-closet-timer', schedule: '*/5 * * * *', desc: 'Turns off any closet light left on for more than 30 minutes' },
-    // Guest bathroom light timer configuration;
-    // the list is admin-editable from the Automations page.
     { name: 'Bathroom Light Timer', type: 'energy-bathroom-timer', schedule: '*/5 * * * *', desc: 'Turns off bathroom lights after 15 minutes — Primary Bath gets 1 hour', config: { excluded_terms: ['guest'] } },
     { name: 'Door Locks & Battery Monitor', type: 'ha-locks', schedule: '0 */4 * * *', desc: 'Monitors Yale & Crestron door locks for low battery, offline status, and jammed locks via Home Assistant' },
   ];
 
   for (const a of automations) {
-    await query(
-      `INSERT INTO family_automations (name, automation_type, schedule, is_active, description, config)
-       VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,
-      [a.name, a.type, a.schedule, true, a.desc, JSON.stringify(a.config ?? {})]
-    );
+    const { rows: existing } = await query(`SELECT id FROM family_automations WHERE name = $1 LIMIT 1`, [a.name]);
+    if (existing.length === 0) {
+      await query(
+        `INSERT INTO family_automations (name, automation_type, schedule, is_active, description, config)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [a.name, a.type, a.schedule, true, a.desc, JSON.stringify(a.config ?? {})]
+      );
+      console.log(`[SEED] Inserted automation: "${a.name}"`);
+    }
   }
 }
 

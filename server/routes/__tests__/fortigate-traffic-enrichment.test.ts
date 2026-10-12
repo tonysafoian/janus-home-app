@@ -7,7 +7,7 @@ import type { NextFunction, Response } from "express";
 vi.mock("../../middleware/auth.js", () => ({
   requireAuth: (req: any, _res: Response, next: NextFunction) => {
     req.userRole = "admin";
-    req.userId = "tony";
+    req.userId = "admin_user";
     next();
   },
 }));

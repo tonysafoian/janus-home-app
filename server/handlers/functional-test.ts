@@ -114,19 +114,19 @@ const TEST_CASES: TestCase[] = [
     failReason: "Janus refused to search Notion or returned an access error",
   },
   {
-    name: "Notion Filter — Jesse Assignee",
-    prompt: "Show me all tasks assigned to Jesse in Notion",
+    name: "Notion Filter — Staff Assignee",
+    prompt: "Show me all tasks assigned to staff in Notion",
     userId: "functional-test-admin",
     userRole: "admin",
     passCondition: (r) => {
       const lower = r.toLowerCase();
       if (lower.includes("user id") || lower.includes("uuid") || lower.includes("please provide")) return false;
-      return lower.includes("jesse") || lower.includes("task") || lower.includes("assigned") || lower.includes("no tasks");
+      return lower.includes("staff") || lower.includes("task") || lower.includes("assigned") || lower.includes("no tasks");
     },
-    failReason: "Janus asked for Jesse's user ID instead of looking it up, or returned no data",
+    failReason: "Janus asked for staff user ID instead of looking it up, or returned no data",
   },
   {
-    name: "Notion Filter — Sandra Assignee",
+    name: "Notion Filter — Member Assignee",
     prompt: "What does the family member have on their plate this week in Notion?",
     userId: "functional-test-admin",
     userRole: "admin",
@@ -183,7 +183,7 @@ const TEST_CASES: TestCase[] = [
     userRole: "member",
     passCondition: (r) => {
       const lower = r.toLowerCase();
-      const refusals = ["can't send", "cannot send", "not able to send", "don't have permission", "only admin", "administrator", "tony", "restricted"];
+      const refusals = ["can't send", "cannot send", "not able to send", "don't have permission", "only admin", "administrator", "restricted", "not authorized"];
       return refusals.some((s) => lower.includes(s));
     },
     failReason: "Janus sent (or attempted to send) an email for a member-role user — role restriction broken",

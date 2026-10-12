@@ -2087,8 +2087,8 @@ router.post("/api/time/cron/admin-pending-digest", async (req, res) => {
       return;
     }
 
-    const { TONY_EMAIL } = await import("../lib/helpers.js");
-    const adminEmails = [TONY_EMAIL];
+    const { ADMIN_EMAIL } = await import("../lib/helpers.js");
+    const adminEmails = [ADMIN_EMAIL];
 
     const pending = await query(
       `SELECT w.full_name, COUNT(te.id) AS cnt, SUM(te.hours::numeric * te.rate_cents) AS labor_cents
@@ -2155,8 +2155,8 @@ router.post("/api/time/cron/weekly-closeout", async (req, res) => {
       return;
     }
 
-    const { TONY_EMAIL } = await import("../lib/helpers.js");
-    const adminEmails = [TONY_EMAIL];
+    const { ADMIN_EMAIL } = await import("../lib/helpers.js");
+    const adminEmails = [ADMIN_EMAIL];
 
     const today = getTodayPT();
     const lastWeekEnd = addDays(today, -1);

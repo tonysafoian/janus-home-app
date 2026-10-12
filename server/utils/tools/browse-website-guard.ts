@@ -78,7 +78,7 @@ export async function enforceBrowseWebsiteQuota(
     });
     return {
       allowed: false,
-      message: `I've hit my daily browser-use cap (${DAILY_CAP}/day). Tell Tony if this needs to go higher.`,
+      message: `I've hit my daily browser-use cap (${DAILY_CAP}/day). Tell the administrator if this needs to go higher.`,
     };
   }
 

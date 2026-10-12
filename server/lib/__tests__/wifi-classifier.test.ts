@@ -15,7 +15,7 @@ describe('expectedSsidFor', () => {
 
   it('routes trusted personal devices to 34', () => {
     expect(expectedSsidFor({ hostname: 'Brian-iPhone' }).expected).toBe('34');
-    expect(expectedSsidFor({ hostname: 'tonys-MacBook-Pro' }).expected).toBe('34');
+    expect(expectedSsidFor({ hostname: 'admins-MacBook-Pro' }).expected).toBe('34');
     expect(expectedSsidFor({ hostname: 'kids-iPad' }).expected).toBe('34');
     expect(expectedSsidFor({ device_type: 'laptop' }).expected).toBe('34');
   });

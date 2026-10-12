@@ -175,10 +175,10 @@ export async function executeGetCalendarEvents(calendarId?: string, timeMin?: st
     const timeMaxVal = timeMax || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     const perCalMax = Math.min(maxResults || 25, 50);
 
-    const isTonyDefault = !calendarId || effectiveCalId === process.env.PRIMARY_CALENDAR_ID || "primary";
+    const isPrimaryDefault = !calendarId || effectiveCalId === process.env.PRIMARY_CALENDAR_ID || "primary";
     let calendarIds: string[] = [effectiveCalId];
 
-    if (isTonyDefault) {
+    if (isPrimaryDefault) {
       try {
         const listData = await callCalendarProxy({ action: "list-calendars", calendarId: effectiveCalId });
         if (listData.success && Array.isArray(listData.calendars)) {
@@ -251,27 +251,27 @@ export async function executeCreateCalendarEvent(calendarId?: string, title?: st
     const normalizedStart = start ? normalizeToPacific(start) : start;
     const normalizedEnd = end ? normalizeToPacific(end) : end;
 
-    const TONY_EMAIL = process.env.PRIMARY_CALENDAR_ID || "primary";
-    const isTonysCalendar = effectiveCalId.toLowerCase() === TONY_EMAIL;
-    const involvesTony = isTonysCalendar || (attendees || []).some(a => a.toLowerCase() === TONY_EMAIL);
+    const PRIMARY_EMAIL = process.env.PRIMARY_CALENDAR_ID || "primary";
+    const isPrimaryCalendar = effectiveCalId.toLowerCase() === PRIMARY_EMAIL;
+    const involvesPrimary = isPrimaryCalendar || (attendees || []).some(a => a.toLowerCase() === PRIMARY_EMAIL);
 
-    if (involvesTony && normalizedStart && normalizedEnd) {
+    if (involvesPrimary && normalizedStart && normalizedEnd) {
       try {
         const availData = await callCalendarProxy({
           action: "check-availability",
-          emails: [TONY_EMAIL],
+          emails: [PRIMARY_EMAIL],
           timeMin: normalizedStart,
           timeMax: normalizedEnd,
         });
         if (availData.success && availData.availability) {
-          const tonyBusy = availData.availability[TONY_EMAIL] || availData.availability[Object.keys(availData.availability)[0]];
-          if (Array.isArray(tonyBusy) && tonyBusy.length > 0) {
-            const conflicts = tonyBusy.map((b: any) => `${b.start} – ${b.end}`).join(", ");
+          const primaryBusy = availData.availability[PRIMARY_EMAIL] || availData.availability[Object.keys(availData.availability)[0]];
+          if (Array.isArray(primaryBusy) && primaryBusy.length > 0) {
+            const conflicts = primaryBusy.map((b: any) => `${b.start} – ${b.end}`).join(", ");
             return JSON.stringify({
               success: false,
               blocked_by_conflict: true,
-              conflicts: tonyBusy,
-              message: `CANNOT CREATE EVENT: Tony has ${tonyBusy.length} conflict(s) during this time: ${conflicts}. You MUST find alternative times. Use check_availability to find open slots, then present 2-3 options to Tony.`,
+              conflicts: primaryBusy,
+              message: `CANNOT CREATE EVENT: Primary user has ${primaryBusy.length} conflict(s) during this time: ${conflicts}. You MUST find alternative times. Use check_availability to find open slots, then present 2-3 options.`,
             });
           }
         }
@@ -366,7 +366,7 @@ async function fetchTripBusyBlocks(
       const travelers = Array.isArray(trip.travelers) ? trip.travelers : [];
       for (const { email, lp } of localParts) {
         const affected =
-          travelers.length === 0 // unspecified travelers → assume Tony (primary cal owner)
+          travelers.length === 0 // unspecified travelers → assume primary user (primary cal owner)
             ? email.toLowerCase() === process.env.PRIMARY_CALENDAR_ID || "primary"
             : travelers.some((t) => isAffected(String(t), lp));
         if (!affected) continue;

@@ -44,7 +44,7 @@ describe("runTokenExpirationWarnings", () => {
   it("sends WhatsApp + records dedup row + writes audit for an expiring tesla token", async () => {
     const expires = inHours(6);
     selectTokens.mockResolvedValueOnce([
-      { user_id: "tony", kind: "tesla", token_expires_at: expires, google_email: null },
+      { user_id: "admin_user", kind: "tesla", token_expires_at: expires, google_email: null },
     ]);
 
     const { outcomes } = await runTokenExpirationWarnings(deps());
@@ -55,9 +55,9 @@ describe("runTokenExpirationWarnings", () => {
 
     expect(sendAlert).toHaveBeenCalledTimes(1);
     expect(sendAlert.mock.calls[0][0]).toBe("13105550100");
-    expect(sendAlert.mock.calls[0][1]).toContain("tesla token for tony");
+    expect(sendAlert.mock.calls[0][1]).toContain("tesla token for admin_user");
 
-    expect(recordAlert).toHaveBeenCalledWith("tony", "tesla", expires);
+    expect(recordAlert).toHaveBeenCalledWith("admin_user", "tesla", expires);
 
     expect(audit).toHaveBeenCalledTimes(1);
     expect(audit.mock.calls[0][1].event_type).toBe("token_expiry_warning");
@@ -68,7 +68,7 @@ describe("runTokenExpirationWarnings", () => {
 
   it("uses google_email instead of user_id in the message when present", async () => {
     selectTokens.mockResolvedValueOnce([
-      { user_id: "tony", kind: "google", token_expires_at: inHours(12), google_email: "admin@example.com" },
+      { user_id: "admin_user", kind: "google", token_expires_at: inHours(12), google_email: "admin@example.com" },
     ]);
 
     await runTokenExpirationWarnings(deps());
@@ -77,7 +77,7 @@ describe("runTokenExpirationWarnings", () => {
 
   it("skips a row when dedup says it was already alerted in the last 24h", async () => {
     selectTokens.mockResolvedValueOnce([
-      { user_id: "tony", kind: "google", token_expires_at: inHours(20), google_email: null },
+      { user_id: "admin_user", kind: "google", token_expires_at: inHours(20), google_email: null },
     ]);
     isDeduped.mockResolvedValueOnce(true);
 
@@ -92,7 +92,7 @@ describe("runTokenExpirationWarnings", () => {
 
   it("enqueues a failed_jobs row and writes an error audit when WhatsApp send fails", async () => {
     selectTokens.mockResolvedValueOnce([
-      { user_id: "tony", kind: "tesla", token_expires_at: inHours(3), google_email: null },
+      { user_id: "admin_user", kind: "tesla", token_expires_at: inHours(3), google_email: null },
     ]);
     sendAlert.mockRejectedValueOnce(new Error("WATI 503: upstream down"));
 
@@ -104,7 +104,7 @@ describe("runTokenExpirationWarnings", () => {
     expect(enqueue).toHaveBeenCalledTimes(1);
     expect(enqueue.mock.calls[0][0]).toBe("janus/token-expiration-warnings");
     expect(enqueue.mock.calls[0][2]).toMatchObject({
-      user_id: "tony",
+      user_id: "admin_user",
       kind: "tesla",
     });
     expect(audit.mock.calls[0][1].status).toBe("error");
@@ -121,8 +121,8 @@ describe("runTokenExpirationWarnings", () => {
 
   it("marks every row failed when the alert phone cannot be resolved", async () => {
     selectTokens.mockResolvedValueOnce([
-      { user_id: "tony", kind: "tesla", token_expires_at: inHours(4), google_email: null },
-      { user_id: "tony", kind: "google", token_expires_at: inHours(6), google_email: "admin@example.com" },
+      { user_id: "admin_user", kind: "tesla", token_expires_at: inHours(4), google_email: null },
+      { user_id: "admin_user", kind: "google", token_expires_at: inHours(6), google_email: "admin@example.com" },
     ]);
     getAlertPhone.mockRejectedValueOnce(new Error("system_configs unreachable"));
 
@@ -136,8 +136,8 @@ describe("runTokenExpirationWarnings", () => {
 
   it("processes a tesla + google mix independently — one can succeed while the other dedupes", async () => {
     selectTokens.mockResolvedValueOnce([
-      { user_id: "tony", kind: "tesla", token_expires_at: inHours(2), google_email: null },
-      { user_id: "tony", kind: "google", token_expires_at: inHours(8), google_email: "admin@example.com" },
+      { user_id: "admin_user", kind: "tesla", token_expires_at: inHours(2), google_email: null },
+      { user_id: "admin_user", kind: "google", token_expires_at: inHours(8), google_email: "admin@example.com" },
     ]);
     isDeduped.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
 
@@ -147,6 +147,6 @@ describe("runTokenExpirationWarnings", () => {
     expect(byKind.google).toBe("sent");
     expect(sendAlert).toHaveBeenCalledTimes(1);
     expect(recordAlert).toHaveBeenCalledTimes(1);
-    expect(recordAlert).toHaveBeenCalledWith("tony", "google", expect.any(String));
+    expect(recordAlert).toHaveBeenCalledWith("admin_user", "google", expect.any(String));
   });
 });

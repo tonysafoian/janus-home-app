@@ -1,7 +1,7 @@
 -- Club34 Ball — capture jersey size at first-waiver sign-up.
 --
--- When a dad signs the click-through waiver for the first time, the
--- player UI also asks them to pick a jersey size so Tony has the
+-- When a player signs the click-through waiver for the first time, the
+-- player UI also asks them to pick a jersey size so the organizer has the
 -- info on hand for swag / pinnies. The column is nullable so existing
 -- already-signed players don't get retroactively forced to pick, but
 -- the backend now refuses the first waiver sign without a size.

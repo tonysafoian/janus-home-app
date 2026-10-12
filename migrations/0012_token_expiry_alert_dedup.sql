@@ -3,7 +3,7 @@
 -- The cron runs daily at 9:00 AM PT and fans out one WhatsApp per
 -- (user_id, kind) that's within 24h of token expiry. Without dedup,
 -- transient cron retries / multiple HEAD-of-cron evaluations could
--- double-message Tony in the morning. Keyed by (user_id, kind) — same
+-- double-message the user in the morning. Keyed by (user_id, kind) — same
 -- (user_id, kind, day) collapses to one alert.
 
 CREATE TABLE IF NOT EXISTS token_expiry_alert_dedup (

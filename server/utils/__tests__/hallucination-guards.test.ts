@@ -77,7 +77,7 @@ describe("google_file guard", () => {
 
 describe("email_sent guard", () => {
   it("fires on 'I sent the email' without send_email tool call", () => {
-    const g = detectHallucination("Done — I just sent the email to Tony.", []);
+    const g = detectHallucination("Done — I just sent the email to Alex.", []);
     expect(g?.name).toBe("email_sent");
   });
 
@@ -94,7 +94,7 @@ describe("email_sent guard", () => {
 
   it("does NOT fire when send_email was actually called", () => {
     const g = detectHallucination(
-      "Done — I sent the email to Tony.",
+      "Done — I sent the email to Alex.",
       [tool("send_email")],
     );
     expect(g).toBeNull();

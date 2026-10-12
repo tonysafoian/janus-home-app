@@ -346,7 +346,7 @@ router.get('/states', requireAuth, (_req: AuthenticatedRequest, res: Response) =
   res.json(getEntityCache());
 });
 
-router.get('/cameras', async (req: AuthenticatedRequest, res: Response) => {
+router.get('/cameras', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const creds = await resolveHACreds(req.userId);
     if (!creds?.haUrl || !creds?.haToken) {
@@ -386,7 +386,7 @@ router.get('/cameras', async (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
-router.get('/camera_proxy/:entityId', async (req: AuthenticatedRequest, res: Response) => {
+router.get('/camera_proxy/:entityId', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const rawEntityId = req.params.entityId;
   const entityId = Array.isArray(rawEntityId) ? rawEntityId[0] : rawEntityId;
   if (!entityId || !entityId.startsWith('camera.')) {
@@ -426,7 +426,7 @@ router.get('/camera_proxy/:entityId', async (req: AuthenticatedRequest, res: Res
   }
 });
 
-router.get('/camera_stream/:entityId', async (req: AuthenticatedRequest, res: Response) => {
+router.get('/camera_stream/:entityId', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const rawEntityId = req.params.entityId;
   const entityId = Array.isArray(rawEntityId) ? rawEntityId[0] : rawEntityId;
   if (!entityId || !entityId.startsWith('camera.')) {

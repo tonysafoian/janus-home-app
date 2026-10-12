@@ -76,7 +76,7 @@ describe("recordLlmUsage", () => {
   it("writes one INSERT into janus_llm_usage with the supplied meta + usage fields", async () => {
     const ok = await recordLlmUsage(
       {
-        userId: "tony",
+        userId: "user-123",
         channel: "chat",
         model: "google/gemini-3-flash-preview",
         tier: "default",
@@ -91,7 +91,7 @@ describe("recordLlmUsage", () => {
     expect(sql).toMatch(/INSERT INTO janus_llm_usage/);
     // Positional params: user_id, channel, model, tier, prompt, completion, total, cost, correlation, duration, request_type
     expect(values).toEqual([
-      "tony", "chat", "google/gemini-3-flash-preview", "default",
+      "user-123", "chat", "google/gemini-3-flash-preview", "default",
       500, 100, 600, 0.0123,
       null, 1234, "chat",
     ]);
@@ -99,7 +99,7 @@ describe("recordLlmUsage", () => {
 
   it("stores NULL when cost is missing", async () => {
     await recordLlmUsage(
-      { userId: "tony", channel: "chat", model: "m", tier: "default", requestType: "chat" },
+      { userId: "user-123", channel: "chat", model: "m", tier: "default", requestType: "chat" },
       { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
     );
     const [, values] = queryMock.mock.calls[0];
@@ -110,7 +110,7 @@ describe("recordLlmUsage", () => {
   it("auto-stamps correlation_id from the ALS context", async () => {
     await runWithCorrelation("trace-xyz", async () => {
       await recordLlmUsage(
-        { userId: "tony", channel: "chat", model: "m", requestType: "chat" },
+        { userId: "user-123", channel: "chat", model: "m", requestType: "chat" },
         { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
       );
     });
@@ -121,7 +121,7 @@ describe("recordLlmUsage", () => {
   it("uses an explicit correlationId when the caller passes one", async () => {
     await runWithCorrelation("ambient-trace", async () => {
       await recordLlmUsage(
-        { userId: "tony", channel: "chat", model: "m", requestType: "chat", correlationId: "explicit-trace" },
+        { userId: "user-123", channel: "chat", model: "m", requestType: "chat", correlationId: "explicit-trace" },
         { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
       );
     });
@@ -138,7 +138,7 @@ describe("recordLlmUsage", () => {
   it("returns false on a DB failure without throwing", async () => {
     queryMock.mockRejectedValueOnce(new Error("connection refused"));
     const ok = await recordLlmUsage(
-      { userId: "tony", channel: "chat", model: "m", requestType: "chat" },
+      { userId: "user-123", channel: "chat", model: "m", requestType: "chat" },
       { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
     );
     expect(ok).toBe(false);

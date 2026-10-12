@@ -34,7 +34,7 @@ const STATUS_SORT_ORDER: Record<CheckStatus, number> = { error: 0, degraded: 1, 
 
 const CATEGORIES = [
   { label: 'Janus Channels', icon: MessageSquare, checks: ['janus_chat', 'janus_whatsapp', 'janus_email'], color: 'text-blue-500' },
-  { label: 'Google Workspace', icon: Mail, checks: ['gmail_tony', 'google_calendar', 'google_drive'], color: 'text-green-500' },
+  { label: 'Google Workspace', icon: Mail, checks: ['google_email', 'google_calendar', 'google_drive'], color: 'text-green-500' },
   { label: 'Google Maps', icon: MapPin, checks: ['google_maps_routes', 'google_air_quality', 'google_pollen'], color: 'text-yellow-500' },
   { label: 'Third-Party', icon: Zap, checks: ['firecrawl', 'wati_whatsapp', 'elevenlabs', 'openrouter'], color: 'text-purple-500' },
   { label: 'Infrastructure', icon: Server, checks: ['home_assistant', 'notion', 'memory_db'], color: 'text-orange-500' },
@@ -42,7 +42,7 @@ const CATEGORIES = [
 
 const CHECK_LABELS: Record<string, string> = {
   janus_chat: 'Chat', janus_whatsapp: 'WhatsApp', janus_email: 'Email',
-  gmail_tony: 'Gmail', google_calendar: 'Calendar', google_drive: 'Drive',
+  google_email: 'Gmail', google_calendar: 'Calendar', google_drive: 'Drive',
   google_maps_routes: 'Routes', google_air_quality: 'Air Quality', google_pollen: 'Pollen',
   firecrawl: 'Firecrawl', wati_whatsapp: 'WATI', elevenlabs: 'ElevenLabs', openrouter: 'OpenRouter',
   home_assistant: 'Home Assistant', notion: 'Notion', memory_db: 'Memory DB',

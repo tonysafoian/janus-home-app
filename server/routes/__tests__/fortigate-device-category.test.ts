@@ -7,7 +7,7 @@ import type { NextFunction, Response } from "express";
 vi.mock("../../middleware/auth.js", () => ({
   requireAuth: (req: any, _res: Response, next: NextFunction) => {
     req.userRole = "admin";
-    req.userId = "tony";
+    req.userId = "admin_user";
     next();
   },
 }));
@@ -139,7 +139,7 @@ describe("GET /api/fortigate/devices — randomized device triage", () => {
         customName: null,
         customCategory: "People / Personal Devices",
         customSubcategory: null,
-        owner: "tony",
+        owner: "admin_user",
       },
     ]);
     const res = await invoke("GET", "/api/fortigate/devices");
@@ -148,7 +148,7 @@ describe("GET /api/fortigate/devices — randomized device triage", () => {
     expect(dev).toBeDefined();
     expect(dev.is_overridden).toBe(true);
     expect(dev.category).toBe("People / Personal Devices");
-    expect(dev.owner).toBe("tony");
+    expect(dev.owner).toBe("admin_user");
     expect(dev.needs_label).toBe(false);
     expect(dev.owner_missing).toBe(false);
   });
@@ -178,14 +178,14 @@ describe("GET /api/fortigate/devices — randomized device triage", () => {
         customName: "Guest phone",
         customCategory: null,
         customSubcategory: null,
-        owner: "tony",
+        owner: "admin_user",
       },
     ]);
     const res = await invoke("GET", "/api/fortigate/devices");
     expect(res.status).toBe(200);
     const dev = res.body.devices.find((d: any) => d.mac === RANDOM_MAC);
     expect(dev.is_overridden).toBe(true);
-    expect(dev.owner).toBe("tony");
+    expect(dev.owner).toBe("admin_user");
     expect(dev.needs_label).toBe(false);
   });
 });

@@ -21,7 +21,7 @@ interface PrinterConfig {
 // IPP implementation does not surface drum life on this model.
 const OFFICE_PRINTERS: PrinterConfig[] = [
   {
-    name: "Sandra's Office",
+    name: "Office Printer 2",
     statusEntity: 'sensor.hp_color_laserjet_pro_mfp_3301_2',
     cartridges: [
       { label: 'Black', entity: 'sensor.hp_color_laserjet_pro_mfp_3301_black_cartridge_2', color: '#374151' },

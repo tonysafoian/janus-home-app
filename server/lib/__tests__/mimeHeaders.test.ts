@@ -24,7 +24,7 @@ describe("decodeMimeHeader", () => {
     expect(decodeMimeHeader(enc)).toBe("Café résumé");
   });
 
-  it("reproduces the Tony bug input → clean output (the appointment confirmation case)", () => {
+  it("reproduces the appointment confirmation bug input → clean output (the appointment confirmation case)", () => {
     // The real Gmail header was something like:
     //   Subject: =?UTF-8?B?WW91ciBJbi1ob21lIEFwcG9pbnRtZW50IENvbmZpcm1hdGlvbsKgwqAvLyAzMDYzMDM4MA==?=
     // which decodes to "Your In-home Appointment Confirmation\u00a0\u00a0// 30630380"
