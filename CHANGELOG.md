@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.17] - 2026-10-11
+### Fixes
+- **Home Assistant Add-on Local Build**: Removed external `image:` reference to `ghcr.io` from `janus/config.yaml`. Home Assistant now builds the add-on container directly on device from source using `janus/Dockerfile`, completely resolving `[403] Head "https://ghcr.io/...": denied` errors during installation and updates.
+- **Dockerfile Build Fallback**: Added robust branch/tag fallback in `janus/Dockerfile` so container builds clone the tagged release or fall back to default branch cleanly.
+
 ## [1.0.16] - 2026-10-11
 ### Security & Privacy
 - **Scrubbed Personal PII**: Removed hardcoded residential GPS coordinates, utility account numbers, personal bills, personal phone numbers, and basketball roster emails from migrations and codebase.
