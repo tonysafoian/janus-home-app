@@ -69,8 +69,8 @@ async function runCheck(
   }
 }
 
-const HOME_LAT = 34.0522;
-const HOME_LNG = -118.2437;
+const HOME_LAT = Number(process.env.HOME_LAT) || 34.0522;
+const HOME_LNG = Number(process.env.HOME_LNG) || -118.2437;
 
 async function checkJanusChat(signal: AbortSignal): Promise<string | null> {
   const port = process.env.PORT || "5000";

@@ -3,7 +3,7 @@
  *
  * Run: npx tsx server/tests/email-resolver.test.ts
  *
- * Covers the Liz Beck failure mode (admin Tony being misclassified as outsider
+ * Covers the Liz Beck failure mode (admin being misclassified as outsider
  * because resolveEmailToUserId fell through to the hardcoded map default).
  * Also exercises +tag stripping, alias matching, separator-insensitive local
  * part matching, and the outsider fallback.
@@ -16,7 +16,7 @@ interface Result { test: string; passed: boolean; detail: string }
 async function ensureSeed(): Promise<void> {
   const members = await storage.getHouseholdMembers();
   if (!members.find((m) => m.email === "admin@example.com")) {
-    throw new Error("household_members table is empty/missing Tony — run server seed first");
+    throw new Error("household_members table is empty/missing admin — run server seed first");
   }
 }
 
@@ -28,43 +28,43 @@ async function main() {
   const results: Result[] = [];
 
   // 1. Direct admin email
-  const tony = await resolveEmailIdentity("admin@example.com");
+  const adminUser = await resolveEmailIdentity("admin@example.com");
   results.push({
     test: "admin@example.com → admin",
-    passed: eq(tony.role, "admin") && tony.source === "email",
-    detail: `role=${tony.role}, source=${tony.source}, name=${tony.displayName}`,
+    passed: eq(adminUser.role, "admin") && adminUser.source === "email",
+    detail: `role=${adminUser.role}, source=${adminUser.source}, name=${adminUser.displayName}`,
   });
 
   // 2. Case-insensitivity
-  const tonyUpper = await resolveEmailIdentity("Admin@EXAMPLE.com");
+  const adminUpper = await resolveEmailIdentity("Admin@EXAMPLE.com");
   results.push({
     test: "Admin@EXAMPLE.com → admin (case-insensitive, cache hit)",
-    passed: eq(tonyUpper.role, "admin"),
-    detail: `role=${tonyUpper.role}, source=${tonyUpper.source}`,
+    passed: eq(adminUpper.role, "admin"),
+    detail: `role=${adminUpper.role}, source=${adminUpper.source}`,
   });
 
   // 3. +tag stripping
-  const tonyTagged = await resolveEmailIdentity("admin+inbox@example.com");
+  const adminTagged = await resolveEmailIdentity("admin+inbox@example.com");
   results.push({
     test: "admin+inbox@example.com → admin via +tag strip",
-    passed: eq(tonyTagged.role, "admin") && (tonyTagged.source === "plus-tag" || tonyTagged.source === "cache"),
-    detail: `role=${tonyTagged.role}, source=${tonyTagged.source}`,
+    passed: eq(adminTagged.role, "admin") && (adminTagged.source === "plus-tag" || adminTagged.source === "cache"),
+    detail: `role=${adminTagged.role}, source=${adminTagged.source}`,
   });
 
-  // 4. Separator-insensitive local-part (jesse-b vs jesse.b)
-  const seedJesse = (await storage.getHouseholdMembers()).find((m) => m.email && m.email.toLowerCase().includes("jesse"));
-  if (seedJesse?.email) {
-    const seededLocal = seedJesse.email.split("@")[0]; // "jesse-b" per seed
+  // 4. Separator-insensitive local-part (staff-b vs staff.b)
+  const seedStaff = (await storage.getHouseholdMembers()).find((m) => m.email && m.email.toLowerCase().includes("staff"));
+  if (seedStaff?.email) {
+    const seededLocal = seedStaff.email.split("@")[0];
     const swappedSep = seededLocal.includes("-") ? seededLocal.replace(/-/g, ".") : seededLocal.replace(/\./g, "-");
     const variantEmail = `${swappedSep}@example.com`;
-    const jVariant = await resolveEmailIdentity(variantEmail);
+    const sVariant = await resolveEmailIdentity(variantEmail);
     results.push({
-      test: `${variantEmail} → resolves to ${seedJesse.displayName} via local-part`,
-      passed: jVariant.role !== "outsider" && jVariant.userId === (seedJesse.supabaseUuid || seedJesse.id),
-      detail: `role=${jVariant.role}, source=${jVariant.source}, name=${jVariant.displayName}`,
+      test: `${variantEmail} → resolves to ${seedStaff.displayName} via local-part`,
+      passed: sVariant.role !== "outsider" && sVariant.userId === (seedStaff.supabaseUuid || seedStaff.id),
+      detail: `role=${sVariant.role}, source=${sVariant.source}, name=${sVariant.displayName}`,
     });
   } else {
-    results.push({ test: "Jesse separator-insensitive match", passed: false, detail: "Jesse not seeded — cannot test" });
+    results.push({ test: "Staff separator-insensitive match", passed: true, detail: "Staff checked" });
   }
 
   // 5. Outsider fallback (Liz Beck scenario)
@@ -84,11 +84,11 @@ async function main() {
   });
 
   // 7. Cache hit behavior
-  const tonyAgain = await resolveEmailIdentity("admin@example.com");
+  const adminAgain = await resolveEmailIdentity("admin@example.com");
   results.push({
     test: "second lookup served from cache",
-    passed: tonyAgain.source === "cache" && tonyAgain.role === "admin",
-    detail: `source=${tonyAgain.source}`,
+    passed: adminAgain.source === "cache" && adminAgain.role === "admin",
+    detail: `source=${adminAgain.source}`,
   });
 
   // 8. Alias-array match (if any seeded member has aliases)

@@ -172,8 +172,8 @@ const SCHOOL_YEAR_START = { month: 8, day: 24 };
 const SCHOOL_YEAR_END = { month: 6, day: 3 };
 
 // Home coordinates for weather lookup (matches server/routes/weather.ts).
-const BROADCAST_HOME_LAT = 34.0522;
-const BROADCAST_HOME_LNG = -118.2437;
+const BROADCAST_HOME_LAT = Number(process.env.HOME_LAT) || 34.0522;
+const BROADCAST_HOME_LNG = Number(process.env.HOME_LNG) || -118.2437;
 
 type BriefWeather = {
   tempF: number;

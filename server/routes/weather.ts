@@ -8,8 +8,8 @@ import {
 
 const router = Router();
 
-const HOME_LAT = 34.0522;
-const HOME_LNG = -118.2437;
+const HOME_LAT = Number(process.env.HOME_LAT) || 34.0522;
+const HOME_LNG = Number(process.env.HOME_LNG) || -118.2437;
 
 let cachedData: { data: unknown; expiresAt: number } | null = null;
 const CACHE_TTL_MS = 5 * 60 * 1000;

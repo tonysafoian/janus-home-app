@@ -110,8 +110,10 @@ async function syncConcerts(db: any) {
       startDateTime: startDate, endDateTime: endDate,
       size: '100', sort: 'date,asc',
     }));
+    const lat = process.env.HOME_LAT || '34.0522';
+    const lng = process.env.HOME_LNG || '-118.2437';
     const geoQuery = {
-      classificationName: 'music', latlong: '34.0522,-118.2437',
+      classificationName: 'music', latlong: `${lat},${lng}`,
       radius: '30', unit: 'miles',
       startDateTime: startDate, endDateTime: endDate,
       size: '200', sort: 'date,asc',
@@ -148,9 +150,11 @@ async function syncConcerts(db: any) {
   }
 
   if (sgKey) {
+    const lat = process.env.HOME_LAT || '34.0522';
+    const lng = process.env.HOME_LNG || '-118.2437';
     const sgQueries = [
-      { 'taxonomies.name': 'concert', lat: '34.0522', lon: '-118.2437', range: '30mi', per_page: '200', 'datetime_utc.gte': now.toISOString().slice(0, 10), 'datetime_utc.lte': endDateSg, sort: 'datetime_utc.asc' },
-      { 'taxonomies.name': 'concert', lat: '34.0522', lon: '-118.2437', range: '30mi', per_page: '200', 'datetime_utc.gte': now.toISOString().slice(0, 10), 'datetime_utc.lte': endDateSg, sort: 'score.desc' },
+      { 'taxonomies.name': 'concert', lat, lon: lng, range: '30mi', per_page: '200', 'datetime_utc.gte': now.toISOString().slice(0, 10), 'datetime_utc.lte': endDateSg, sort: 'datetime_utc.asc' },
+      { 'taxonomies.name': 'concert', lat, lon: lng, range: '30mi', per_page: '200', 'datetime_utc.gte': now.toISOString().slice(0, 10), 'datetime_utc.lte': endDateSg, sort: 'score.desc' },
     ];
     const beforeSg = allConcerts.length;
     for (const q of sgQueries) {
@@ -522,9 +526,11 @@ async function syncShows(db: any) {
   if (sgKey) {
     const sgShowTypes = ['theater', 'broadway_tickets_national', 'comedy', 'family'];
     const beforeSg = allShows.length;
+    const lat = process.env.HOME_LAT || '34.0522';
+    const lng = process.env.HOME_LNG || '-118.2437';
     for (const taxo of sgShowTypes) {
       const events = await fetchSeatGeekEvents({
-        'taxonomies.name': taxo, lat: '34.0522', lon: '-118.2437', range: '30mi',
+        'taxonomies.name': taxo, lat, lon: lng, range: '30mi',
         per_page: '100', 'datetime_utc.gte': now.toISOString().slice(0, 10),
         'datetime_utc.lte': endDateSg, sort: 'datetime_utc.asc',
       });

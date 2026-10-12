@@ -203,8 +203,8 @@ router.post('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =
   }
 });
 
-const LAT = 34.0522;
-const LON = -118.2437;
+const LAT = Number(process.env.HOME_LAT) || 34.0522;
+const LON = Number(process.env.HOME_LNG) || -118.2437;
 const POOL_HEATER_ENTITY = 'switch.pool_heater';
 const SPA_HEATER_ENTITY = 'switch.spa_heater';
 const POOL_CLIMATE_ENTITY = 'climate.pool';

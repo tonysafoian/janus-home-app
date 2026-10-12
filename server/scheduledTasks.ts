@@ -252,7 +252,7 @@ export async function runTeslaBatteryMonitor(): Promise<void> {
                       ...(location ? { location } : {}),
                     });
 
-                    // Send WhatsApp alert to Tony
+                    // Send WhatsApp alert to admin
                     try {
                       const phone = await getAlertPhoneNumber();
                       const msg = `🅿️ ${vehicleName} stopped driving near ${location || 'unknown location'}.`;

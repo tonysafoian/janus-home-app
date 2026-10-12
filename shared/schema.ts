@@ -1191,7 +1191,7 @@ export const deviceOverrides = pgTable("device_overrides", {
   customCategory: text("custom_category"),
   customSubcategory: text("custom_subcategory"),
   originalHostname: text("original_hostname"),
-  // owner: free-text label (e.g. "Tony's iPhone", "Guest — Jane"). Set from
+  // owner: free-text label (e.g. "Admin's iPhone", "Guest — Jane"). Set from
   // the edit popover; used to clear the needs_label triage flag.
   owner: text("owner"),
   // trusted: admin-confirmed device that belongs to the household.
@@ -1579,7 +1579,7 @@ export const ballPlayers = pgTable("ball_players", {
   phone: text("phone"),
   token: text("token").notNull().unique(),
   active: boolean("active").default(true).notNull(),
-  // is_host = Tony. Auto-confirmed IN, skipped on email blasts.
+  // is_host = Event host / organizer. Auto-confirmed IN, skipped on email blasts.
   isHost: boolean("is_host").default(false).notNull(),
   notes: text("notes"),
   // Captured at first waiver sign-up via the player Ball page. One of

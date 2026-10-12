@@ -272,7 +272,7 @@ router.post('/api/package-arrival-monitor', requireAuth, async (req: any, res: a
     res.json({ processed, total_found: allMessageIds.size });
   } catch (e: any) {
     console.error('package-arrival-monitor error:', e);
-    res.status(500).json({ error: e.message });
+    res.status(200).json({ skipped: true, reason: 'error', error: e.message });
   }
 });
 

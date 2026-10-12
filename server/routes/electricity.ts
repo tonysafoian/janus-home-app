@@ -1262,8 +1262,8 @@ router.get('/live-rate', requireAuth, async (_req: AuthenticatedRequest, res: Re
 const INSIGHTS_MIN_DAYS = 14;
 const INSIGHTS_TARGET_DAYS = 30;
 const INSIGHTS_CONTEXT_CACHE_MS = 30 * 60 * 1000;
-const HOME_LAT = 34.0522;
-const HOME_LNG = -118.2437;
+const HOME_LAT = Number(process.env.HOME_LAT) || 34.0522;
+const HOME_LNG = Number(process.env.HOME_LNG) || -118.2437;
 let insightsContextCache: { key: string; expiresAt: number; rows: EnergyDailyContextRow[] } | null = null;
 
 function addIsoDays(date: string, days: number): string {

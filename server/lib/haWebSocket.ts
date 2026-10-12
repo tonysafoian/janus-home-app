@@ -149,6 +149,60 @@ export function isCacheReady(): boolean {
   return cacheReady;
 }
 
+export interface HAUser {
+  id: string;
+  name: string;
+  username?: string;
+  is_owner?: boolean;
+  is_admin?: boolean;
+  group_ids?: string[];
+}
+
+const haUsersCache: Map<string, HAUser> = new Map();
+const haUsersByNameCache: Map<string, HAUser> = new Map();
+
+export async function refreshHAUsers(): Promise<HAUser[]> {
+  try {
+    const result = await sendHAWSCommand({ type: 'config/auth/list' }, 5000);
+    if (Array.isArray(result)) {
+      haUsersCache.clear();
+      haUsersByNameCache.clear();
+      for (const u of result as HAUser[]) {
+        if (u.id) haUsersCache.set(u.id, u);
+        if (u.name) haUsersByNameCache.set(u.name.toLowerCase().trim(), u);
+        if (u.username) haUsersByNameCache.set(u.username.toLowerCase().trim(), u);
+      }
+      console.log(`[HA-WS] Successfully synced ${haUsersCache.size} Home Assistant users for RBAC`);
+      return result as HAUser[];
+    }
+  } catch (err) {
+    console.warn('[HA-WS] Could not fetch config/auth/list:', err instanceof Error ? err.message : err);
+  }
+  return [];
+}
+
+export function isHAUserAdminSync(userId?: string, userName?: string): boolean {
+  if (userId) {
+    const cleanId = userId.replace(/^ha:/, '');
+    const user = haUsersCache.get(cleanId);
+    if (user) {
+      return Boolean(user.is_owner || user.is_admin || user.group_ids?.includes('system-admin'));
+    }
+  }
+  if (userName) {
+    const normalizedName = userName.toLowerCase().trim();
+    const user = haUsersByNameCache.get(normalizedName);
+    if (user) {
+      return Boolean(user.is_owner || user.is_admin || user.group_ids?.includes('system-admin'));
+    }
+    const configuredAdmin = process.env.ADMIN_USER_NAME?.toLowerCase().trim();
+    if (configuredAdmin && normalizedName === configuredAdmin) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function sendHAWSCommand(command: Record<string, unknown>, timeoutMs = 30_000): Promise<unknown> {
   return new Promise((resolve, reject) => {
     if (!wsClient || wsClient.readyState !== WebSocket.OPEN) {
@@ -239,6 +293,9 @@ export function startHAWebSocket(): void {
       const statesId = nextId();
       send(wsClient!, { id: statesId, type: 'get_states' });
 
+      // Refresh Home Assistant users for RBAC role verification
+      refreshHAUsers().catch(e => console.warn('[HA-WS] User list fetch failed:', e));
+
       const subId = nextId();
       send(wsClient!, { id: subId, type: 'subscribe_events', event_type: 'state_changed' });
 
@@ -247,6 +304,7 @@ export function startHAWebSocket(): void {
         if (wsClient && wsClient.readyState === WebSocket.OPEN) {
           console.log('[HA-WS] Safety sync: refreshing all states from HA');
           send(wsClient, { id: nextId(), type: 'get_states' });
+          refreshHAUsers().catch(() => {});
         }
       }, SAFETY_SYNC_INTERVAL);
 

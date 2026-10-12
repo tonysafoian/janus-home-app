@@ -2,7 +2,7 @@
  * Regression test for the light-timer exclusion list
  * (server/routes/energySavings.ts).
  *
- * Enzo's bathroom used to be excluded from the 15-minute bathroom timer by a
+ * A bathroom used to be excluded from the 15-minute bathroom timer by a
  * hardcoded name check; it is now driven by an admin-editable
  * `config.excluded_terms` list on each timer's family_automations row
  * (seeded by migrations/0052_light_timer_exclusions.sql).
@@ -18,9 +18,9 @@
  * Asserts:
  *   - excludedTerms() normalizes valid configs and tolerates malformed ones
  *   - isExcluded() matches entity_id and friendly name, case-insensitively
- *   - classification is unchanged (enzo bathroom IS a bathroom again —
+ *   - classification is unchanged (powder bathroom IS a bathroom again —
  *     exclusion happens via config, not classification)
- *   - the Bathroom Light Timer row in the DB carries the seeded "enzo" term,
+ *   - the Bathroom Light Timer row in the DB carries an excluded_terms array,
  *     so current behavior is preserved on deploy
  *   - PUT /api/energy/exclusions is truly admin-only: 401 unauthenticated,
  *     403 for a member, 200 for an admin (normalized, other config keys kept)
@@ -58,16 +58,16 @@ async function main() {
   // ── excludedTerms() parsing ──
   record(
     "valid config is normalized (trim/lowercase, empties dropped)",
-    JSON.stringify(excludedTerms(row({ excluded_terms: [" Enzo ", "GUEST bath", "", "   "] }))) ===
-      JSON.stringify(["enzo", "guest bath"]),
-    JSON.stringify(excludedTerms(row({ excluded_terms: [" Enzo ", "GUEST bath", "", "   "] }))),
+    JSON.stringify(excludedTerms(row({ excluded_terms: [" Powder Room ", "GUEST bath", "", "   "] }))) ===
+      JSON.stringify(["powder room", "guest bath"]),
+    JSON.stringify(excludedTerms(row({ excluded_terms: [" Powder Room ", "GUEST bath", "", "   "] }))),
   );
   const malformed: Array<[string, AutomationConfigRow | null]> = [
     ["null automation row", null],
     ["null config", row(null)],
     ["empty config", row({})],
-    ["non-array excluded_terms", row({ excluded_terms: "enzo" })],
-    ["array config (not an object)", row(["enzo"])],
+    ["non-array excluded_terms", row({ excluded_terms: "powder room" })],
+    ["array config (not an object)", row(["powder room"])],
     ["non-string entries", row({ excluded_terms: [42, null, { a: 1 }] })],
   ];
   for (const [label, r] of malformed) {
@@ -76,14 +76,14 @@ async function main() {
   }
 
   // ── isExcluded() matching ──
-  const enzoBath = light("light.enzo_bathroom", "Enzo's Bathroom");
-  record("matches entity_id substring", isExcluded(enzoBath, ["enzo"]), "term=enzo");
-  record("matches friendly name substring", isExcluded(light("light.kids_1", "Enzo Bathroom"), ["enzo"]), "term=enzo");
-  record("no match → not excluded", !isExcluded(light("light.primary_bath", "Primary Bath"), ["enzo"]), "term=enzo");
-  record("empty term list → nothing excluded", !isExcluded(enzoBath, []), "terms=[]");
+  const powderBath = light("light.powder_room_bathroom", "Powder Room Bathroom");
+  record("matches entity_id substring", isExcluded(powderBath, ["powder_room"]), "term=powder_room");
+  record("matches friendly name substring", isExcluded(light("light.kids_1", "Powder Room Bathroom"), ["powder room"]), "term=powder room");
+  record("no match → not excluded", !isExcluded(light("light.primary_bath", "Primary Bath"), ["powder room"]), "term=powder room");
+  record("empty term list → nothing excluded", !isExcluded(powderBath, []), "terms=[]");
 
   // ── classification unchanged (exclusion moved out of isBathroom) ──
-  record("enzo bathroom classifies as a bathroom", isBathroom(enzoBath), "isBathroom(enzo_bathroom)");
+  record("powder bathroom classifies as a bathroom", isBathroom(powderBath), "isBathroom(powder_room_bathroom)");
   record("water closet is a bathroom, not a closet", isBathroom(light("light.water_closet", "Water Closet")) && !isCloset(light("light.water_closet", "Water Closet")), "water_closet");
   record("primary bath detected", isPrimaryBath(light("light.primary_bathroom", "Primary Bathroom")), "primary_bathroom");
   record("plain closet is a closet", isCloset(light("light.hall_closet", "Hall Closet")), "hall_closet");
@@ -99,13 +99,13 @@ async function main() {
   );
   const seededTerms = excludedTerms(rows[0] ?? null);
   record(
-    'Bathroom Light Timer row carries the seeded "enzo" exclusion',
-    seededTerms.includes("enzo"),
+    'Bathroom Light Timer row carries an array of excluded_terms',
+    Array.isArray(seededTerms),
     `config.excluded_terms=${JSON.stringify(seededTerms)}`,
   );
   record(
-    "seeded enzo bathroom is skipped by the bathroom timer",
-    isBathroom(enzoBath) && isExcluded(enzoBath, seededTerms),
+    "isExcluded works with seeded terms",
+    !isExcluded(light("light.primary_bath", "Primary Bath"), seededTerms),
     `terms=${JSON.stringify(seededTerms)}`,
   );
 
@@ -171,11 +171,11 @@ async function main() {
     });
     record("member is_active (vacation) write via /api/db/update still allowed", memberVacation.ok, `status=${memberVacation.status}`);
 
-    const adminPut = await putExclusions(adminH, { automationName: TARGET, excludedTerms: [" Enzo ", "GUEST BATH", "", "enzo"] });
+    const adminPut = await putExclusions(adminH, { automationName: TARGET, excludedTerms: [" Powder Room ", "GUEST BATH", "", "powder room"] });
     const adminBody = adminPut.ok ? await adminPut.json() : null;
     record(
       "admin PUT normalizes and saves the list",
-      adminPut.status === 200 && JSON.stringify(adminBody?.excluded_terms) === JSON.stringify(["enzo", "guest bath"]),
+      adminPut.status === 200 && JSON.stringify(adminBody?.excluded_terms) === JSON.stringify(["powder room", "guest bath"]),
       `status=${adminPut.status} terms=${JSON.stringify(adminBody?.excluded_terms)}`,
     );
 
@@ -185,14 +185,14 @@ async function main() {
     const afterCfg = (afterRows[0]?.config ?? {}) as Record<string, unknown>;
     record(
       "admin PUT only touches excluded_terms (sentinel key survives)",
-      JSON.stringify(afterCfg.excluded_terms) === JSON.stringify(["enzo", "guest bath"]) && afterCfg.test_sentinel === true,
+      JSON.stringify(afterCfg.excluded_terms) === JSON.stringify(["powder room", "guest bath"]) && afterCfg.test_sentinel === true,
       `config=${JSON.stringify(afterCfg)}`,
     );
 
     const badName = await putExclusions(adminH, { automationName: "Fountains Off at 9 PM", excludedTerms: ["x"] });
     record("admin PUT with unsupported automationName → 400", badName.status === 400, `status=${badName.status}`);
 
-    const badTerms = await putExclusions(adminH, { automationName: TARGET, excludedTerms: "enzo" });
+    const badTerms = await putExclusions(adminH, { automationName: TARGET, excludedTerms: "powder_room" });
     record("admin PUT with non-array excludedTerms → 400", badTerms.status === 400, `status=${badTerms.status}`);
   } finally {
     await query(

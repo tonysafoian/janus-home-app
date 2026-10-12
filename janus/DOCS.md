@@ -58,7 +58,7 @@ All options in the add-on configuration are optional. API keys are masked as pas
 | Option | Description |
 |---|---|
 | `google_service_account_key` | JSON service account key string for Google Calendar, Gmail parcel scans, and Drive backups. |
-| `wati_api_endpoint`, `wati_api_token`, `wati_phone_number` | WATI WhatsApp Business API for bi-directional household messaging and alert dispatch. |
+| `wati_api_endpoint`, `wati_access_token`, `wati_phone_number` | WATI WhatsApp Business API for bi-directional household messaging and alert dispatch. |
 | `alert_phone_number` | Destination mobile phone number (E.164) for urgent vehicle, security, or system alerts. |
 | `tesla_client_id`, `tesla_client_secret` | (Optional) Direct Tesla Fleet API developer credentials. If omitted, Janus automatically discovers Tesla vehicles and telemetry from your Home Assistant Tesla integration (Tesla Fleet, Teslemetry, or Tessie). |
 | `verkada_api_key`, `verkada_org_id` | (Optional) Verkada Cloud API for enterprise cameras and access doors. If omitted, Janus automatically discovers and displays all Home Assistant `camera.*` entities. |
