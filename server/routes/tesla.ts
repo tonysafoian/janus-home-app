@@ -517,8 +517,8 @@ router.get('/map', requireAuth, async (req: AuthenticatedRequest, res: Response)
     return;
   }
 
-  const HOME_LAT = 34.0522;
-  const HOME_LNG = -118.2437;
+  const HOME_LAT = Number(process.env.HOME_LAT) || 34.0522;
+  const HOME_LNG = Number(process.env.HOME_LNG) || -118.2437;
   const action = req.query.action as string;
 
   if (action === "api-key") {

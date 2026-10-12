@@ -14,13 +14,14 @@ import { Input } from '@/components/ui/input';
 import { format, parseISO } from 'date-fns';
 import { apiClient } from '@/lib/apiClient';
 import { Slider } from '@/components/ui/slider';
+import { useQuery } from '@tanstack/react-query';
 
 // Window extensions for Google Maps dynamic script loading
 type WindowWithGoogle = Window & { google?: typeof google };
 type WindowWithCallbacks = Window & Record<string, unknown>;
 
-const LAT = 34.0522;
-const LNG = -118.2437;
+const DEFAULT_LAT = 34.0522;
+const DEFAULT_LNG = -118.2437;
 
 interface RainViewerFrame {
   time: number;
@@ -121,6 +122,18 @@ function pollenColor(category: string): string {
 
 export default function Weather() {
   const navigate = useNavigate();
+
+  const { data: estateConfig } = useQuery<{ latitude?: number; longitude?: number }>({
+    queryKey: ['estate-config'],
+    queryFn: async () => {
+      const res = await apiClient.get('/api/estate/config');
+      return res as any;
+    },
+    staleTime: 60 * 60_000,
+  });
+  const LAT = estateConfig?.latitude ?? DEFAULT_LAT;
+  const LNG = estateConfig?.longitude ?? DEFAULT_LNG;
+
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
   const radarLayerRef = useRef<google.maps.ImageMapType | null>(null);

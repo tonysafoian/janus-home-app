@@ -1124,7 +1124,7 @@ var init_schema = __esm({
       customCategory: text("custom_category"),
       customSubcategory: text("custom_subcategory"),
       originalHostname: text("original_hostname"),
-      // owner: free-text label (e.g. "Tony's iPhone", "Guest — Jane"). Set from
+      // owner: free-text label (e.g. "Admin's iPhone", "Guest — Jane"). Set from
       // the edit popover; used to clear the needs_label triage flag.
       owner: text("owner"),
       // trusted: admin-confirmed device that belongs to the household.
@@ -1334,7 +1334,7 @@ var init_schema = __esm({
       phone: text("phone"),
       token: text("token").notNull().unique(),
       active: boolean("active").default(true).notNull(),
-      // is_host = Tony. Auto-confirmed IN, skipped on email blasts.
+      // is_host = Event host / organizer. Auto-confirmed IN, skipped on email blasts.
       isHost: boolean("is_host").default(false).notNull(),
       notes: text("notes"),
       // Captured at first waiver sign-up via the player Ball page. One of
@@ -2416,190 +2416,65 @@ var init_auditLog = __esm({
   }
 });
 
-// server/auth.ts
-import jwt from "jsonwebtoken";
-import crypto2 from "crypto";
-function generateToken(user) {
-  return jwt.sign(user, JWT_SECRET, { expiresIn: JWT_EXPIRY });
-}
-function verifyToken(token) {
-  try {
-    return jwt.verify(token, JWT_SECRET);
-  } catch {
-    return null;
+// server/socket.ts
+import { Server as SocketServer } from "socket.io";
+function getAllowedOrigins() {
+  if (process.env.NODE_ENV === "production" && process.env.ALLOWED_ORIGINS) {
+    return process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim());
   }
+  return true;
 }
-function setAuthCookie(res, token) {
-  res.cookie("auth_token", token, {
-    httpOnly: true,
-    secure: true,
-    sameSite: "lax",
-    maxAge: 7 * 24 * 60 * 60 * 1e3,
-    path: "/"
+function setupSocketIO(httpServer) {
+  io = new SocketServer(httpServer, {
+    path: "/ws",
+    cors: {
+      origin: getAllowedOrigins(),
+      credentials: true
+    },
+    transports: ["websocket", "polling"]
   });
-}
-function clearAuthCookie(res) {
-  res.clearCookie("auth_token", {
-    httpOnly: true,
-    secure: true,
-    sameSite: "lax",
-    path: "/"
-  });
-}
-function getAuthUser(req) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && req.headers["x-cron-secret"] === cronSecret) {
-    return {
-      userId: "system",
-      email: "cron@local",
-      displayName: "Janus Cron",
-      avatarUrl: null,
-      roles: ["admin"],
-      approvalStatus: "approved"
-    };
-  }
-  const isHAEnvironment = Boolean(process.env.SUPERVISOR_TOKEN);
-  const haUserId = req.headers["x-remote-user-id"] || req.headers["x-ingress-user-id"];
-  if (isHAEnvironment && haUserId) {
-    const haUserName = req.headers["x-remote-user-name"] || req.headers["x-remote-user-display-name"] || "HA User";
-    const haAdminHeader = req.headers["x-remote-user-is-admin"];
-    const isAdmin2 = haAdminHeader === void 0 || haAdminHeader === "" || String(haAdminHeader).toLowerCase() !== "false" && haAdminHeader !== "0";
-    return {
-      userId: `ha:${haUserId}`,
-      email: `${haUserName.toLowerCase().replace(/[^a-z0-9]/g, ".")}@homeassistant.local`,
-      displayName: req.headers["x-remote-user-display-name"] || haUserName,
-      avatarUrl: null,
-      roles: isAdmin2 ? ["admin"] : ["member"],
-      approvalStatus: "approved"
-    };
-  }
-  const cookieToken = req.cookies?.auth_token;
-  if (cookieToken) {
-    const user = verifyToken(cookieToken);
-    if (user) return user;
-  }
-  const authHeader = req.headers.authorization;
-  if (authHeader?.startsWith("Bearer ")) {
-    const bearerToken = authHeader.slice(7);
-    if (bearerToken) {
-      const user = verifyToken(bearerToken);
-      if (user) return user;
+  io.use((socket, next) => {
+    const token = socket.handshake.auth?.token || parseCookie(socket.handshake.headers.cookie || "", "auth_token");
+    if (!token) {
+      return next(new Error("Authentication required"));
     }
-  }
-  return null;
-}
-function requireAuth(req, res, next) {
-  const user = getAuthUser(req);
-  if (!user) {
-    res.status(401).json({ error: "Authentication required" });
-    return;
-  }
-  req.user = user;
-  next();
-}
-function requireRole(...roles) {
-  return (req, res, next) => {
-    const user = getAuthUser(req);
+    const user = verifyToken(token);
     if (!user) {
-      console.warn(`[auth] 401 ${req.method} ${req.path} \u2014 no authenticated user`);
-      res.status(401).json({ error: "Authentication required" });
-      return;
+      return next(new Error("Invalid or expired token"));
     }
-    const hasRequiredRole = roles.some((role) => user.roles.includes(role));
-    if (!hasRequiredRole) {
-      console.warn(`[auth] 403 ${req.method} ${req.path} \u2014 user=${user.email} roles=[${user.roles}] required=[${roles}]`);
-      res.status(403).json({ error: "Insufficient permissions" });
-      return;
+    if (user.approvalStatus !== "approved") {
+      return next(new Error("Account not approved"));
     }
-    req.user = user;
+    socket.data.user = user;
     next();
-  };
-}
-async function linkWorkerProfile(profileId, email) {
-  try {
-    await query(
-      `UPDATE tt_workers SET user_id = $1 WHERE email = $2 AND user_id IS NULL`,
-      [profileId, email.toLowerCase()]
-    );
-  } catch (e) {
-    console.warn("[AUTH] Could not link worker profile:", e);
-  }
-}
-async function handleNewUser(oauthProfile) {
-  const existingProfile = await storage.getProfileByUserId(oauthProfile.userId);
-  if (existingProfile) {
-    const invite2 = await storage.getInvitedEmail(oauthProfile.email);
-    let status = existingProfile.approvalStatus;
-    if (status !== "approved" && invite2) {
-      await storage.updateProfile(oauthProfile.userId, { approvalStatus: "approved" });
-      status = "approved";
-    }
-    const roles = await storage.getUserRoles(oauthProfile.userId);
-    const roleNames = roles.map((r) => r.role);
-    if (roleNames.includes("worker")) {
-      await linkWorkerProfile(existingProfile.id, oauthProfile.email);
-    }
-    return {
-      userId: oauthProfile.userId,
-      email: oauthProfile.email,
-      displayName: existingProfile.displayName,
-      avatarUrl: existingProfile.avatarUrl,
-      roles: roleNames,
-      approvalStatus: status
-    };
-  }
-  const invite = await storage.getInvitedEmail(oauthProfile.email);
-  const isWorkerInvite = invite?.role === "worker";
-  let approvalStatus;
-  if (invite) {
-    approvalStatus = "approved";
-  } else {
-    approvalStatus = "rejected";
-  }
-  const profile = await storage.createProfile({
-    userId: oauthProfile.userId,
-    displayName: oauthProfile.displayName || oauthProfile.email,
-    avatarUrl: oauthProfile.avatarUrl,
-    approvalStatus,
-    phoneNumber: invite?.phoneNumber || null
   });
-  if (isWorkerInvite) {
-    await storage.createUserRole({ userId: oauthProfile.userId, role: "worker" });
-    await linkWorkerProfile(profile.id, oauthProfile.email);
-    return {
-      userId: oauthProfile.userId,
-      email: oauthProfile.email,
-      displayName: profile.displayName,
-      avatarUrl: profile.avatarUrl,
-      roles: ["worker"],
-      approvalStatus: "approved"
-    };
-  }
-  const roleCount = await storage.countUserRoles();
-  const role = roleCount === 0 ? "admin" : "member";
-  await storage.createUserRole({ userId: oauthProfile.userId, role });
-  if (invite) {
-    await storage.deleteInvitedEmail(oauthProfile.email);
-  }
-  return {
-    userId: oauthProfile.userId,
-    email: oauthProfile.email,
-    displayName: profile.displayName,
-    avatarUrl: profile.avatarUrl,
-    roles: [role],
-    approvalStatus: profile.approvalStatus
-  };
+  io.on("connection", (socket) => {
+    const user = socket.data.user;
+    socket.join(`user:${user.userId}`);
+    console.log(`[WS] Connected: ${user.email} (${socket.id})`);
+    socket.on("disconnect", (reason) => {
+      console.log(`[WS] Disconnected: ${user.email} (${reason})`);
+    });
+  });
+  return io;
 }
-var JWT_SECRET, JWT_EXPIRY;
-var init_auth = __esm({
-  "server/auth.ts"() {
-    init_storage();
-    init_db2();
-    JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET || (() => {
-      console.warn("[AUTH] WARNING: Neither JWT_SECRET nor SESSION_SECRET was configured. Generating secure random secret.");
-      return crypto2.randomBytes(32).toString("hex");
-    })();
-    JWT_EXPIRY = "7d";
+function emitToAll(event, data) {
+  if (!io) return;
+  io.emit(event, data);
+}
+function emitToUser(userId, event, data) {
+  if (!io) return;
+  io.to(`user:${userId}`).emit(event, data);
+}
+function parseCookie(cookieHeader, name) {
+  const match = cookieHeader.split(";").map((c) => c.trim()).find((c) => c.startsWith(`${name}=`));
+  return match ? match.split("=")[1] : void 0;
+}
+var io;
+var init_socket = __esm({
+  "server/socket.ts"() {
+    init_auth();
+    io = null;
   }
 });
 
@@ -3907,6 +3782,544 @@ var init_helpers = __esm({
     REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || `${GOOGLE_REDIRECT_BASE}/google/callback`;
     _alertPhone = null;
     _fallbackPhone = null;
+  }
+});
+
+// server/lib/haWebSocket.ts
+import WebSocket from "ws";
+function scheduleCrestronCheck() {
+  if (crestronCheckTimer) return;
+  crestronCheckTimer = setTimeout(() => {
+    crestronCheckTimer = null;
+    checkCrestronBridge().catch((e) => console.error("[Crestron] Bridge check error:", e));
+  }, 2e3);
+}
+async function checkCrestronBridge() {
+  const allEntities = Array.from(entityCache.values());
+  const lights = allEntities.filter(
+    (e) => e.entity_id.startsWith("light.") && !CRESTRON_EXCLUDED_ENTITIES.has(e.entity_id) && !goveeEntityIdsCache.includes(e.entity_id)
+  );
+  if (lights.length === 0) return;
+  const unavailable = lights.filter((e) => e.state === "unavailable").length;
+  const pct = unavailable / lights.length;
+  const newState = pct >= CRESTRON_OFFLINE_THRESHOLD ? "offline" : "healthy";
+  if (crestronBridgeState === "unknown") {
+    crestronBridgeState = newState;
+    return;
+  }
+  if (newState === crestronBridgeState) return;
+  const prevState = crestronBridgeState;
+  crestronBridgeState = newState;
+  console.log(`[Crestron] Bridge state: ${prevState} \u2192 ${newState} (${unavailable}/${lights.length} unavailable)`);
+  await fireCrestronAlert(newState, unavailable, lights.length);
+}
+async function fireCrestronAlert(state2, unavailable, total) {
+  const alertKey = state2 === "offline" ? "crestron_bridge_offline" : "crestron_bridge_recovered";
+  try {
+    const { rows } = await query(
+      `SELECT id FROM system_audit_log WHERE event_type = 'crestron_alert' AND detail->>'alert_key' = $1 AND created_at > NOW() - INTERVAL '${CRESTRON_DEDUP_MINUTES} minutes' LIMIT 1`,
+      [alertKey]
+    );
+    if (rows.length > 0) {
+      console.log(`[Crestron] Alert "${alertKey}" suppressed by dedup (within ${CRESTRON_DEDUP_MINUTES} min)`);
+      return;
+    }
+  } catch (e) {
+    console.error("[Crestron] Dedup query failed:", e);
+  }
+  const summary = state2 === "offline" ? `Crestron bridge offline: ${unavailable}/${total} lights unavailable (${Math.round(unavailable / total * 100)}%)` : `Crestron bridge recovered: lights back online (${total} total)`;
+  await logAudit("crestron-bridge-monitor", {
+    category: "crestron_bridge",
+    event_type: "crestron_alert",
+    severity: state2 === "offline" ? "warn" : "info",
+    actor_id: "system",
+    actor_name: "Crestron Bridge Monitor",
+    channel: "system",
+    summary,
+    detail: {
+      alert_key: alertKey,
+      unavailable,
+      total,
+      pct: Math.round(unavailable / total * 100)
+    },
+    status: state2 === "offline" ? "error" : "success"
+  });
+  try {
+    const { getAlertPhoneNumber: getAlertPhoneNumber6, sendWhatsAppTo: sendWhatsAppTo2 } = await Promise.resolve().then(() => (init_helpers(), helpers_exports));
+    const phone = await getAlertPhoneNumber6();
+    const msg = state2 === "offline" ? `\u{1F534} *Crestron Home bridge offline*
+${unavailable}/${total} lights are unavailable. Open Janus \u2192 Home Lights to reload.` : `\u2705 *Crestron Home bridge recovered*
+Unavailable lights dropped below threshold (${unavailable}/${total} still offline).`;
+    await sendWhatsAppTo2(phone, msg);
+  } catch (e) {
+    console.error("[Crestron] WhatsApp alert failed:", e);
+  }
+}
+function nextId() {
+  return msgId++;
+}
+function send(ws, msg) {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(msg));
+  }
+}
+function getEntityCache() {
+  return Array.from(entityCache.values());
+}
+function getGoveeEntityIdsFromCache() {
+  return goveeEntityIdsCache;
+}
+function isCacheReady() {
+  return cacheReady;
+}
+async function refreshHAUsers() {
+  try {
+    const result = await sendHAWSCommand({ type: "config/auth/list" }, 5e3);
+    if (Array.isArray(result)) {
+      haUsersCache.clear();
+      haUsersByNameCache.clear();
+      for (const u of result) {
+        if (u.id) haUsersCache.set(u.id, u);
+        if (u.name) haUsersByNameCache.set(u.name.toLowerCase().trim(), u);
+        if (u.username) haUsersByNameCache.set(u.username.toLowerCase().trim(), u);
+      }
+      console.log(`[HA-WS] Successfully synced ${haUsersCache.size} Home Assistant users for RBAC`);
+      return result;
+    }
+  } catch (err) {
+    console.warn("[HA-WS] Could not fetch config/auth/list:", err instanceof Error ? err.message : err);
+  }
+  return [];
+}
+function isHAUserAdminSync(userId, userName) {
+  if (userId) {
+    const cleanId = userId.replace(/^ha:/, "");
+    const user = haUsersCache.get(cleanId);
+    if (user) {
+      return Boolean(user.is_owner || user.is_admin || user.group_ids?.includes("system-admin"));
+    }
+  }
+  if (userName) {
+    const normalizedName = userName.toLowerCase().trim();
+    const user = haUsersByNameCache.get(normalizedName);
+    if (user) {
+      return Boolean(user.is_owner || user.is_admin || user.group_ids?.includes("system-admin"));
+    }
+    const configuredAdmin = process.env.ADMIN_USER_NAME?.toLowerCase().trim();
+    if (configuredAdmin && normalizedName === configuredAdmin) {
+      return true;
+    }
+  }
+  return false;
+}
+function sendHAWSCommand(command, timeoutMs = 3e4) {
+  return new Promise((resolve2, reject) => {
+    if (!wsClient || wsClient.readyState !== WebSocket.OPEN) {
+      reject(new Error("HA WebSocket not connected"));
+      return;
+    }
+    const id = nextId();
+    const timer = setTimeout(() => {
+      pendingCallbacks.delete(id);
+      reject(new Error("HA WebSocket command timed out"));
+    }, timeoutMs);
+    pendingCallbacks.set(id, (msg) => {
+      clearTimeout(timer);
+      pendingCallbacks.delete(id);
+      if (msg.success) {
+        resolve2(msg.result);
+      } else {
+        reject(new Error(msg.error?.message || "HA command failed"));
+      }
+    });
+    send(wsClient, { ...command, id });
+  });
+}
+async function callHAService(domain, service, serviceData = {}) {
+  return sendHAWSCommand({
+    type: "call_service",
+    domain,
+    service,
+    service_data: serviceData
+  });
+}
+function startHAWebSocket() {
+  const supervisorToken2 = process.env.SUPERVISOR_TOKEN || process.env.HASSIO_TOKEN;
+  const HA_URL2 = process.env.HA_URL || (supervisorToken2 ? "http://supervisor/core" : void 0);
+  const HA_TOKEN2 = process.env.HA_TOKEN || supervisorToken2;
+  if (!HA_URL2 || !HA_TOKEN2) {
+    console.log("[HA-WS] HA_URL or HA_TOKEN not configured \u2014 skipping WebSocket connection");
+    return;
+  }
+  const isSupervisor = HA_URL2.includes("supervisor");
+  const wsUrl = isSupervisor ? HA_URL2.replace(/^http(s?)/, "ws$1").replace(/\/$/, "") + "/websocket" : HA_URL2.replace(/^http(s?)/, "ws$1").replace(/\/$/, "") + "/api/websocket";
+  console.log(`[HA-WS] Connecting to ${wsUrl}`);
+  try {
+    wsClient = new WebSocket(wsUrl);
+  } catch (err) {
+    console.error("[HA-WS] Failed to create WebSocket:", err);
+    scheduleReconnect();
+    return;
+  }
+  wsClient.on("open", () => {
+    console.log("[HA-WS] Connected");
+    reconnectDelay = 1e3;
+  });
+  wsClient.on("message", (raw) => {
+    let msg;
+    try {
+      msg = JSON.parse(raw.toString());
+    } catch {
+      return;
+    }
+    const type = msg.type;
+    if (type === "auth_required") {
+      send(wsClient, { type: "auth", access_token: HA_TOKEN2 });
+      return;
+    }
+    if (type === "auth_ok") {
+      console.log("[HA-WS] Authenticated \u2014 fetching all states");
+      msgId = 1;
+      const statesId = nextId();
+      send(wsClient, { id: statesId, type: "get_states" });
+      refreshHAUsers().catch((e) => console.warn("[HA-WS] User list fetch failed:", e));
+      const subId = nextId();
+      send(wsClient, { id: subId, type: "subscribe_events", event_type: "state_changed" });
+      if (safetySyncTimer) clearInterval(safetySyncTimer);
+      safetySyncTimer = setInterval(() => {
+        if (wsClient && wsClient.readyState === WebSocket.OPEN) {
+          console.log("[HA-WS] Safety sync: refreshing all states from HA");
+          send(wsClient, { id: nextId(), type: "get_states" });
+          refreshHAUsers().catch(() => {
+          });
+        }
+      }, SAFETY_SYNC_INTERVAL);
+      return;
+    }
+    if (type === "auth_invalid") {
+      console.error("[HA-WS] Auth failed \u2014 invalid token");
+      logAudit("ha-websocket", {
+        category: "home",
+        event_type: "ha_ws_auth_invalid",
+        severity: "critical",
+        actor_id: "system",
+        actor_name: "System",
+        channel: "system",
+        summary: "HA WebSocket authentication failed \u2014 token may be invalid",
+        detail: {},
+        status: "error"
+      });
+      wsClient?.close();
+      return;
+    }
+    if (type === "result") {
+      const result = msg;
+      const cb = pendingCallbacks.get(result.id);
+      if (cb) {
+        cb({ success: result.success, result: result.result, error: result.error });
+        return;
+      }
+      if (result.success && Array.isArray(result.result)) {
+        const states = result.result;
+        entityCache.clear();
+        for (const entity of states) {
+          entityCache.set(entity.entity_id, entity);
+        }
+        cacheReady = true;
+        console.log(`[HA-WS] Loaded ${states.length} entity states into cache`);
+        goveeTemplateId = nextId();
+        send(wsClient, {
+          id: goveeTemplateId,
+          type: "render_template",
+          template: "{{ (integration_entities('govee') + integration_entities('govee_cloud') + integration_entities('govee_ble') + integration_entities('govee_light_local')) | unique | list | to_json }}"
+        });
+      }
+      return;
+    }
+    if (type === "event" && msg.id === goveeTemplateId) {
+      const listeners = msg.event ?? {};
+      const eventResult = listeners.result;
+      if (eventResult) {
+        try {
+          let ids;
+          if (Array.isArray(eventResult)) {
+            ids = eventResult;
+          } else if (typeof eventResult === "string") {
+            const jsonFixed = eventResult.replace(/'/g, '"');
+            ids = JSON.parse(jsonFixed);
+          } else {
+            ids = [];
+          }
+          if (Array.isArray(ids) && ids.length > 0) {
+            goveeEntityIdsCache = ids;
+            console.log(`[HA-WS] Cached ${ids.length} Govee entity IDs`);
+          }
+          scheduleCrestronCheck();
+        } catch (e) {
+          console.warn("[HA-WS] Failed to parse Govee template result:", e.message);
+        }
+      }
+      return;
+    }
+    if (type === "event") {
+      const event = msg.event;
+      if (!event || event.event_type !== "state_changed" || !event.data) return;
+      const { entity_id, new_state } = event.data;
+      if (new_state) {
+        entityCache.set(entity_id, new_state);
+        emitToAll("ha:state_changed", { entity_id, new_state });
+      } else {
+        entityCache.delete(entity_id);
+        emitToAll("ha:state_changed", { entity_id, new_state: null });
+      }
+      if (entity_id.startsWith("light.")) scheduleCrestronCheck();
+      return;
+    }
+  });
+  wsClient.on("close", (code, reason) => {
+    console.warn(`[HA-WS] Disconnected (code=${code} reason=${reason.toString() || "none"}) \u2014 reconnecting in ${reconnectDelay}ms`);
+    cacheReady = false;
+    wsClient = null;
+    if (safetySyncTimer) {
+      clearInterval(safetySyncTimer);
+      safetySyncTimer = null;
+    }
+    scheduleReconnect();
+  });
+  wsClient.on("error", (err) => {
+    console.error(`[HA-WS] Error: ${err.message}`);
+  });
+}
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+    startHAWebSocket();
+  }, reconnectDelay);
+}
+var entityCache, goveeEntityIdsCache, wsClient, reconnectTimer, reconnectDelay, msgId, cacheReady, goveeTemplateId, CRESTRON_EXCLUDED_ENTITIES, CRESTRON_OFFLINE_THRESHOLD, CRESTRON_DEDUP_MINUTES, crestronBridgeState, crestronCheckTimer, pendingCallbacks, MAX_RECONNECT_DELAY, SAFETY_SYNC_INTERVAL, safetySyncTimer, haUsersCache, haUsersByNameCache;
+var init_haWebSocket = __esm({
+  "server/lib/haWebSocket.ts"() {
+    init_socket();
+    init_auditLog();
+    init_db2();
+    entityCache = /* @__PURE__ */ new Map();
+    goveeEntityIdsCache = [];
+    wsClient = null;
+    reconnectTimer = null;
+    reconnectDelay = 1e3;
+    msgId = 1;
+    cacheReady = false;
+    goveeTemplateId = null;
+    CRESTRON_EXCLUDED_ENTITIES = /* @__PURE__ */ new Set([
+      "light.spa_light",
+      "light.pool_light",
+      "light.laminar_led_lt"
+    ]);
+    CRESTRON_OFFLINE_THRESHOLD = 0.2;
+    CRESTRON_DEDUP_MINUTES = 30;
+    crestronBridgeState = "unknown";
+    crestronCheckTimer = null;
+    pendingCallbacks = /* @__PURE__ */ new Map();
+    MAX_RECONNECT_DELAY = 6e4;
+    SAFETY_SYNC_INTERVAL = 24 * 60 * 60 * 1e3;
+    safetySyncTimer = null;
+    haUsersCache = /* @__PURE__ */ new Map();
+    haUsersByNameCache = /* @__PURE__ */ new Map();
+  }
+});
+
+// server/auth.ts
+import jwt from "jsonwebtoken";
+import crypto2 from "crypto";
+function generateToken(user) {
+  return jwt.sign(user, JWT_SECRET, { expiresIn: JWT_EXPIRY });
+}
+function verifyToken(token) {
+  try {
+    return jwt.verify(token, JWT_SECRET);
+  } catch {
+    return null;
+  }
+}
+function setAuthCookie(res, token) {
+  res.cookie("auth_token", token, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "lax",
+    maxAge: 7 * 24 * 60 * 60 * 1e3,
+    path: "/"
+  });
+}
+function clearAuthCookie(res) {
+  res.clearCookie("auth_token", {
+    httpOnly: true,
+    secure: true,
+    sameSite: "lax",
+    path: "/"
+  });
+}
+function getAuthUser(req) {
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret && req.headers["x-cron-secret"] === cronSecret) {
+    return {
+      userId: "system",
+      email: "cron@local",
+      displayName: "Janus Cron",
+      avatarUrl: null,
+      roles: ["admin"],
+      approvalStatus: "approved"
+    };
+  }
+  const isHAEnvironment = Boolean(process.env.SUPERVISOR_TOKEN);
+  const haUserId = req.headers["x-remote-user-id"] || req.headers["x-ingress-user-id"];
+  if (isHAEnvironment && haUserId) {
+    const haUserName = req.headers["x-remote-user-name"] || req.headers["x-remote-user-display-name"] || "HA User";
+    const haAdminHeader = req.headers["x-remote-user-is-admin"];
+    let isAdmin2 = false;
+    if (haAdminHeader !== void 0 && haAdminHeader !== "") {
+      isAdmin2 = String(haAdminHeader).toLowerCase() === "true" || haAdminHeader === "1";
+    } else {
+      isAdmin2 = isHAUserAdminSync(haUserId, haUserName);
+    }
+    return {
+      userId: `ha:${haUserId}`,
+      email: `${haUserName.toLowerCase().replace(/[^a-z0-9]/g, ".")}@homeassistant.local`,
+      displayName: req.headers["x-remote-user-display-name"] || haUserName,
+      avatarUrl: null,
+      roles: isAdmin2 ? ["admin"] : ["member"],
+      approvalStatus: "approved"
+    };
+  }
+  const cookieToken = req.cookies?.auth_token;
+  if (cookieToken) {
+    const user = verifyToken(cookieToken);
+    if (user) return user;
+  }
+  const authHeader = req.headers.authorization;
+  if (authHeader?.startsWith("Bearer ")) {
+    const bearerToken = authHeader.slice(7);
+    if (bearerToken) {
+      const user = verifyToken(bearerToken);
+      if (user) return user;
+    }
+  }
+  return null;
+}
+function requireAuth(req, res, next) {
+  const user = getAuthUser(req);
+  if (!user) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+  req.user = user;
+  next();
+}
+function requireRole(...roles) {
+  return (req, res, next) => {
+    const user = getAuthUser(req);
+    if (!user) {
+      console.warn(`[auth] 401 ${req.method} ${req.path} \u2014 no authenticated user`);
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+    const hasRequiredRole = roles.some((role) => user.roles.includes(role));
+    if (!hasRequiredRole) {
+      console.warn(`[auth] 403 ${req.method} ${req.path} \u2014 user=${user.email} roles=[${user.roles}] required=[${roles}]`);
+      res.status(403).json({ error: "Insufficient permissions" });
+      return;
+    }
+    req.user = user;
+    next();
+  };
+}
+async function linkWorkerProfile(profileId, email) {
+  try {
+    await query(
+      `UPDATE tt_workers SET user_id = $1 WHERE email = $2 AND user_id IS NULL`,
+      [profileId, email.toLowerCase()]
+    );
+  } catch (e) {
+    console.warn("[AUTH] Could not link worker profile:", e);
+  }
+}
+async function handleNewUser(oauthProfile) {
+  const existingProfile = await storage.getProfileByUserId(oauthProfile.userId);
+  if (existingProfile) {
+    const invite2 = await storage.getInvitedEmail(oauthProfile.email);
+    let status = existingProfile.approvalStatus;
+    if (status !== "approved" && invite2) {
+      await storage.updateProfile(oauthProfile.userId, { approvalStatus: "approved" });
+      status = "approved";
+    }
+    const roles = await storage.getUserRoles(oauthProfile.userId);
+    const roleNames = roles.map((r) => r.role);
+    if (roleNames.includes("worker")) {
+      await linkWorkerProfile(existingProfile.id, oauthProfile.email);
+    }
+    return {
+      userId: oauthProfile.userId,
+      email: oauthProfile.email,
+      displayName: existingProfile.displayName,
+      avatarUrl: existingProfile.avatarUrl,
+      roles: roleNames,
+      approvalStatus: status
+    };
+  }
+  const invite = await storage.getInvitedEmail(oauthProfile.email);
+  const isWorkerInvite = invite?.role === "worker";
+  let approvalStatus;
+  if (invite) {
+    approvalStatus = "approved";
+  } else {
+    approvalStatus = "rejected";
+  }
+  const profile = await storage.createProfile({
+    userId: oauthProfile.userId,
+    displayName: oauthProfile.displayName || oauthProfile.email,
+    avatarUrl: oauthProfile.avatarUrl,
+    approvalStatus,
+    phoneNumber: invite?.phoneNumber || null
+  });
+  if (isWorkerInvite) {
+    await storage.createUserRole({ userId: oauthProfile.userId, role: "worker" });
+    await linkWorkerProfile(profile.id, oauthProfile.email);
+    return {
+      userId: oauthProfile.userId,
+      email: oauthProfile.email,
+      displayName: profile.displayName,
+      avatarUrl: profile.avatarUrl,
+      roles: ["worker"],
+      approvalStatus: "approved"
+    };
+  }
+  const roleCount = await storage.countUserRoles();
+  const role = roleCount === 0 ? "admin" : "member";
+  await storage.createUserRole({ userId: oauthProfile.userId, role });
+  if (invite) {
+    await storage.deleteInvitedEmail(oauthProfile.email);
+  }
+  return {
+    userId: oauthProfile.userId,
+    email: oauthProfile.email,
+    displayName: profile.displayName,
+    avatarUrl: profile.avatarUrl,
+    roles: [role],
+    approvalStatus: profile.approvalStatus
+  };
+}
+var JWT_SECRET, JWT_EXPIRY;
+var init_auth = __esm({
+  "server/auth.ts"() {
+    init_storage();
+    init_db2();
+    init_haWebSocket();
+    JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET || (() => {
+      console.warn("[AUTH] WARNING: Neither JWT_SECRET nor SESSION_SECRET was configured. Generating secure random secret.");
+      return crypto2.randomBytes(32).toString("hex");
+    })();
+    JWT_EXPIRY = "7d";
   }
 });
 
@@ -6877,365 +7290,1850 @@ var init_network_devices = __esm({
   }
 });
 
-// server/socket.ts
-import { Server as SocketServer } from "socket.io";
-function getAllowedOrigins() {
-  if (process.env.NODE_ENV === "production" && process.env.ALLOWED_ORIGINS) {
-    return process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim());
-  }
-  return true;
+// server/middleware/auth.ts
+import { timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+function validComputerToken(headerValue) {
+  const configured = process.env.COMPUTER_ADMIN_TOKEN?.trim();
+  if (!configured || configured.length < 24) return false;
+  if (typeof headerValue !== "string" || !headerValue.trim()) return false;
+  if (process.env.NODE_ENV === "test") return false;
+  const a = Buffer.from(configured);
+  const b2 = Buffer.from(headerValue.trim());
+  if (a.length !== b2.length) return false;
+  return timingSafeEqual2(a, b2);
 }
-function setupSocketIO(httpServer) {
-  io = new SocketServer(httpServer, {
-    path: "/ws",
-    cors: {
-      origin: getAllowedOrigins(),
-      credentials: true
-    },
-    transports: ["websocket", "polling"]
-  });
-  io.use((socket, next) => {
-    const token = socket.handshake.auth?.token || parseCookie(socket.handshake.headers.cookie || "", "auth_token");
-    if (!token) {
-      return next(new Error("Authentication required"));
-    }
-    const user = verifyToken(token);
-    if (!user) {
-      return next(new Error("Invalid or expired token"));
-    }
-    if (user.approvalStatus !== "approved") {
-      return next(new Error("Account not approved"));
-    }
-    socket.data.user = user;
+function requireAuth2(req, res, next) {
+  const cronSecret = process.env.CRON_SECRET;
+  const isCronCall = !!cronSecret && req.headers["x-cron-secret"] === cronSecret;
+  if (isCronCall) {
+    req.userId = "system";
+    req.userRole = "admin";
     next();
-  });
-  io.on("connection", (socket) => {
-    const user = socket.data.user;
-    socket.join(`user:${user.userId}`);
-    console.log(`[WS] Connected: ${user.email} (${socket.id})`);
-    socket.on("disconnect", (reason) => {
-      console.log(`[WS] Disconnected: ${user.email} (${reason})`);
-    });
-  });
-  return io;
+    return;
+  }
+  if (validComputerToken(req.headers["x-computer-token"])) {
+    req.userId = "computer-agent";
+    req.userRole = "admin";
+    next();
+    return;
+  }
+  const isHAEnvironment = Boolean(process.env.SUPERVISOR_TOKEN);
+  const haUserId = req.headers["x-remote-user-id"] || req.headers["x-ingress-user-id"];
+  if (isHAEnvironment && haUserId) {
+    const haAdminHeader = req.headers["x-remote-user-is-admin"];
+    let isAdmin2 = false;
+    if (haAdminHeader !== void 0 && haAdminHeader !== "") {
+      isAdmin2 = String(haAdminHeader).toLowerCase() === "true" || haAdminHeader === "1";
+    } else {
+      const haUserName = req.headers["x-remote-user-name"] || req.headers["x-remote-user-display-name"];
+      isAdmin2 = isHAUserAdminSync(haUserId, haUserName);
+    }
+    req.userId = `ha:${haUserId}`;
+    req.userRole = isAdmin2 ? "admin" : "member";
+    next();
+    return;
+  }
+  const authHeader = req.headers.authorization;
+  const cookieToken = req.cookies?.auth_token;
+  if (!authHeader?.startsWith("Bearer ") && !cookieToken) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const token = cookieToken || authHeader.replace("Bearer ", "");
+  const isServiceRole = process.env.JWT_SECRET && token === process.env.JWT_SECRET || process.env.SESSION_SECRET && token === process.env.SESSION_SECRET;
+  if (isServiceRole) {
+    req.userId = "system";
+    req.userRole = "admin";
+    next();
+    return;
+  }
+  const user = verifyToken(token);
+  if (!user) {
+    res.status(401).json({ error: "Invalid token" });
+    return;
+  }
+  req.userId = user.userId;
+  if (user.roles?.includes("admin")) {
+    req.userRole = "admin";
+  } else if (user.roles?.includes("worker")) {
+    req.userRole = "worker";
+  } else {
+    req.userRole = "member";
+  }
+  next();
 }
-function emitToAll(event, data) {
-  if (!io) return;
-  io.emit(event, data);
+function rejectWorkers(req, res, next) {
+  const authHeader = req.headers.authorization;
+  const cookieToken = req.cookies?.auth_token;
+  const token = cookieToken || (authHeader?.startsWith("Bearer ") ? authHeader.replace("Bearer ", "") : null);
+  if (!token) {
+    next();
+    return;
+  }
+  const isServiceRole = process.env.JWT_SECRET && token === process.env.JWT_SECRET || process.env.SESSION_SECRET && token === process.env.SESSION_SECRET;
+  if (isServiceRole) {
+    next();
+    return;
+  }
+  const user = verifyToken(token);
+  if (!user || !user.roles?.includes("worker")) {
+    next();
+    return;
+  }
+  const allowed = req.path.startsWith("/api/time/") || req.path === "/api/auth/me" || req.path === "/api/auth/logout" || req.path === "/api/auth/google" || req.path === "/api/auth/google/callback" || req.path === "/api/health";
+  if (!allowed) {
+    res.status(403).json({ error: "Worker accounts are restricted to /api/time/* endpoints" });
+    return;
+  }
+  next();
 }
-function emitToUser(userId, event, data) {
-  if (!io) return;
-  io.to(`user:${userId}`).emit(event, data);
-}
-function parseCookie(cookieHeader, name) {
-  const match = cookieHeader.split(";").map((c) => c.trim()).find((c) => c.startsWith(`${name}=`));
-  return match ? match.split("=")[1] : void 0;
-}
-var io;
-var init_socket = __esm({
-  "server/socket.ts"() {
+var init_auth2 = __esm({
+  "server/middleware/auth.ts"() {
     init_auth();
-    io = null;
+    init_haWebSocket();
   }
 });
 
-// server/lib/haWebSocket.ts
-import WebSocket from "ws";
-function scheduleCrestronCheck() {
-  if (crestronCheckTimer) return;
-  crestronCheckTimer = setTimeout(() => {
-    crestronCheckTimer = null;
-    checkCrestronBridge().catch((e) => console.error("[Crestron] Bridge check error:", e));
-  }, 2e3);
-}
-async function checkCrestronBridge() {
-  const allEntities = Array.from(entityCache.values());
-  const lights = allEntities.filter(
-    (e) => e.entity_id.startsWith("light.") && !CRESTRON_EXCLUDED_ENTITIES.has(e.entity_id) && !goveeEntityIdsCache.includes(e.entity_id)
-  );
-  if (lights.length === 0) return;
-  const unavailable = lights.filter((e) => e.state === "unavailable").length;
-  const pct = unavailable / lights.length;
-  const newState = pct >= CRESTRON_OFFLINE_THRESHOLD ? "offline" : "healthy";
-  if (crestronBridgeState === "unknown") {
-    crestronBridgeState = newState;
-    return;
-  }
-  if (newState === crestronBridgeState) return;
-  const prevState = crestronBridgeState;
-  crestronBridgeState = newState;
-  console.log(`[Crestron] Bridge state: ${prevState} \u2192 ${newState} (${unavailable}/${lights.length} unavailable)`);
-  await fireCrestronAlert(newState, unavailable, lights.length);
-}
-async function fireCrestronAlert(state2, unavailable, total) {
-  const alertKey = state2 === "offline" ? "crestron_bridge_offline" : "crestron_bridge_recovered";
-  try {
-    const { rows } = await query(
-      `SELECT id FROM system_audit_log WHERE event_type = 'crestron_alert' AND detail->>'alert_key' = $1 AND created_at > NOW() - INTERVAL '${CRESTRON_DEDUP_MINUTES} minutes' LIMIT 1`,
-      [alertKey]
+// server/lib/encryption.ts
+import { webcrypto as webcrypto2 } from "crypto";
+async function getEncryptionKey() {
+  const keySource = process.env.ENCRYPTION_KEY || process.env.SESSION_SECRET || "";
+  if (!keySource) {
+    throw new Error(
+      "ENCRYPTION_KEY (or SESSION_SECRET fallback) is not set; cannot encrypt/decrypt tokens"
     );
-    if (rows.length > 0) {
-      console.log(`[Crestron] Alert "${alertKey}" suppressed by dedup (within ${CRESTRON_DEDUP_MINUTES} min)`);
-      return;
+  }
+  const digest = await subtle.digest("SHA-256", new TextEncoder().encode(keySource));
+  return subtle.importKey("raw", new Uint8Array(digest), "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+async function encryptToken(plaintext) {
+  const key = await getEncryptionKey();
+  const iv = webcrypto2.getRandomValues(new Uint8Array(12));
+  const encoded = new TextEncoder().encode(plaintext);
+  const ciphertext = new Uint8Array(await subtle.encrypt({ name: "AES-GCM", iv }, key, encoded));
+  const combined = new Uint8Array(iv.length + ciphertext.length);
+  combined.set(iv);
+  combined.set(ciphertext, iv.length);
+  return Buffer.from(combined).toString("base64");
+}
+async function decryptToken(encrypted) {
+  const key = await getEncryptionKey();
+  const combined = new Uint8Array(Buffer.from(encrypted, "base64"));
+  const iv = combined.slice(0, 12);
+  const ciphertext = combined.slice(12);
+  const decrypted = await subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
+  return new TextDecoder().decode(decrypted);
+}
+var subtle;
+var init_encryption = __esm({
+  "server/lib/encryption.ts"() {
+    subtle = webcrypto2.subtle;
+  }
+});
+
+// server/lib/ssrfGuard.ts
+import { lookup as lookupCb } from "node:dns";
+import net from "node:net";
+import { Agent, fetch as undiciFetch } from "undici";
+function isBlockedIp(ip) {
+  if (net.isIPv4(ip)) {
+    const [a, b2] = ip.split(".").map(Number);
+    if (a === 0 || a === 127 || a === 10) return true;
+    if (a === 172 && b2 >= 16 && b2 <= 31) return true;
+    if (a === 192 && b2 === 168) return true;
+    if (a === 169 && b2 === 254) return true;
+    if (a === 100 && b2 >= 64 && b2 <= 127) return true;
+    if (a >= 224) return true;
+    return false;
+  }
+  if (net.isIPv6(ip)) {
+    const lower = ip.toLowerCase();
+    if (lower === "::" || lower === "::1") return true;
+    if (lower.startsWith("fe8") || lower.startsWith("fe9") || lower.startsWith("fea") || lower.startsWith("feb")) return true;
+    if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
+    if (lower.startsWith("::ffff:")) {
+      const mapped = lower.slice("::ffff:".length);
+      if (net.isIPv4(mapped)) return isBlockedIp(mapped);
+      return true;
     }
-  } catch (e) {
-    console.error("[Crestron] Dedup query failed:", e);
+    return false;
   }
-  const summary = state2 === "offline" ? `Crestron bridge offline: ${unavailable}/${total} lights unavailable (${Math.round(unavailable / total * 100)}%)` : `Crestron bridge recovered: lights back online (${total} total)`;
-  await logAudit("crestron-bridge-monitor", {
-    category: "crestron_bridge",
-    event_type: "crestron_alert",
-    severity: state2 === "offline" ? "warn" : "info",
-    actor_id: "system",
-    actor_name: "Crestron Bridge Monitor",
-    channel: "system",
-    summary,
-    detail: {
-      alert_key: alertKey,
-      unavailable,
-      total,
-      pct: Math.round(unavailable / total * 100)
-    },
-    status: state2 === "offline" ? "error" : "success"
-  });
-  try {
-    const { getAlertPhoneNumber: getAlertPhoneNumber6, sendWhatsAppTo: sendWhatsAppTo2 } = await Promise.resolve().then(() => (init_helpers(), helpers_exports));
-    const phone = await getAlertPhoneNumber6();
-    const msg = state2 === "offline" ? `\u{1F534} *Crestron Home bridge offline*
-${unavailable}/${total} lights are unavailable. Open Janus \u2192 Home Lights to reload.` : `\u2705 *Crestron Home bridge recovered*
-Unavailable lights dropped below threshold (${unavailable}/${total} still offline).`;
-    await sendWhatsAppTo2(phone, msg);
-  } catch (e) {
-    console.error("[Crestron] WhatsApp alert failed:", e);
-  }
+  return true;
 }
-function nextId() {
-  return msgId++;
-}
-function send(ws, msg) {
-  if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(msg));
-  }
-}
-function getEntityCache() {
-  return Array.from(entityCache.values());
-}
-function getGoveeEntityIdsFromCache() {
-  return goveeEntityIdsCache;
-}
-function isCacheReady() {
-  return cacheReady;
-}
-function sendHAWSCommand(command, timeoutMs = 3e4) {
-  return new Promise((resolve2, reject) => {
-    if (!wsClient || wsClient.readyState !== WebSocket.OPEN) {
-      reject(new Error("HA WebSocket not connected"));
-      return;
-    }
-    const id = nextId();
-    const timer = setTimeout(() => {
-      pendingCallbacks.delete(id);
-      reject(new Error("HA WebSocket command timed out"));
-    }, timeoutMs);
-    pendingCallbacks.set(id, (msg) => {
-      clearTimeout(timer);
-      pendingCallbacks.delete(id);
-      if (msg.success) {
-        resolve2(msg.result);
-      } else {
-        reject(new Error(msg.error?.message || "HA command failed"));
-      }
-    });
-    send(wsClient, { ...command, id });
-  });
-}
-async function callHAService(domain, service, serviceData = {}) {
-  return sendHAWSCommand({
-    type: "call_service",
-    domain,
-    service,
-    service_data: serviceData
-  });
-}
-function startHAWebSocket() {
-  const supervisorToken2 = process.env.SUPERVISOR_TOKEN || process.env.HASSIO_TOKEN;
-  const HA_URL2 = process.env.HA_URL || (supervisorToken2 ? "http://supervisor/core" : void 0);
-  const HA_TOKEN2 = process.env.HA_TOKEN || supervisorToken2;
-  if (!HA_URL2 || !HA_TOKEN2) {
-    console.log("[HA-WS] HA_URL or HA_TOKEN not configured \u2014 skipping WebSocket connection");
+function guardedLookup(hostname, options, callback) {
+  if (hostname.toLowerCase() === "supervisor" && (Boolean(process.env.SUPERVISOR_TOKEN) || Boolean(process.env.HASSIO_TOKEN) || process.env.HA_ALLOWED_HOSTS?.includes("supervisor"))) {
+    lookupCb(hostname, options, callback);
     return;
   }
-  const isSupervisor = HA_URL2.includes("supervisor");
-  const wsUrl = isSupervisor ? HA_URL2.replace(/^http(s?)/, "ws$1").replace(/\/$/, "") + "/websocket" : HA_URL2.replace(/^http(s?)/, "ws$1").replace(/\/$/, "") + "/api/websocket";
-  console.log(`[HA-WS] Connecting to ${wsUrl}`);
-  try {
-    wsClient = new WebSocket(wsUrl);
-  } catch (err) {
-    console.error("[HA-WS] Failed to create WebSocket:", err);
-    scheduleReconnect();
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) {
+    callback(Object.assign(new Error(`Blocked host: ${hostname}`), { code: "EBLOCKED" }), "", 4);
     return;
   }
-  wsClient.on("open", () => {
-    console.log("[HA-WS] Connected");
-    reconnectDelay = 1e3;
+  lookupCb(hostname, { ...options, all: true }, (err, addresses) => {
+    if (err) {
+      callback(err, "", 4);
+      return;
+    }
+    const list = addresses.filter(
+      (a) => !isBlockedIp(a.address)
+    );
+    if (list.length === 0) {
+      callback(
+        Object.assign(new Error(`Blocked host: ${hostname} resolves only to disallowed addresses`), {
+          code: "EBLOCKED"
+        }),
+        "",
+        4
+      );
+      return;
+    }
+    if (options.all) {
+      callback(null, list);
+    } else {
+      callback(null, list[0].address, list[0].family);
+    }
   });
-  wsClient.on("message", (raw) => {
-    let msg;
+}
+async function guardedFetch(url, init) {
+  const hostname = new URL(url).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (hostname === "supervisor" && (Boolean(process.env.SUPERVISOR_TOKEN) || Boolean(process.env.HASSIO_TOKEN) || process.env.HA_ALLOWED_HOSTS?.includes("supervisor"))) {
+    return undiciFetch(url, init);
+  }
+  if (hostname === "localhost" || hostname.endsWith(".localhost") || net.isIP(hostname) !== 0 && isBlockedIp(hostname)) {
+    throw new Error(`Blocked host: ${hostname}`);
+  }
+  return undiciFetch(url, { ...init, dispatcher: guardedAgent });
+}
+var guardedAgent;
+var init_ssrfGuard = __esm({
+  "server/lib/ssrfGuard.ts"() {
+    guardedAgent = new Agent({ connect: { lookup: guardedLookup } });
+  }
+});
+
+// server/lib/errorSanitizer.ts
+function sanitizeErrorMessage2(error) {
+  let message;
+  if (error instanceof Error) {
+    message = error.message;
+  } else if (typeof error === "string") {
+    message = error;
+  } else {
+    message = "An internal error occurred";
+  }
+  for (const pattern of SENSITIVE_PATTERNS2) {
+    message = message.replace(pattern, "[REDACTED]");
+  }
+  if (message.length > 200) {
+    message = message.slice(0, 200) + "...";
+  }
+  return message;
+}
+function safeErrorJson(error) {
+  return { error: sanitizeErrorMessage2(error) };
+}
+var SENSITIVE_PATTERNS2;
+var init_errorSanitizer = __esm({
+  "server/lib/errorSanitizer.ts"() {
+    SENSITIVE_PATTERNS2 = [
+      /Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi,
+      /apikey[=:]\s*["']?[A-Za-z0-9\-._~+/]+["']?/gi,
+      /password[=:]\s*["']?[^\s"',}]+["']?/gi,
+      /secret[=:]\s*["']?[^\s"',}]+["']?/gi,
+      /token[=:]\s*["']?[A-Za-z0-9\-._~+/]+["']?/gi,
+      /eyJ[A-Za-z0-9\-_]+\.eyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_.+/=]*/g
+    ];
+  }
+});
+
+// server/lib/castBroadcast.ts
+import fs5 from "fs";
+import path6 from "path";
+async function cleanupOldBroadcasts(bucket, subdir, filePrefix, keep) {
+  const dirs = [
+    path6.join(process.cwd(), "public", bucket, subdir),
+    path6.join(process.cwd(), "dist", "public", bucket, subdir)
+  ];
+  for (const dir of dirs) {
     try {
-      msg = JSON.parse(raw.toString());
-    } catch {
-      return;
-    }
-    const type = msg.type;
-    if (type === "auth_required") {
-      send(wsClient, { type: "auth", access_token: HA_TOKEN2 });
-      return;
-    }
-    if (type === "auth_ok") {
-      console.log("[HA-WS] Authenticated \u2014 fetching all states");
-      msgId = 1;
-      const statesId = nextId();
-      send(wsClient, { id: statesId, type: "get_states" });
-      const subId = nextId();
-      send(wsClient, { id: subId, type: "subscribe_events", event_type: "state_changed" });
-      if (safetySyncTimer) clearInterval(safetySyncTimer);
-      safetySyncTimer = setInterval(() => {
-        if (wsClient && wsClient.readyState === WebSocket.OPEN) {
-          console.log("[HA-WS] Safety sync: refreshing all states from HA");
-          send(wsClient, { id: nextId(), type: "get_states" });
-        }
-      }, SAFETY_SYNC_INTERVAL);
-      return;
-    }
-    if (type === "auth_invalid") {
-      console.error("[HA-WS] Auth failed \u2014 invalid token");
-      logAudit("ha-websocket", {
-        category: "home",
-        event_type: "ha_ws_auth_invalid",
-        severity: "critical",
-        actor_id: "system",
-        actor_name: "System",
-        channel: "system",
-        summary: "HA WebSocket authentication failed \u2014 token may be invalid",
-        detail: {},
-        status: "error"
-      });
-      wsClient?.close();
-      return;
-    }
-    if (type === "result") {
-      const result = msg;
-      const cb = pendingCallbacks.get(result.id);
-      if (cb) {
-        cb({ success: result.success, result: result.result, error: result.error });
-        return;
+      if (!fs5.existsSync(dir)) continue;
+      const entries = await fs5.promises.readdir(dir, { withFileTypes: true });
+      const matched = entries.filter(
+        (e) => e.isFile() && e.name.startsWith(filePrefix) && e.name.endsWith(".mp3")
+      );
+      const withMtime = await Promise.all(
+        matched.map(async (e) => {
+          const mtime = await fs5.promises.stat(path6.join(dir, e.name)).then((s3) => s3.mtimeMs).catch(() => 0);
+          return { name: e.name, mtime };
+        })
+      );
+      withMtime.sort((a, b2) => b2.mtime - a.mtime);
+      for (const f of withMtime.slice(keep)) {
+        await fs5.promises.unlink(path6.join(dir, f.name)).catch(() => {
+        });
+        console.log(`[castBroadcast] Cleaned up old broadcast file: ${f.name}`);
       }
-      if (result.success && Array.isArray(result.result)) {
-        const states = result.result;
-        entityCache.clear();
-        for (const entity of states) {
-          entityCache.set(entity.entity_id, entity);
+    } catch {
+    }
+  }
+  try {
+    const objKeys = await listObjects(VOICE_REPLIES_BUCKET, `${subdir}/`);
+    const matched = objKeys.map((key) => ({ key, base: key.split("/").pop() ?? "" })).filter((o) => o.base.startsWith(filePrefix) && o.base.endsWith(".mp3")).map((o) => {
+      const m = o.base.match(/-(\d+)\.mp3$/);
+      return { key: o.key, ts: m ? Number(m[1]) : 0 };
+    }).sort((a, b2) => b2.ts - a.ts);
+    for (const o of matched.slice(keep)) {
+      await deleteObjectKey(o.key);
+      console.log(`[castBroadcast] Cleaned up old broadcast object: ${o.key}`);
+    }
+  } catch {
+  }
+}
+async function generateAndUploadTTS(message, filePrefix = "broadcast") {
+  const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
+  let supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+  if (!elevenLabsKey) {
+    console.error("[castBroadcast] ELEVENLABS_API_KEY not set \u2014 cannot generate TTS");
+    return null;
+  }
+  const isDeletedSupabase = !supabaseUrl;
+  if (isDeletedSupabase) {
+    supabaseUrl = `http://localhost:${process.env.PORT || 5e3}`;
+  }
+  console.log(`[castBroadcast] Calling ElevenLabs TTS (${message.length} chars)`);
+  let audioBuffer;
+  try {
+    const ttsRes = await fetchT2(
+      `https://api.elevenlabs.io/v1/text-to-speech/${JANUS_VOICE_ID}`,
+      {
+        method: "POST",
+        headers: {
+          "xi-api-key": elevenLabsKey,
+          "Content-Type": "application/json",
+          Accept: "audio/mpeg"
+        },
+        body: JSON.stringify({
+          text: message,
+          model_id: "eleven_turbo_v2_5",
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.75,
+            style: 0,
+            use_speaker_boost: true
+          }
+        })
+      },
+      3e4
+    );
+    if (!ttsRes.ok) {
+      const errText = await ttsRes.text().catch(() => "");
+      console.error(
+        `[castBroadcast] ElevenLabs TTS failed: HTTP ${ttsRes.status} \u2014 ${errText.slice(0, 300)}`
+      );
+      return null;
+    }
+    audioBuffer = await ttsRes.arrayBuffer();
+    console.log(`[castBroadcast] ElevenLabs TTS generated ${audioBuffer.byteLength} bytes`);
+  } catch (e) {
+    console.error(
+      `[castBroadcast] ElevenLabs TTS error: ${e instanceof Error ? e.message : "unknown"}`
+    );
+    return null;
+  }
+  const timestamp2 = Date.now();
+  const filename = `${BROADCAST_SUBDIR}/${filePrefix}-${timestamp2}.mp3`;
+  const storageUrl = `${supabaseUrl.replace(/\/$/, "")}/storage/v1/object/${VOICE_REPLIES_BUCKET}/${filename}`;
+  const internalKey = process.env.JWT_SECRET || process.env.SESSION_SECRET || "janus-dev-secret-change-in-production";
+  try {
+    const uploadRes = await fetchT2(
+      storageUrl,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${internalKey}`,
+          apikey: internalKey,
+          "Content-Type": "audio/mpeg",
+          "x-upsert": "true"
+        },
+        body: audioBuffer
+      },
+      2e4
+    );
+    if (!uploadRes.ok) {
+      const errText = await uploadRes.text().catch(() => "");
+      console.error(
+        `[castBroadcast] Storage upload failed: HTTP ${uploadRes.status} \u2014 ${errText.slice(0, 300)}`
+      );
+      return null;
+    }
+    console.log(`[castBroadcast] MP3 uploaded: ${filename} (${audioBuffer.byteLength} bytes)`);
+  } catch (e) {
+    console.error(
+      `[castBroadcast] Storage upload error: ${e instanceof Error ? e.message : "unknown"}`
+    );
+    return null;
+  }
+  cleanupOldBroadcasts(VOICE_REPLIES_BUCKET, BROADCAST_SUBDIR, filePrefix, MAX_BROADCAST_FILES).catch(
+    () => {
+    }
+  );
+  const baseUrl = process.env.MEDIA_BASE_URL || process.env.APP_URL || "http://localhost:5000";
+  return `${baseUrl.replace(/\/$/, "")}/storage/v1/object/public/${VOICE_REPLIES_BUCKET}/${filename}`;
+}
+async function verifyPlaybackState(haUrl, haToken, entityId, expectedUrl, announceMode = false) {
+  try {
+    const res = await guardedFetch(`${haUrl.replace(/\/$/, "")}/api/states/${entityId}`, {
+      headers: { Authorization: `Bearer ${haToken}` },
+      signal: AbortSignal.timeout(5e3)
+    });
+    if (!res.ok) return { verified: false, state: null, contentId: null, urlMatch: null };
+    const data = await res.json();
+    const state2 = data?.state ?? "unknown";
+    const contentId = data?.attributes?.media_content_id ?? null;
+    const isPlaying = state2 === "playing";
+    const isUnavailable = state2 === "unavailable";
+    let urlMatch = null;
+    if (expectedUrl) {
+      urlMatch = contentId !== null && contentId === expectedUrl;
+    }
+    let verified;
+    if (announceMode) {
+      verified = !isUnavailable && urlMatch === true;
+    } else {
+      verified = isPlaying && (urlMatch === null || urlMatch === true);
+    }
+    return { verified, state: state2, contentId, urlMatch };
+  } catch {
+    return { verified: false, state: null, contentId: null, urlMatch: null };
+  }
+}
+async function detectSilentDropRisk(haUrl, haToken, speakers, expectedUrl, firstPollDelayMs = 3500) {
+  const TARGET_DELAY_MS = 8e3;
+  const remaining = Math.max(0, TARGET_DELAY_MS - firstPollDelayMs);
+  if (remaining > 0) {
+    await new Promise((r) => setTimeout(r, remaining));
+  }
+  const secondPoll = {};
+  for (const speaker of speakers) {
+    const v = await verifyPlaybackState(haUrl, haToken, speaker, expectedUrl, true);
+    secondPoll[speaker] = { state: v.state, contentId: v.contentId, urlMatch: v.urlMatch };
+  }
+  const entries = Object.values(secondPoll);
+  const silentDropRisk = entries.length > 0 && entries.every((v) => v.urlMatch === true && v.state === "idle");
+  return { silentDropRisk, secondPoll };
+}
+var JANUS_VOICE_ID, VOICE_REPLIES_BUCKET, BROADCAST_SUBDIR, MAX_BROADCAST_FILES;
+var init_castBroadcast = __esm({
+  "server/lib/castBroadcast.ts"() {
+    init_fetchWithTimeout();
+    init_ssrfGuard();
+    init_objectStore();
+    JANUS_VOICE_ID = "iLVmqjzCGGvqtMCk6vVQ";
+    VOICE_REPLIES_BUCKET = "voice-replies";
+    BROADCAST_SUBDIR = "broadcasts";
+    MAX_BROADCAST_FILES = 5;
+  }
+});
+
+// server/lib/haUrlGuard.ts
+import { isIP } from "node:net";
+import { lookup } from "node:dns/promises";
+function getAllowedHaHosts(env = process.env) {
+  const hosts = /* @__PURE__ */ new Set();
+  if (env.SUPERVISOR_TOKEN || env.HASSIO_TOKEN) {
+    hosts.add("supervisor");
+  }
+  if (env.HA_URL) {
+    try {
+      hosts.add(new URL(env.HA_URL).hostname.toLowerCase());
+    } catch {
+    }
+  }
+  for (const raw of (env.HA_ALLOWED_HOSTS ?? "").split(",")) {
+    const h = raw.trim().toLowerCase();
+    if (h) hosts.add(h);
+  }
+  return hosts;
+}
+function isPrivateOrReservedIp(ip) {
+  const version = isIP(ip);
+  if (version === 4) return isPrivateV4(ip);
+  if (version === 6) return isPrivateV6(ip);
+  return true;
+}
+function isPrivateV4(ip) {
+  const parts = ip.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((p) => Number.isNaN(p) || p < 0 || p > 255)) return true;
+  const [a, b2] = parts;
+  return a === 0 || // 0.0.0.0/8 "this network"
+  a === 10 || // 10.0.0.0/8 private
+  a === 127 || // 127.0.0.0/8 loopback
+  a === 100 && b2 >= 64 && b2 <= 127 || // 100.64.0.0/10 CGNAT
+  a === 169 && b2 === 254 || // 169.254.0.0/16 link-local + cloud metadata
+  a === 172 && b2 >= 16 && b2 <= 31 || // 172.16.0.0/12 private
+  a === 192 && b2 === 168 || // 192.168.0.0/16 private
+  a === 192 && b2 === 0 || // 192.0.0.0/24 IETF protocol assignments
+  a === 198 && (b2 === 18 || b2 === 19) || // 198.18.0.0/15 benchmarking
+  a >= 224;
+}
+function isPrivateV6(ip) {
+  const lower = ip.toLowerCase();
+  const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped) return isPrivateV4(mapped[1]);
+  const hexMapped = lower.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (hexMapped) {
+    const hi = parseInt(hexMapped[1], 16);
+    const lo = parseInt(hexMapped[2], 16);
+    return isPrivateV4(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+  }
+  if (lower === "::" || lower === "::1") return true;
+  if (lower.startsWith("fe80:") || lower.startsWith("fe9") || lower.startsWith("fea") || lower.startsWith("feb")) return true;
+  if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
+  if (lower.startsWith("64:ff9b:")) return true;
+  return false;
+}
+function checkHaUrlSync(rawUrl, env = process.env) {
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return { ok: false, reason: "ha_url must be a valid http(s) URL" };
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return { ok: false, reason: "ha_url must use http or https" };
+  }
+  if (parsed.username || parsed.password) {
+    return { ok: false, reason: "ha_url must not contain embedded credentials" };
+  }
+  const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (hostname === "supervisor" && (env.SUPERVISOR_TOKEN || env.HASSIO_TOKEN || env.HA_ALLOWED_HOSTS?.includes("supervisor"))) {
+    return { ok: true, url: rawUrl };
+  }
+  if (isIP(hostname)) {
+    if (isPrivateOrReservedIp(hostname)) {
+      return { ok: false, reason: "ha_url must not point at a private, loopback, or reserved address" };
+    }
+  }
+  const allowed = getAllowedHaHosts(env);
+  if (allowed.size > 0 && !allowed.has(hostname)) {
+    return { ok: false, reason: "ha_url host is not on the allowed Home Assistant host list" };
+  }
+  return { ok: true, url: rawUrl };
+}
+async function validateHaUrl(rawUrl, env = process.env) {
+  const sync2 = checkHaUrlSync(rawUrl, env);
+  if (!sync2.ok) return sync2;
+  const hostname = new URL(rawUrl).hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (hostname === "supervisor" && (env.SUPERVISOR_TOKEN || env.HASSIO_TOKEN || env.HA_ALLOWED_HOSTS?.includes("supervisor"))) {
+    return sync2;
+  }
+  if (isIP(hostname)) return sync2;
+  let addrs;
+  try {
+    addrs = await lookup(hostname, { all: true, verbatim: true });
+  } catch {
+    return { ok: false, reason: "ha_url hostname could not be resolved" };
+  }
+  if (addrs.length === 0) {
+    return { ok: false, reason: "ha_url hostname could not be resolved" };
+  }
+  for (const { address } of addrs) {
+    if (isPrivateOrReservedIp(address)) {
+      return { ok: false, reason: "ha_url resolves to a private, loopback, or reserved address" };
+    }
+  }
+  return sync2;
+}
+var init_haUrlGuard = __esm({
+  "server/lib/haUrlGuard.ts"() {
+  }
+});
+
+// server/routes/homeAssistant.ts
+import { Router as Router6 } from "express";
+import { fetch as undiciFetch2 } from "undici";
+function requireAdmin(req, res, next) {
+  if (req.userRole !== "admin") {
+    res.status(403).json({ error: "Admin access required" });
+    return;
+  }
+  next();
+}
+function invalidateHACredsCache(userId) {
+  if (userId) haCredsCache.delete(userId);
+  else haCredsCache.clear();
+}
+async function resolveHACreds(userId) {
+  const cacheKey = userId && userId !== "UNKNOWN" ? userId : "__env__";
+  const cached = haCredsCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < HA_CREDS_CACHE_TTL_MS) return cached.creds;
+  let creds = null;
+  if (userId && userId !== "UNKNOWN") {
+    try {
+      const settings = await storage.getHomeAssistantSettings(userId);
+      if (settings?.encryptedToken) {
+        const token = await decryptToken(settings.encryptedToken);
+        let url = settings.haUrl || process.env.HA_URL || "";
+        if (url && settings.haUrl) {
+          const check = await validateHaUrl(url);
+          if (!check.ok) {
+            console.warn(`[home-assistant] Stored HA URL for user ${userId} rejected (${check.reason}) \u2014 falling back to env HA_URL`);
+            url = process.env.HA_URL || "";
+          }
         }
-        cacheReady = true;
-        console.log(`[HA-WS] Loaded ${states.length} entity states into cache`);
-        goveeTemplateId = nextId();
-        send(wsClient, {
-          id: goveeTemplateId,
-          type: "render_template",
-          template: "{{ (integration_entities('govee') + integration_entities('govee_cloud') + integration_entities('govee_ble') + integration_entities('govee_light_local')) | unique | list | to_json }}"
+        if (url && token) creds = { haUrl: url, haToken: token, source: "settings" };
+      }
+    } catch (err) {
+      console.error(
+        `[home-assistant] Failed to load stored HA credentials for user ${userId}; falling back to env:`,
+        err instanceof Error ? err.message : err
+      );
+    }
+  }
+  if (!creds) {
+    const supervisorToken2 = process.env.SUPERVISOR_TOKEN || process.env.HASSIO_TOKEN;
+    const envUrl = process.env.HA_URL || process.env.HOME_ASSISTANT_URL || (supervisorToken2 ? "http://supervisor/core" : "");
+    const envToken = process.env.HA_TOKEN || process.env.HOME_ASSISTANT_TOKEN || supervisorToken2 || "";
+    if (envUrl && envToken) creds = { haUrl: envUrl, haToken: envToken, source: supervisorToken2 ? "supervisor" : "env" };
+  }
+  haCredsCache.set(cacheKey, { creds, fetchedAt: Date.now() });
+  return creds;
+}
+async function getCrestronEntryId(haUrl, haToken) {
+  const now = Date.now();
+  if (crestronEntryIdCache && now - crestronEntryIdFetchedAt < CRESTRON_ENTRY_CACHE_TTL_MS) {
+    return crestronEntryIdCache;
+  }
+  const { status, data } = await callHA(haUrl, haToken, "GET", "/api/config/config_entries/entry");
+  if (status !== 200 || !Array.isArray(data)) return null;
+  const entries = data;
+  const crestron = entries.find(
+    (e) => e.domain === "crestron_home" || typeof e.title === "string" && e.title.toLowerCase().includes("crestron")
+  );
+  if (!crestron) return null;
+  crestronEntryIdCache = crestron.entry_id;
+  crestronEntryIdFetchedAt = now;
+  return crestronEntryIdCache;
+}
+async function getGoveeCloudEntryId(haUrl, haToken) {
+  const now = Date.now();
+  if (goveeEntryCache && goveeEntryIdCache && now - goveeEntryIdFetchedAt < CRESTRON_ENTRY_CACHE_TTL_MS) {
+    return goveeEntryCache;
+  }
+  const { status, data } = await callHA(haUrl, haToken, "GET", "/api/config/config_entries/entry");
+  if (status !== 200 || !Array.isArray(data)) return null;
+  const entries = data;
+  const goveeAll = entries.filter(
+    (e) => e.domain.toLowerCase().includes("govee") || typeof e.title === "string" && e.title.toLowerCase().includes("govee")
+  );
+  const goveeCloud = goveeAll.find(
+    (e) => e.domain === "govee_cloud" || typeof e.title === "string" && e.title.toLowerCase().includes("govee cloud")
+  );
+  const govee = goveeCloud ?? goveeAll[0];
+  if (!govee) return null;
+  goveeEntryCache = govee;
+  goveeEntryIdCache = govee.entry_id;
+  goveeEntryIdFetchedAt = now;
+  return govee;
+}
+async function callHA(haUrl, haToken, method, path12, body, opts) {
+  const url = `${haUrl.replace(/\/$/, "")}${path12}`;
+  const MAX_RETRIES = opts?.maxRetries ?? 3;
+  const retryOn401 = opts?.retryOn401 ?? true;
+  let lastError = null;
+  let lastStatus = 0;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const init = {
+        method,
+        headers: {
+          "Authorization": `Bearer ${haToken}`,
+          "Content-Type": "application/json"
+        },
+        body: body ? JSON.stringify(body) : void 0,
+        // Never follow redirects: a redirecting host could bounce the request
+        // (and its bearer token) to an unvalidated internal destination.
+        // HA's REST API does not redirect in normal operation; a 3xx is
+        // surfaced to the caller as-is.
+        redirect: "manual"
+      };
+      const res = await breakers.ha.execute(() => opts?.dispatcher ? undiciFetch2(url, { ...init, dispatcher: opts.dispatcher }) : guardedFetch(url, init));
+      const text2 = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text2);
+      } catch {
+        data = text2;
+      }
+      lastStatus = res.status;
+      if (res.status >= 500 && attempt < MAX_RETRIES) {
+        console.warn(`callHA: HA returned ${res.status} on attempt ${attempt}/${MAX_RETRIES} for ${method} ${path12} \u2014 retrying in 2s`);
+        await new Promise((r) => setTimeout(r, 2e3));
+        continue;
+      }
+      if (retryOn401 && res.status === 401 && attempt < MAX_RETRIES) {
+        console.warn(`callHA: HA returned 401 on attempt ${attempt}/${MAX_RETRIES} for ${method} ${path12} \u2014 retrying in 2s`);
+        await new Promise((r) => setTimeout(r, 2e3));
+        continue;
+      }
+      if (retryOn401 && res.status === 401 && attempt === MAX_RETRIES) {
+        console.error(`callHA: HA returned 401 after ${MAX_RETRIES} attempts for ${method} ${path12} \u2014 HA token likely expired or revoked`);
+        logAudit("home-assistant-proxy", {
+          category: "home",
+          event_type: "ha_auth_failure",
+          severity: "critical",
+          actor_id: "system",
+          actor_name: "System",
+          channel: "system",
+          summary: `CRITICAL: Home Assistant rejected auth (401) for ${method} ${path12} after ${MAX_RETRIES} retries. Token may need rotation.`,
+          detail: { method, path: path12, attempts: MAX_RETRIES },
+          status: "error"
         });
       }
-      return;
-    }
-    if (type === "event" && msg.id === goveeTemplateId) {
-      const listeners = msg.event ?? {};
-      const eventResult = listeners.result;
-      if (eventResult) {
-        try {
-          let ids;
-          if (Array.isArray(eventResult)) {
-            ids = eventResult;
-          } else if (typeof eventResult === "string") {
-            const jsonFixed = eventResult.replace(/'/g, '"');
-            ids = JSON.parse(jsonFixed);
-          } else {
-            ids = [];
-          }
-          if (Array.isArray(ids) && ids.length > 0) {
-            goveeEntityIdsCache = ids;
-            console.log(`[HA-WS] Cached ${ids.length} Govee entity IDs`);
-          }
-          scheduleCrestronCheck();
-        } catch (e) {
-          console.warn("[HA-WS] Failed to parse Govee template result:", e.message);
-        }
+      return { status: res.status, data };
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (err instanceof CircuitOpenError) {
+        console.warn(`callHA: breaker open for HA, skipping remaining ${MAX_RETRIES - attempt} retries for ${method} ${path12}`);
+        throw err;
       }
-      return;
-    }
-    if (type === "event") {
-      const event = msg.event;
-      if (!event || event.event_type !== "state_changed" || !event.data) return;
-      const { entity_id, new_state } = event.data;
-      if (new_state) {
-        entityCache.set(entity_id, new_state);
-        emitToAll("ha:state_changed", { entity_id, new_state });
-      } else {
-        entityCache.delete(entity_id);
-        emitToAll("ha:state_changed", { entity_id, new_state: null });
+      console.warn(`callHA attempt ${attempt}/${MAX_RETRIES} failed for ${method} ${path12}: ${lastError.message}`);
+      if (attempt < MAX_RETRIES) {
+        await new Promise((r) => setTimeout(r, 500));
       }
-      if (entity_id.startsWith("light.")) scheduleCrestronCheck();
-      return;
     }
-  });
-  wsClient.on("close", (code, reason) => {
-    console.warn(`[HA-WS] Disconnected (code=${code} reason=${reason.toString() || "none"}) \u2014 reconnecting in ${reconnectDelay}ms`);
-    cacheReady = false;
-    wsClient = null;
-    if (safetySyncTimer) {
-      clearInterval(safetySyncTimer);
-      safetySyncTimer = null;
+  }
+  throw lastError;
+}
+function prettifyEntityId(id) {
+  const zoneLabel = getZoneFlow(id)?.label;
+  if (zoneLabel) return zoneLabel;
+  const raw = id.replace(/^[^.]+\./, "");
+  const parts = raw.split("_");
+  if (parts.length >= 3) {
+    for (let len = Math.floor(parts.length / 2); len >= 1; len--) {
+      const a = parts.slice(0, len).join("_");
+      const b2 = parts.slice(len, len * 2).join("_");
+      if (a === b2) {
+        parts.splice(0, len);
+        break;
+      }
     }
-    scheduleReconnect();
-  });
-  wsClient.on("error", (err) => {
-    console.error(`[HA-WS] Error: ${err.message}`);
-  });
+  }
+  return parts.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
 }
-function scheduleReconnect() {
-  if (reconnectTimer) return;
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
-    startHAWebSocket();
-  }, reconnectDelay);
+function resolveTargetSpeakers(target) {
+  const cached = getEntityCache();
+  const allMediaPlayers = cached.map((e) => e.entity_id).filter((id) => id.startsWith("media_player."));
+  if (allMediaPlayers.length === 0) {
+    if (target === "bedrooms") {
+      return { speakers: ["media_player.bedroom_speaker"], tvs: [], displays: [] };
+    }
+    return {
+      speakers: ["media_player.living_room_speaker", "media_player.bedroom_speaker"],
+      tvs: ["media_player.living_room_tv"],
+      displays: ["media_player.kitchen_display"]
+    };
+  }
+  const tvs = allMediaPlayers.filter((id) => id.includes("_tv") || id.includes("television"));
+  const displays = allMediaPlayers.filter((id) => id.includes("display") || id.includes("hub"));
+  if (target === "bedrooms") {
+    const bedroomSpeakers = allMediaPlayers.filter(
+      (id) => (id.includes("bedroom") || id.includes("room") || id.includes("closet")) && !tvs.includes(id)
+    );
+    return {
+      speakers: bedroomSpeakers.length > 0 ? bedroomSpeakers : allMediaPlayers.filter((id) => !tvs.includes(id)),
+      tvs: [],
+      displays: []
+    };
+  }
+  if (target === "google-home") {
+    const ghSpeakers = allMediaPlayers.filter(
+      (id) => !tvs.includes(id) && (id.includes("speaker") || id.includes("display") || id.includes("google"))
+    );
+    return {
+      speakers: ghSpeakers.length > 0 ? ghSpeakers : allMediaPlayers.filter((id) => !tvs.includes(id)),
+      tvs: [],
+      displays
+    };
+  }
+  return {
+    speakers: allMediaPlayers,
+    tvs,
+    displays
+  };
 }
-var entityCache, goveeEntityIdsCache, wsClient, reconnectTimer, reconnectDelay, msgId, cacheReady, goveeTemplateId, CRESTRON_EXCLUDED_ENTITIES, CRESTRON_OFFLINE_THRESHOLD, CRESTRON_DEDUP_MINUTES, crestronBridgeState, crestronCheckTimer, pendingCallbacks, MAX_RECONNECT_DELAY, SAFETY_SYNC_INTERVAL, safetySyncTimer;
-var init_haWebSocket = __esm({
-  "server/lib/haWebSocket.ts"() {
-    init_socket();
+var router5, haCredsCache, HA_CREDS_CACHE_TTL_MS, crestronEntryIdCache, crestronEntryIdFetchedAt, CRESTRON_ENTRY_CACHE_TTL_MS, goveeEntryCache, goveeEntryIdCache, goveeEntryIdFetchedAt, HA_TOKEN_ALERT_COOLDOWN_MS, JANUS_LOGO_URL, homeAssistant_default;
+var init_homeAssistant = __esm({
+  "server/routes/homeAssistant.ts"() {
+    init_auth2();
+    init_auth();
+    init_storage();
     init_auditLog();
-    init_db2();
-    entityCache = /* @__PURE__ */ new Map();
-    goveeEntityIdsCache = [];
-    wsClient = null;
-    reconnectTimer = null;
-    reconnectDelay = 1e3;
-    msgId = 1;
-    cacheReady = false;
-    goveeTemplateId = null;
-    CRESTRON_EXCLUDED_ENTITIES = /* @__PURE__ */ new Set([
-      "light.spa_light",
-      "light.pool_light",
-      "light.laminar_led_lt"
-    ]);
-    CRESTRON_OFFLINE_THRESHOLD = 0.2;
-    CRESTRON_DEDUP_MINUTES = 30;
-    crestronBridgeState = "unknown";
-    crestronCheckTimer = null;
-    pendingCallbacks = /* @__PURE__ */ new Map();
-    MAX_RECONNECT_DELAY = 6e4;
-    SAFETY_SYNC_INTERVAL = 24 * 60 * 60 * 1e3;
-    safetySyncTimer = null;
+    init_encryption();
+    init_ssrfGuard();
+    init_breakers();
+    init_errorSanitizer();
+    init_haWebSocket();
+    init_helpers();
+    init_castBroadcast();
+    init_irrigationFlow();
+    init_haUrlGuard();
+    router5 = Router6();
+    haCredsCache = /* @__PURE__ */ new Map();
+    HA_CREDS_CACHE_TTL_MS = 60 * 1e3;
+    crestronEntryIdCache = null;
+    crestronEntryIdFetchedAt = 0;
+    CRESTRON_ENTRY_CACHE_TTL_MS = 60 * 60 * 1e3;
+    goveeEntryCache = null;
+    goveeEntryIdCache = null;
+    goveeEntryIdFetchedAt = 0;
+    router5.post("/crestron/reload", requireAuth2, requireAdmin, async (req, res) => {
+      const creds = await resolveHACreds(req.userId);
+      const HA_URL2 = creds?.haUrl ?? "";
+      const HA_TOKEN2 = creds?.haToken ?? "";
+      const userId = req.userId ?? "unknown";
+      const userInfo = getAuthUser(req);
+      const actorName = userInfo?.name ?? userInfo?.email ?? userId;
+      const t0 = Date.now();
+      if (!HA_URL2 || !HA_TOKEN2) {
+        res.status(503).json({ error: "Home Assistant not configured" });
+        return;
+      }
+      try {
+        const entryId = await getCrestronEntryId(HA_URL2, HA_TOKEN2);
+        if (!entryId) {
+          await logAudit("crestron-reload", {
+            category: "crestron_bridge",
+            event_type: "crestron_reload",
+            severity: "error",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary: "Crestron reload failed \u2014 config entry not found",
+            detail: {},
+            status: "error",
+            duration_ms: Date.now() - t0
+          });
+          res.status(404).json({ error: "Crestron Home config entry not found in Home Assistant" });
+          return;
+        }
+        const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/homeassistant/reload_config_entry", {
+          entry_id: entryId
+        });
+        const success = status < 400;
+        let haErrorMsg;
+        if (!success && data) {
+          if (typeof data === "string") haErrorMsg = data.slice(0, 300);
+          else if (typeof data === "object") {
+            const d = data;
+            haErrorMsg = String(d.message ?? d.error ?? JSON.stringify(data)).slice(0, 300);
+          }
+        }
+        await logAudit("crestron-reload", {
+          category: "crestron_bridge",
+          event_type: "crestron_reload",
+          severity: success ? "info" : "warn",
+          actor_id: userId,
+          actor_name: actorName,
+          channel: "web",
+          summary: success ? `Crestron integration reloaded by ${actorName}` : `Crestron reload failed (HTTP ${status})`,
+          detail: { entry_id: entryId, ha_status: status, ...haErrorMsg ? { ha_error: haErrorMsg } : {} },
+          status: success ? "success" : "error",
+          duration_ms: Date.now() - t0
+        });
+        res.status(success ? 200 : 502).json({ success, entry_id: entryId, data });
+      } catch (err) {
+        console.error("[crestron-reload] Error:", err);
+        await logAudit("crestron-reload", {
+          category: "crestron_bridge",
+          event_type: "crestron_reload",
+          severity: "error",
+          actor_id: userId,
+          actor_name: actorName,
+          channel: "web",
+          summary: `Crestron reload error: ${err instanceof Error ? err.message : String(err)}`,
+          detail: { error: err instanceof Error ? err.message : String(err) },
+          status: "error",
+          duration_ms: Date.now() - t0
+        });
+        res.status(500).json({ error: "Failed to reload Crestron integration" });
+      }
+    });
+    router5.post("/govee/reload", requireAuth2, requireAdmin, async (req, res) => {
+      const creds = await resolveHACreds(req.userId);
+      const HA_URL2 = creds?.haUrl ?? "";
+      const HA_TOKEN2 = creds?.haToken ?? "";
+      const userId = req.userId ?? "unknown";
+      const userInfo = getAuthUser(req);
+      const actorName = userInfo?.name ?? userInfo?.email ?? userId;
+      const t0 = Date.now();
+      if (!HA_URL2 || !HA_TOKEN2) {
+        res.status(503).json({ error: "Home Assistant not configured" });
+        return;
+      }
+      try {
+        const entry = await getGoveeCloudEntryId(HA_URL2, HA_TOKEN2);
+        if (!entry) {
+          await logAudit("govee-reload", {
+            category: "home",
+            event_type: "govee_reload",
+            severity: "error",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary: "Govee reload failed \u2014 config entry not found in Home Assistant",
+            detail: {},
+            status: "error",
+            duration_ms: Date.now() - t0
+          });
+          res.status(404).json({ error: "Govee config entry not found in Home Assistant" });
+          return;
+        }
+        const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/homeassistant/reload_config_entry", {
+          entry_id: entry.entry_id
+        });
+        const success = status < 400;
+        let haErrorMsg;
+        if (!success && data) {
+          if (typeof data === "string") haErrorMsg = data.slice(0, 300);
+          else if (typeof data === "object") {
+            const d = data;
+            haErrorMsg = String(d.message ?? d.error ?? JSON.stringify(data)).slice(0, 300);
+          }
+        }
+        goveeEntryCache = null;
+        goveeEntryIdCache = null;
+        goveeEntryIdFetchedAt = 0;
+        await logAudit("govee-reload", {
+          category: "home",
+          event_type: "govee_reload",
+          severity: success ? "info" : "warn",
+          actor_id: userId,
+          actor_name: actorName,
+          channel: "web",
+          summary: success ? `Govee integration (${entry.domain}) reloaded by ${actorName}` : `Govee reload failed (HTTP ${status})`,
+          detail: {
+            entry_id: entry.entry_id,
+            domain: entry.domain,
+            title: entry.title,
+            ha_status: status,
+            ...haErrorMsg ? { ha_error: haErrorMsg } : {}
+          },
+          status: success ? "success" : "error",
+          duration_ms: Date.now() - t0
+        });
+        res.status(success ? 200 : 502).json({ success, entry_id: entry.entry_id, domain: entry.domain, title: entry.title, data });
+      } catch (err) {
+        console.error("[govee-reload] Error:", err);
+        await logAudit("govee-reload", {
+          category: "home",
+          event_type: "govee_reload",
+          severity: "error",
+          actor_id: userId,
+          actor_name: actorName,
+          channel: "web",
+          summary: `Govee reload error: ${err instanceof Error ? err.message : String(err)}`,
+          detail: { error: err instanceof Error ? err.message : String(err) },
+          status: "error",
+          duration_ms: Date.now() - t0
+        });
+        res.status(500).json({ error: "Failed to reload Govee integration" });
+      }
+    });
+    router5.get("/govee/config-entries", requireAuth2, requireAdmin, async (req, res) => {
+      const creds = await resolveHACreds(req.userId);
+      const HA_URL2 = creds?.haUrl ?? "";
+      const HA_TOKEN2 = creds?.haToken ?? "";
+      if (!HA_URL2 || !HA_TOKEN2) {
+        res.status(503).json({ error: "Home Assistant not configured" });
+        return;
+      }
+      try {
+        const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", "/api/config/config_entries/entry");
+        if (status !== 200 || !Array.isArray(data)) {
+          res.status(502).json({ error: "Failed to fetch config entries from HA" });
+          return;
+        }
+        const entries = data;
+        const goveeEntries = entries.filter(
+          (e) => e.domain.toLowerCase().includes("govee") || typeof e.title === "string" && e.title.toLowerCase().includes("govee")
+        );
+        res.json({ entries: goveeEntries });
+      } catch (err) {
+        res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+    router5.get("/states", requireAuth2, (_req, res) => {
+      if (!isCacheReady()) {
+        res.status(503).json({ error: "State cache not ready yet" });
+        return;
+      }
+      res.json(getEntityCache());
+    });
+    router5.get("/cameras", requireAuth2, async (req, res) => {
+      try {
+        const creds = await resolveHACreds(req.userId);
+        if (!creds?.haUrl || !creds?.haToken) {
+          res.json({ success: true, cameras: [] });
+          return;
+        }
+        let states = [];
+        if (isCacheReady()) {
+          const cache3 = getEntityCache();
+          states = Object.values(cache3);
+        } else {
+          const { status, data } = await callHA(creds.haUrl, creds.haToken, "GET", "/api/states", void 0, { maxRetries: 1 });
+          if (status === 200 && Array.isArray(data)) {
+            states = data;
+          }
+        }
+        const cameras = states.filter((s3) => s3.entity_id && s3.entity_id.startsWith("camera.")).map((s3) => ({
+          camera_id: s3.entity_id,
+          entity_id: s3.entity_id,
+          name: s3.attributes?.friendly_name || s3.entity_id.replace(/^camera\./, "").replace(/_/g, " "),
+          status: s3.state === "unavailable" ? "offline" : "live",
+          model: s3.attributes?.brand || s3.attributes?.model_name || s3.attributes?.model || "Home Assistant",
+          location: s3.attributes?.area_id || "",
+          thumbnail_url: `/api/ha/camera_proxy/${s3.entity_id}`,
+          stream_url: `/api/ha/camera_stream/${s3.entity_id}`,
+          is_ha: true
+        }));
+        res.json({ success: true, cameras });
+      } catch (err) {
+        console.error("[ha-cameras] Failed to list cameras:", err);
+        res.json({ success: false, cameras: [], error: String(err) });
+      }
+    });
+    router5.get("/camera_proxy/:entityId", requireAuth2, async (req, res) => {
+      const rawEntityId = req.params.entityId;
+      const entityId = Array.isArray(rawEntityId) ? rawEntityId[0] : rawEntityId;
+      if (!entityId || !entityId.startsWith("camera.")) {
+        res.status(400).json({ error: "Valid camera entityId required" });
+        return;
+      }
+      const creds = await resolveHACreds(req.userId);
+      if (!creds?.haUrl || !creds?.haToken) {
+        res.status(503).json({ error: "Home Assistant not configured" });
+        return;
+      }
+      try {
+        const haUrl = creds.haUrl.replace(/\/$/, "");
+        const proxyUrl = `${haUrl}/api/camera_proxy/${encodeURIComponent(entityId)}`;
+        const haRes = await undiciFetch2(proxyUrl, {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${creds.haToken}`
+          }
+        });
+        if (!haRes.ok) {
+          res.status(haRes.status).json({ error: `HA camera proxy returned ${haRes.status}` });
+          return;
+        }
+        const contentType = haRes.headers.get("content-type") || "image/jpeg";
+        res.setHeader("Content-Type", contentType);
+        res.setHeader("Cache-Control", "no-cache, max-age=0, must-revalidate");
+        const buffer = Buffer.from(await haRes.arrayBuffer());
+        res.send(buffer);
+      } catch (err) {
+        console.error(`[ha-camera-proxy] Error proxying ${entityId}:`, err);
+        res.status(500).json({ error: "Failed to fetch camera snapshot" });
+      }
+    });
+    router5.get("/camera_stream/:entityId", requireAuth2, async (req, res) => {
+      const rawEntityId = req.params.entityId;
+      const entityId = Array.isArray(rawEntityId) ? rawEntityId[0] : rawEntityId;
+      if (!entityId || !entityId.startsWith("camera.")) {
+        res.status(400).json({ error: "Valid camera entityId required" });
+        return;
+      }
+      const creds = await resolveHACreds(req.userId);
+      if (!creds?.haUrl || !creds?.haToken) {
+        res.status(503).json({ error: "Home Assistant not configured" });
+        return;
+      }
+      try {
+        const haUrl = creds.haUrl.replace(/\/$/, "");
+        const streamUrl = `${haUrl}/api/camera_proxy_stream/${encodeURIComponent(entityId)}`;
+        const haRes = await undiciFetch2(streamUrl, {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${creds.haToken}`
+          }
+        });
+        if (!haRes.ok) {
+          res.status(haRes.status).json({ error: `HA camera stream returned ${haRes.status}` });
+          return;
+        }
+        const contentType = haRes.headers.get("content-type") || "multipart/x-mixed-replace; boundary=--frame";
+        res.setHeader("Content-Type", contentType);
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+        res.setHeader("Connection", "close");
+        if (haRes.body) {
+          const reader = haRes.body.getReader();
+          req.on("close", () => {
+            reader.cancel().catch(() => {
+            });
+          });
+          const pump = async () => {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              res.write(value);
+            }
+            res.end();
+          };
+          pump().catch(() => res.end());
+        } else {
+          res.status(500).json({ error: "No stream body available" });
+        }
+      } catch (err) {
+        console.error(`[ha-camera-stream] Error streaming ${entityId}:`, err);
+        if (!res.headersSent) res.status(500).json({ error: "Failed to stream camera" });
+      }
+    });
+    router5.get("/govee-ids", requireAuth2, (_req, res) => {
+      res.json(getGoveeEntityIdsFromCache());
+    });
+    HA_TOKEN_ALERT_COOLDOWN_MS = 60 * 60 * 1e3;
+    JANUS_LOGO_URL = process.env.APP_LOGO_URL || "/icon.svg";
+    router5.post("/", requireAuth2, async (req, res) => {
+      const authUser = getAuthUser(req);
+      const userId = authUser?.userId || req.userId || "UNKNOWN";
+      const actorName = authUser?.displayName || authUser?.email || "UNKNOWN";
+      const isAdmin2 = authUser?.roles?.includes("admin") || req.userRole === "admin";
+      try {
+        const body = req.body;
+        const { action, path: path12, method = "GET", payload } = body;
+        if (action === "save-settings") {
+          if (userId === "UNKNOWN") {
+            res.status(401).json({ error: "Authentication required" });
+            return;
+          }
+          if (!isAdmin2) {
+            res.status(403).json({ error: "Admin privileges required to save Home Assistant configuration" });
+            return;
+          }
+          const haUrlInput = typeof body.ha_url === "string" ? body.ha_url.trim().replace(/\/$/, "") : "";
+          const tokenInput = typeof body.access_token === "string" ? body.access_token.trim() : "";
+          if (!haUrlInput) {
+            res.status(400).json({ error: "ha_url is required" });
+            return;
+          }
+          const urlCheck = await validateHaUrl(haUrlInput);
+          if (!urlCheck.ok) {
+            res.status(400).json({ error: urlCheck.reason });
+            return;
+          }
+          const existing = await storage.getHomeAssistantSettings(userId);
+          if (!tokenInput && !existing?.encryptedToken) {
+            res.status(400).json({ error: "access_token is required" });
+            return;
+          }
+          const update = { userId, haUrl: haUrlInput };
+          if (tokenInput) {
+            update.encryptedToken = await encryptToken(tokenInput);
+          }
+          await storage.upsertHomeAssistantSettings(update);
+          invalidateHACredsCache(userId);
+          logAudit("home-assistant-proxy", {
+            category: "home",
+            event_type: "ha_settings_saved",
+            severity: "info",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary: tokenInput ? `Home Assistant settings saved (URL + new token) by ${actorName}` : `Home Assistant URL updated by ${actorName}`,
+            detail: { ha_url: haUrlInput, token_updated: Boolean(tokenInput) },
+            status: "success"
+          });
+          res.json({ success: true, ha_url: haUrlInput, token_saved: Boolean(tokenInput) });
+          return;
+        }
+        if (action === "get-settings") {
+          if (userId === "UNKNOWN") {
+            res.status(401).json({ error: "Authentication required" });
+            return;
+          }
+          const settings = await storage.getHomeAssistantSettings(userId);
+          res.json({
+            settings: settings ? {
+              id: settings.id,
+              ha_url: settings.haUrl,
+              is_connected: settings.isConnected,
+              last_connected_at: settings.lastConnectedAt,
+              has_token: Boolean(settings.encryptedToken)
+            } : null
+          });
+          return;
+        }
+        if (action === "disconnect") {
+          if (userId === "UNKNOWN") {
+            res.status(401).json({ error: "Authentication required" });
+            return;
+          }
+          if (!isAdmin2) {
+            res.status(403).json({ error: "Admin privileges required to disconnect Home Assistant" });
+            return;
+          }
+          const existing = await storage.getHomeAssistantSettings(userId);
+          if (existing) {
+            await storage.upsertHomeAssistantSettings({
+              userId,
+              haUrl: existing.haUrl,
+              encryptedToken: null,
+              isConnected: false
+            });
+            invalidateHACredsCache(userId);
+            logAudit("home-assistant-proxy", {
+              category: "home",
+              event_type: "ha_disconnected",
+              severity: "info",
+              actor_id: userId,
+              actor_name: actorName,
+              channel: "web",
+              summary: `Home Assistant disconnected by ${actorName}`,
+              detail: { ha_url: existing.haUrl },
+              status: "success"
+            });
+          }
+          res.json({ success: true });
+          return;
+        }
+        const creds = await resolveHACreds(userId);
+        if (action === "test-connection") {
+          const suppliedUrl = typeof body.ha_url === "string" ? body.ha_url.trim().replace(/\/$/, "") : "";
+          const suppliedToken = typeof body.access_token === "string" ? body.access_token.trim() : "";
+          let testUrl;
+          let testToken;
+          if (suppliedToken) {
+            testUrl = suppliedUrl || creds?.haUrl || "";
+            testToken = suppliedToken;
+          } else {
+            if (suppliedUrl && creds && suppliedUrl !== creds.haUrl) {
+              res.status(400).json({ error: "To test a new URL, provide its access token too" });
+              return;
+            }
+            testUrl = creds?.haUrl || "";
+            testToken = creds?.haToken || "";
+          }
+          if (!testUrl || !testToken) {
+            res.status(503).json({ unavailable: true, reason: "not_configured", message: "ha_not_configured" });
+            return;
+          }
+          const urlCheck = await validateHaUrl(testUrl);
+          if (!urlCheck.ok) {
+            res.status(400).json({ error: urlCheck.reason });
+            return;
+          }
+          const { status } = await callHA(testUrl, testToken, "GET", "/api/");
+          const connected = status === 200;
+          if (connected && userId && userId !== "UNKNOWN") {
+            const existing = await storage.getHomeAssistantSettings(userId);
+            if (existing) {
+              await storage.upsertHomeAssistantSettings({
+                userId,
+                isConnected: true,
+                lastConnectedAt: /* @__PURE__ */ new Date()
+              });
+            }
+          }
+          logAudit("home-assistant-proxy", {
+            category: "home",
+            event_type: "ha_test_connection",
+            severity: "info",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary: connected ? "Home Assistant connection test succeeded" : `Home Assistant connection test failed (HTTP ${status})`,
+            detail: { status, connected },
+            status: connected ? "success" : "error"
+          });
+          res.json({ connected });
+          return;
+        }
+        if (!creds) {
+          res.status(503).json({ unavailable: true, reason: "not_configured", message: "ha_not_configured" });
+          return;
+        }
+        const HA_URL2 = creds.haUrl;
+        const HA_TOKEN2 = creds.haToken;
+        if (action === "proxy" && path12) {
+          if (typeof path12 !== "string" || !path12.startsWith("/") || path12.startsWith("//") || path12.includes("\\")) {
+            res.status(400).json({ error: "path must be an absolute URL path" });
+            return;
+          }
+          const t0 = Date.now();
+          const { status, data } = await callHA(HA_URL2, HA_TOKEN2, method, path12, payload);
+          if (status >= 400 && path12.startsWith("/api/calendars/")) {
+            console.warn(`Calendar endpoint returned ${status} \u2014 returning empty array`);
+            logAudit("home-assistant-proxy", {
+              category: "home",
+              event_type: "ha_proxy_error",
+              severity: "warn",
+              actor_id: userId,
+              actor_name: actorName,
+              channel: "web",
+              summary: `Home Assistant calendar proxy ${method} ${path12} returned HTTP ${status} (suppressed)`,
+              detail: { method, path: path12, status, suppressed: true },
+              status: "error",
+              duration_ms: Date.now() - t0
+            });
+            res.json([]);
+            return;
+          }
+          if (status >= 400) {
+            const payloadBytes = payload ? JSON.stringify(payload).length : 0;
+            const responseBytes = JSON.stringify(data).length;
+            const errorDetail = typeof data === "object" && data !== null ? data.message || data.error || void 0 : void 0;
+            logAudit("home-assistant-proxy", {
+              category: "home",
+              event_type: "ha_proxy_error",
+              severity: "warn",
+              actor_id: userId,
+              actor_name: actorName,
+              channel: "web",
+              summary: `Home Assistant proxy ${method} ${path12} returned HTTP ${status}`,
+              detail: {
+                method,
+                path: path12,
+                status,
+                request_bytes: payloadBytes || void 0,
+                response_bytes: responseBytes,
+                ...errorDetail ? { error: errorDetail } : {}
+              },
+              status: "error",
+              duration_ms: Date.now() - t0
+            });
+          } else if (method !== "GET") {
+            const responseBytes = JSON.stringify(data).length;
+            const payloadBytes = payload ? JSON.stringify(payload).length : 0;
+            logAudit("home-assistant-proxy", {
+              category: "home",
+              event_type: "ha_proxy_request",
+              severity: "info",
+              actor_id: userId,
+              actor_name: actorName,
+              channel: "web",
+              summary: `HA proxy ${method} ${path12}`,
+              detail: { method, path: path12, status, request_bytes: payloadBytes || void 0, response_bytes: responseBytes },
+              status: "success",
+              duration_ms: Date.now() - t0
+            });
+          }
+          res.status(status).json(data);
+          return;
+        }
+        if (action === "get-states") {
+          const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", "/api/states");
+          const entityIds = body.entity_ids;
+          if (entityIds && Array.isArray(entityIds) && entityIds.length > 0 && Array.isArray(data)) {
+            const idSet = new Set(entityIds);
+            const filtered = data.filter((s3) => idSet.has(s3.entity_id));
+            res.status(status).json(filtered);
+            return;
+          }
+          res.status(status).json(data);
+          return;
+        }
+        if (action === "get-state") {
+          const { entity_id } = body;
+          if (!entity_id) {
+            res.status(400).json({ error: "entity_id required" });
+            return;
+          }
+          const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", `/api/states/${entity_id}`);
+          res.status(status).json(data);
+          return;
+        }
+        if (action === "get-domain") {
+          const { domain } = body;
+          if (!domain) {
+            res.status(400).json({ error: "domain required" });
+            return;
+          }
+          const { status: domainStatus, data: allStates } = await callHA(HA_URL2, HA_TOKEN2, "GET", "/api/states");
+          const statesArray = Array.isArray(allStates) ? allStates : [];
+          const states = statesArray.filter((s3) => s3.entity_id?.startsWith(`${domain}.`));
+          res.status(domainStatus < 400 ? 200 : domainStatus).json(states);
+          return;
+        }
+        if (action === "call-service") {
+          if (!isAdmin2) {
+            res.status(403).json({ error: "Device control requires admin privileges" });
+            return;
+          }
+          const { domain: svcDomain, service, service_data } = body;
+          if (!svcDomain || !service) {
+            res.status(400).json({ error: "domain and service required" });
+            return;
+          }
+          const t0 = Date.now();
+          const entityId = service_data?.entity_id;
+          const svcPath = `/api/services/${svcDomain}/${service}`;
+          const svcPayload = service_data || {};
+          let callResult;
+          if (svcDomain === "climate" && creds.source === "env") {
+            try {
+              const wsResult = await callHAService(svcDomain, service, svcPayload);
+              console.log(
+                `[HA climate] WebSocket call succeeded for entity_id=${entityId ?? "unknown"} service=${service}`
+              );
+              callResult = { status: 200, data: wsResult ?? [] };
+            } catch (wsErr) {
+              const wsErrMsg = wsErr instanceof Error ? wsErr.message : String(wsErr);
+              console.warn(
+                `[HA climate] WebSocket call failed for entity_id=${entityId ?? "unknown"} service=${service} error=${wsErrMsg} \u2014 falling back to REST`
+              );
+              try {
+                const restResult = await callHA(HA_URL2, HA_TOKEN2, "POST", svcPath, svcPayload, { maxRetries: 1, retryOn401: false });
+                if (restResult.status >= 400) {
+                  console.error(
+                    `[HA climate] REST fallback returned ${restResult.status} for entity_id=${entityId ?? "unknown"} service=${service} (WS error: ${wsErrMsg})`
+                  );
+                  callResult = { status: 500, data: { error: `Climate control failed \u2014 WS: ${wsErrMsg}, REST: HTTP ${restResult.status}` } };
+                } else {
+                  callResult = restResult;
+                }
+              } catch (restErr) {
+                const restErrMsg = restErr instanceof Error ? restErr.message : String(restErr);
+                console.error(
+                  `[HA climate] REST fallback also threw for entity_id=${entityId ?? "unknown"} service=${service} ws_error=${wsErrMsg} rest_error=${restErrMsg}`
+                );
+                callResult = { status: 500, data: { error: `Climate control failed \u2014 WS: ${wsErrMsg}, REST: ${restErrMsg}` } };
+              }
+            }
+          } else {
+            callResult = await callHA(HA_URL2, HA_TOKEN2, "POST", svcPath, svcPayload);
+          }
+          const { status, data } = callResult;
+          const ids = entityId ? Array.isArray(entityId) ? entityId : [entityId] : [];
+          const count = ids.length;
+          const verbMap = {
+            turn_on: svcDomain === "scene" ? "Activated scene" : "Turned on",
+            turn_off: "Turned off",
+            toggle: "Toggled",
+            set_temperature: service_data?.temperature != null ? `Set temperature to ${service_data.temperature}\xB0F` : "Set temperature",
+            set_hvac_mode: service_data?.hvac_mode ? `Set mode to ${service_data.hvac_mode}` : "Set HVAC mode",
+            volume_set: service_data?.volume_level != null ? `Set volume to ${Math.round(service_data.volume_level * 100)}%` : "Set volume",
+            select_source: service_data?.source ? `Selected source ${service_data.source} on` : "Selected source on",
+            activate: "Activated scene"
+          };
+          const verb = verbMap[service] || service.replace(/_/g, " ");
+          let summary;
+          if (count === 0) {
+            summary = `${verb} (${svcDomain})`;
+          } else if (count === 1) {
+            summary = `${verb} ${prettifyEntityId(ids[0])}`;
+          } else if (count <= 2) {
+            summary = `${verb} ${ids.map(prettifyEntityId).join(" & ")}`;
+          } else {
+            summary = `${verb} ${ids.slice(0, 2).map(prettifyEntityId).join(", ")} +${count - 2} more`;
+          }
+          const extras = [];
+          if (service_data?.brightness != null && !verbMap[service]?.includes("brightness"))
+            extras.push(`brightness ${Math.round(service_data.brightness / 255 * 100)}%`);
+          if (extras.length) summary += ` (${extras.join(", ")})`;
+          if (status >= 400 && svcDomain === "climate") {
+            const responseBody = typeof data === "object" ? JSON.stringify(data) : String(data ?? "");
+            console.error(
+              `[HA climate] call-service failed: entity_id=${entityId ?? "unknown"} service=${service} status=${status} body=${responseBody}`
+            );
+          }
+          logAudit("home-assistant-proxy", {
+            category: "home",
+            event_type: "ha_call_service",
+            severity: "info",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary,
+            detail: { domain: svcDomain, service, entity_id: entityId, service_data, status },
+            duration_ms: Date.now() - t0,
+            status: status < 400 ? "success" : "error"
+          });
+          res.status(status).json(data);
+          return;
+        }
+        if (action === "get-climate-debug") {
+          const t0 = Date.now();
+          const { status, data: allStates } = await callHA(HA_URL2, HA_TOKEN2, "GET", "/api/states");
+          const statesArray = Array.isArray(allStates) ? allStates : [];
+          const climateEntities = statesArray.filter((s3) => s3.entity_id?.startsWith("climate."));
+          const poolSpaFilter = /pool|spa/i;
+          const debug = climateEntities.map((e) => ({
+            entity_id: e.entity_id,
+            friendly_name: e.attributes?.friendly_name || e.entity_id,
+            state: e.state,
+            hvac_modes: e.attributes?.hvac_modes || [],
+            current_temperature: e.attributes?.current_temperature ?? null,
+            target_temperature: e.attributes?.temperature ?? null,
+            hvac_action: e.attributes?.hvac_action ?? null,
+            is_pool_spa: poolSpaFilter.test(e.entity_id),
+            category: poolSpaFilter.test(e.entity_id) ? "pool_spa" : "hvac"
+          }));
+          const hvacCount = debug.filter((d) => d.category === "hvac").length;
+          const poolSpaCount = debug.filter((d) => d.category === "pool_spa").length;
+          logAudit("home-assistant-proxy", {
+            category: "home",
+            event_type: "ha_climate_debug",
+            severity: "info",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary: `Climate debug: ${climateEntities.length} entities (${hvacCount} HVAC, ${poolSpaCount} pool/spa)`,
+            duration_ms: Date.now() - t0,
+            status: status < 400 ? "success" : "error"
+          });
+          res.json({
+            total_climate_entities: climateEntities.length,
+            hvac_count: hvacCount,
+            pool_spa_count: poolSpaCount,
+            total_ha_entities: statesArray.length,
+            timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+            entities: debug
+          });
+          return;
+        }
+        if (action === "get-history") {
+          const { entity_id, hours = 24 } = body;
+          const end = (/* @__PURE__ */ new Date()).toISOString();
+          const start = new Date(Date.now() - hours * 3600 * 1e3).toISOString();
+          let histPath = `/api/history/period/${start}?end_time=${encodeURIComponent(end)}&minimal_response`;
+          if (entity_id) histPath += `&filter_entity_id=${entity_id}`;
+          const t0 = Date.now();
+          const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", histPath);
+          const entityLabel = entity_id ? prettifyEntityId(entity_id) : "all entities";
+          logAudit("home-assistant-proxy", {
+            category: "home",
+            event_type: "ha_get_history",
+            severity: "info",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary: `Retrieved ${hours}h history for ${entityLabel}`,
+            detail: { entity_id: entity_id || void 0, hours },
+            status: status < 400 ? "success" : "error",
+            duration_ms: Date.now() - t0
+          });
+          res.status(status).json(data);
+          return;
+        }
+        if (action === "get-logbook") {
+          const { hours = 24, entity_id } = body;
+          const start = new Date(Date.now() - hours * 3600 * 1e3).toISOString();
+          let logPath = `/api/logbook/${start}`;
+          if (entity_id) logPath += `?entity=${entity_id}`;
+          const t0 = Date.now();
+          const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", logPath);
+          const entityLabel = entity_id ? prettifyEntityId(entity_id) : "all entities";
+          const entryCount = Array.isArray(data) ? data.length : 0;
+          logAudit("home-assistant-proxy", {
+            category: "home",
+            event_type: "ha_get_logbook",
+            severity: "info",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary: `Retrieved ${entryCount} logbook entries (${hours}h) for ${entityLabel}`,
+            detail: { entity_id: entity_id || void 0, hours, entry_count: entryCount },
+            status: status < 400 ? "success" : "error",
+            duration_ms: Date.now() - t0
+          });
+          res.status(status).json(data);
+          return;
+        }
+        if (action === "get-services") {
+          const t0 = Date.now();
+          const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", "/api/services");
+          const domainCount = Array.isArray(data) ? data.length : 0;
+          logAudit("home-assistant-proxy", {
+            category: "home",
+            event_type: "ha_get_services",
+            severity: "info",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary: `Fetched HA service list (${domainCount} domain${domainCount !== 1 ? "s" : ""})`,
+            detail: { domain_count: domainCount },
+            status: status < 400 ? "success" : "error",
+            duration_ms: Date.now() - t0
+          });
+          res.status(status).json(data);
+          return;
+        }
+        if (action === "get-config") {
+          const t0 = Date.now();
+          const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", "/api/config");
+          logAudit("home-assistant-proxy", {
+            category: "home",
+            event_type: "ha_get_config",
+            severity: "info",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary: "Fetched Home Assistant configuration",
+            detail: {},
+            status: status < 400 ? "success" : "error",
+            duration_ms: Date.now() - t0
+          });
+          res.status(status).json(data);
+          return;
+        }
+        if (action === "broadcast-all") {
+          const { speakers, tvs, displays } = resolveTargetSpeakers("all");
+          const requestedVolumeAll = Number.isFinite(body.volume) ? body.volume : 0.75;
+          const volumeLevelAll = Math.min(1, Math.max(0, requestedVolumeAll));
+          await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/turn_on", { entity_id: speakers });
+          await new Promise((r) => setTimeout(r, 3e3));
+          await Promise.all([
+            callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/volume_set", {
+              entity_id: speakers,
+              volume_level: volumeLevelAll
+            }),
+            ...displays.length > 0 ? [
+              callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/play_media", {
+                entity_id: displays,
+                media_content_id: JANUS_LOGO_URL,
+                media_content_type: "image/png"
+              })
+            ] : []
+          ]);
+          await new Promise((r) => setTimeout(r, 1500));
+          const t0 = Date.now();
+          await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/tts/speak", {
+            entity_id: "tts.elevenlabs_text_to_speech",
+            media_player_entity_id: speakers,
+            message: body.message,
+            options: { voice: "iLVmqjzCGGvqtMCk6vVQ" }
+          });
+          if (tvs.length > 0) {
+            setTimeout(async () => {
+              try {
+                await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/turn_off", { entity_id: tvs });
+              } catch {
+              }
+            }, 6e4);
+          }
+          logAudit("home-assistant-proxy", {
+            category: "home",
+            event_type: "broadcast_all",
+            severity: "info",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary: `Broadcast to ${speakers.length} devices (vol ${Math.round(volumeLevelAll * 100)}%)`,
+            detail: { message: body.message?.slice(0, 100), volume: volumeLevelAll },
+            duration_ms: Date.now() - t0,
+            status: "success"
+          });
+          res.json({ success: true, devices: speakers.length });
+          return;
+        }
+        if (action === "broadcast-bedrooms" || action === "broadcast-girls") {
+          const { speakers } = resolveTargetSpeakers("bedrooms");
+          const requestedVolumeBedrooms = Number.isFinite(body.volume) ? body.volume : 0.85;
+          const volumeLevelBedrooms = Math.min(1, Math.max(0, requestedVolumeBedrooms));
+          await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/turn_on", { entity_id: speakers });
+          await new Promise((r) => setTimeout(r, 3e3));
+          await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/volume_set", {
+            entity_id: speakers,
+            volume_level: volumeLevelBedrooms
+          });
+          await new Promise((r) => setTimeout(r, 1500));
+          const t0 = Date.now();
+          await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/tts/speak", {
+            entity_id: "tts.elevenlabs_text_to_speech",
+            media_player_entity_id: speakers,
+            message: body.message,
+            options: { voice: "iLVmqjzCGGvqtMCk6vVQ" }
+          });
+          logAudit("home-assistant-proxy", {
+            category: "home",
+            event_type: "broadcast_bedrooms",
+            severity: "info",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary: `Broadcast to bedrooms (${speakers.length} speakers)`,
+            detail: { message: body.message?.slice(0, 100) },
+            duration_ms: Date.now() - t0,
+            status: "success"
+          });
+          res.json({ success: true, devices: speakers.length });
+          return;
+        }
+        if (action === "broadcast-google-home") {
+          const { speakers, displays } = resolveTargetSpeakers("google-home");
+          const requestedVolumeGH = Number.isFinite(body.volume) ? body.volume : 0.75;
+          const volumeLevelGH = Math.min(1, Math.max(0, requestedVolumeGH));
+          await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/turn_on", { entity_id: speakers });
+          await new Promise((r) => setTimeout(r, 3e3));
+          await Promise.all([
+            callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/volume_set", {
+              entity_id: speakers,
+              volume_level: volumeLevelGH
+            }),
+            callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/play_media", {
+              entity_id: displays,
+              media_content_id: JANUS_LOGO_URL,
+              media_content_type: "image/png"
+            })
+          ]);
+          await new Promise((r) => setTimeout(r, 1500));
+          const t0 = Date.now();
+          const messageText = typeof body.message === "string" ? body.message : "";
+          let ttsOk = true;
+          let ttsError = null;
+          let whatsappFallback = false;
+          let whatsappAlert = false;
+          const audioUrl = await generateAndUploadTTS(messageText, "google-home-broadcast");
+          if (audioUrl) {
+            const speakerErrors = [];
+            for (const speaker of speakers) {
+              const { status: playStatus } = await callHA(
+                HA_URL2,
+                HA_TOKEN2,
+                "POST",
+                "/api/services/media_player/play_media",
+                {
+                  entity_id: speaker,
+                  media_content_id: audioUrl,
+                  media_content_type: "audio/mpeg",
+                  announce: true,
+                  extra: {
+                    metadata: { metadataType: 3, title: "Home Announcement", artist: "Janus" }
+                  }
+                }
+              );
+              if (playStatus >= 400) {
+                speakerErrors.push(`${speaker}: HTTP ${playStatus}`);
+                console.warn(`[home-assistant-proxy] play_media failed on ${speaker}: HTTP ${playStatus}`);
+              } else {
+                console.log(`[home-assistant-proxy] \u2713 play_media accepted on ${speaker}`);
+              }
+              await new Promise((r) => setTimeout(r, 400));
+            }
+            if (speakerErrors.length > 0) {
+              ttsOk = false;
+              ttsError = `play_media failed on ${speakerErrors.length} speaker(s): ${speakerErrors.join("; ")}`;
+            }
+          } else {
+            ttsOk = false;
+            ttsError = "ElevenLabs TTS or storage upload failed";
+          }
+          if (!ttsOk) {
+            try {
+              const fallbackPhone = await getBroadcastFallbackPhone();
+              whatsappFallback = await sendWhatsAppTo(fallbackPhone, `\u{1F4E2} Home broadcast: ${messageText}`);
+              if (whatsappFallback) {
+                console.log("[home-assistant-proxy] WhatsApp fallback sent for broadcast-google-home");
+              } else {
+                console.warn("[home-assistant-proxy] WhatsApp fallback failed for broadcast-google-home");
+              }
+            } catch (e) {
+              console.error("[home-assistant-proxy] WhatsApp fallback error:", e);
+            }
+            try {
+              const alertPhone = await getAlertPhoneNumber();
+              const fallbackNote = whatsappFallback ? " WhatsApp fallback sent to family." : " WhatsApp fallback failed.";
+              whatsappAlert = await sendWhatsAppTo(
+                alertPhone,
+                `\u26A0\uFE0F All Google Home broadcast failed: ${ttsError ?? "unknown TTS error"}.${fallbackNote}`
+              );
+            } catch (e) {
+              console.error("[home-assistant-proxy] WhatsApp alert error:", e);
+            }
+          }
+          logAudit("home-assistant-proxy", {
+            category: "home",
+            event_type: "broadcast_google_home",
+            severity: ttsOk ? "info" : "warn",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary: ttsOk ? `Broadcast to ${speakers.length} Google Home devices (vol ${Math.round(volumeLevelGH * 100)}%)` : `Broadcast to ${speakers.length} Google Home devices FAILED (vol ${Math.round(volumeLevelGH * 100)}%)`,
+            detail: {
+              message: messageText.slice(0, 100),
+              volume: volumeLevelGH,
+              ttsError,
+              whatsappFallback,
+              whatsappAlert
+            },
+            duration_ms: Date.now() - t0,
+            status: ttsOk ? "success" : "error"
+          });
+          res.json({
+            success: ttsOk,
+            devices: speakers.length,
+            ttsError,
+            whatsappFallback,
+            whatsappAlert
+          });
+          if (ttsOk && audioUrl) {
+            setTimeout(async () => {
+              const tVerify = Date.now();
+              const verifications = {};
+              let verifiedCount = 0;
+              for (const speaker of speakers) {
+                const v = await verifyPlaybackState(HA_URL2, HA_TOKEN2, speaker, audioUrl, true);
+                verifications[speaker] = v;
+                if (v.verified) {
+                  verifiedCount++;
+                  console.log(`[home-assistant-proxy] \u2713 Cast state verified: ${speaker} loaded correct content (announce-mode, state=${v.state})`);
+                } else {
+                  console.warn(
+                    `[home-assistant-proxy] \u26A0 Cast state check: ${speaker} state=${v.state ?? "null"} urlMatch=${v.urlMatch} (announce-mode: urlMatch must be true and state must not be unavailable)`
+                  );
+                }
+              }
+              const allVerified = verifiedCount === speakers.length;
+              let silentDropRisk = false;
+              if (allVerified) {
+                const { silentDropRisk: risk } = await detectSilentDropRisk(
+                  HA_URL2,
+                  HA_TOKEN2,
+                  speakers,
+                  audioUrl,
+                  3500
+                );
+                silentDropRisk = risk;
+                if (risk) {
+                  console.warn(
+                    `[home-assistant-proxy] \u26A0 silent_drop_risk: all speakers urlMatch=true but still idle at ~8s \u2014 audio may have been silently dropped (no failure alert raised)`
+                  );
+                }
+              }
+              logAudit("home-assistant-proxy", {
+                category: "home",
+                event_type: "broadcast_cast_verification",
+                severity: allVerified && !silentDropRisk ? "info" : "warn",
+                actor_id: userId,
+                actor_name: actorName,
+                channel: "web",
+                summary: silentDropRisk ? `Cast state verified ${verifiedCount}/${speakers.length} Google Home speakers (silent-drop risk: still idle at 8s)` : `Cast state verified ${verifiedCount}/${speakers.length} Google Home speakers`,
+                detail: {
+                  broadcast: "all-google-home",
+                  expectedUrl: audioUrl,
+                  verifiedCount,
+                  totalSpeakers: speakers.length,
+                  verifications,
+                  silent_drop_risk: silentDropRisk
+                },
+                duration_ms: Date.now() - tVerify,
+                status: allVerified ? "success" : "warning"
+              });
+            }, 3500).unref?.();
+          }
+          return;
+        }
+        res.status(400).json({ error: `Unknown action: ${action}` });
+      } catch (err) {
+        console.error("Home Assistant proxy error:", err);
+        res.status(500).json(safeErrorJson(err));
+      }
+    });
+    homeAssistant_default = router5;
   }
 });
 
@@ -7330,6 +9228,149 @@ var init_notifications = __esm({
     init_janus_tools();
     _cooldowns = {};
     BASE_URL = `http://localhost:${process.env.PORT || 5e3}`;
+  }
+});
+
+// server/lib/estateConfig.ts
+var estateConfig_exports = {};
+__export(estateConfig_exports, {
+  getEntityMappings: () => getEntityMappings,
+  getEstateConfig: () => getEstateConfig,
+  getEstateTimezone: () => getEstateTimezone,
+  invalidateEntityMappingsCache: () => invalidateEntityMappingsCache,
+  invalidateEstateConfigCache: () => invalidateEstateConfigCache
+});
+async function getEstateConfig() {
+  const now = Date.now();
+  if (cachedConfig && now - lastFetchTime < CACHE_TTL_MS2) {
+    return cachedConfig;
+  }
+  const fallback = {
+    latitude: Number(process.env.HOME_LAT) || 37.7749,
+    longitude: Number(process.env.HOME_LNG) || -122.4194,
+    elevation: 0,
+    timeZone: process.env.TZ || process.env.TIME_ZONE || "UTC",
+    unitSystem: {
+      length: "mi",
+      mass: "lb",
+      pressure: "psi",
+      temperature: "\xB0F",
+      volume: "gal"
+    },
+    locationName: process.env.HOME_LOCATION || "Home"
+  };
+  const haUrl = process.env.HA_URL || "http://supervisor/core";
+  const haToken = process.env.HA_TOKEN || process.env.SUPERVISOR_TOKEN;
+  if (!haToken) {
+    cachedConfig = fallback;
+    lastFetchTime = now;
+    return cachedConfig;
+  }
+  try {
+    const { status, data } = await callHA(haUrl, haToken, "GET", "/api/config", void 0, { maxRetries: 1 });
+    if (status === 200 && data && typeof data === "object") {
+      const d = data;
+      cachedConfig = {
+        latitude: typeof d.latitude === "number" ? d.latitude : fallback.latitude,
+        longitude: typeof d.longitude === "number" ? d.longitude : fallback.longitude,
+        elevation: typeof d.elevation === "number" ? d.elevation : fallback.elevation,
+        timeZone: d.time_zone || fallback.timeZone,
+        unitSystem: d.unit_system || fallback.unitSystem,
+        locationName: d.location_name || fallback.locationName
+      };
+      lastFetchTime = now;
+      return cachedConfig;
+    }
+  } catch (err) {
+    console.warn("[estateConfig] Failed to fetch HA /api/config, using fallback:", err instanceof Error ? err.message : err);
+  }
+  cachedConfig = fallback;
+  lastFetchTime = now;
+  return cachedConfig;
+}
+function invalidateEstateConfigCache() {
+  cachedConfig = null;
+  lastFetchTime = 0;
+}
+function getEstateTimezone() {
+  if (cachedConfig?.timeZone) return cachedConfig.timeZone;
+  return process.env.TZ || process.env.TIME_ZONE || "UTC";
+}
+async function getEntityMappings() {
+  const now = Date.now();
+  if (cachedEntityMappings && now - lastEntityMappingsFetchTime < CACHE_TTL_MS2) {
+    return cachedEntityMappings;
+  }
+  const fallback = {
+    energy: [],
+    irrigation: [],
+    pool: {
+      pool_heater: "switch.pool_heater",
+      spa_heater: "switch.spa_heater",
+      pool_temp: "sensor.pool_temp",
+      spa_temp: "sensor.spa_temp",
+      pool_pump: "switch.pool_pump",
+      spa_pump: "switch.spa_pump"
+    },
+    climate: [],
+    cameras: [],
+    vehicles: [],
+    speedtest: {
+      download: "sensor.speedtest_download",
+      upload: "sensor.speedtest_upload",
+      ping: "sensor.speedtest_ping"
+    },
+    utility_rates: {
+      electricity_kwh_cost: 0.28,
+      water_hcf_cost: 12.5
+    }
+  };
+  try {
+    const { query: query2 } = await Promise.resolve().then(() => (init_db2(), db_exports));
+    const res = await query2(
+      `SELECT value FROM system_configs WHERE key = 'entity_mappings' LIMIT 1`
+    );
+    if (res?.rows?.[0]?.value) {
+      const parsed = typeof res.rows[0].value === "string" ? JSON.parse(res.rows[0].value) : res.rows[0].value;
+      cachedEntityMappings = {
+        ...fallback,
+        ...parsed,
+        pool: {
+          ...fallback.pool,
+          ...parsed.pool || {}
+        },
+        speedtest: {
+          ...fallback.speedtest,
+          ...parsed.speedtest || {}
+        },
+        utility_rates: {
+          ...fallback.utility_rates,
+          ...parsed.utility_rates || {}
+        }
+      };
+      lastEntityMappingsFetchTime = now;
+      return cachedEntityMappings;
+    }
+  } catch (err) {
+    console.warn("[estateConfig] Failed to fetch entity_mappings from system_configs:", err instanceof Error ? err.message : err);
+  }
+  cachedEntityMappings = fallback;
+  lastEntityMappingsFetchTime = now;
+  return cachedEntityMappings;
+}
+function invalidateEntityMappingsCache() {
+  cachedEntityMappings = null;
+  lastEntityMappingsFetchTime = 0;
+}
+var cachedConfig, lastFetchTime, CACHE_TTL_MS2, cachedEntityMappings, lastEntityMappingsFetchTime;
+var init_estateConfig = __esm({
+  "server/lib/estateConfig.ts"() {
+    init_homeAssistant();
+    cachedConfig = null;
+    lastFetchTime = 0;
+    CACHE_TTL_MS2 = 10 * 60 * 1e3;
+    cachedEntityMappings = null;
+    lastEntityMappingsFetchTime = 0;
   }
 });
 
@@ -18282,8 +20323,8 @@ async function runCheck(name, fn) {
     };
   }
 }
-var HOME_LAT2 = 34.0522;
-var HOME_LNG2 = -118.2437;
+var HOME_LAT2 = Number(process.env.HOME_LAT) || 34.0522;
+var HOME_LNG2 = Number(process.env.HOME_LNG) || -118.2437;
 async function checkJanusChat(signal) {
   const port = process.env.PORT || "5000";
   const res = await fetch(`http://localhost:${port}/api/janus/chat/ping`, {
@@ -19275,1815 +21316,8 @@ router4.delete("/api/notion/sync-configs/:id", requireAuth, async (req, res, nex
 });
 var productivity_default = router4;
 
-// server/routes/homeAssistant.ts
-import { Router as Router6 } from "express";
-
-// server/middleware/auth.ts
-init_auth();
-import { timingSafeEqual as timingSafeEqual2 } from "node:crypto";
-function validComputerToken(headerValue) {
-  const configured = process.env.COMPUTER_ADMIN_TOKEN?.trim();
-  if (!configured || configured.length < 24) return false;
-  if (typeof headerValue !== "string" || !headerValue.trim()) return false;
-  if (process.env.NODE_ENV === "test") return false;
-  const a = Buffer.from(configured);
-  const b2 = Buffer.from(headerValue.trim());
-  if (a.length !== b2.length) return false;
-  return timingSafeEqual2(a, b2);
-}
-function requireAuth2(req, res, next) {
-  const cronSecret = process.env.CRON_SECRET;
-  const isCronCall = !!cronSecret && req.headers["x-cron-secret"] === cronSecret;
-  if (isCronCall) {
-    req.userId = "system";
-    req.userRole = "admin";
-    next();
-    return;
-  }
-  if (validComputerToken(req.headers["x-computer-token"])) {
-    req.userId = "computer-agent";
-    req.userRole = "admin";
-    next();
-    return;
-  }
-  const isHAEnvironment = Boolean(process.env.SUPERVISOR_TOKEN);
-  const haUserId = req.headers["x-remote-user-id"] || req.headers["x-ingress-user-id"];
-  if (isHAEnvironment && haUserId) {
-    const haAdminHeader = req.headers["x-remote-user-is-admin"];
-    const isAdmin2 = haAdminHeader === void 0 || haAdminHeader === "" || String(haAdminHeader).toLowerCase() !== "false" && haAdminHeader !== "0";
-    req.userId = `ha:${haUserId}`;
-    req.userRole = isAdmin2 ? "admin" : "member";
-    next();
-    return;
-  }
-  const authHeader = req.headers.authorization;
-  const cookieToken = req.cookies?.auth_token;
-  if (!authHeader?.startsWith("Bearer ") && !cookieToken) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-  const token = cookieToken || authHeader.replace("Bearer ", "");
-  const isServiceRole = process.env.JWT_SECRET && token === process.env.JWT_SECRET || process.env.SESSION_SECRET && token === process.env.SESSION_SECRET;
-  if (isServiceRole) {
-    req.userId = "system";
-    req.userRole = "admin";
-    next();
-    return;
-  }
-  const user = verifyToken(token);
-  if (!user) {
-    res.status(401).json({ error: "Invalid token" });
-    return;
-  }
-  req.userId = user.userId;
-  if (user.roles?.includes("admin")) {
-    req.userRole = "admin";
-  } else if (user.roles?.includes("worker")) {
-    req.userRole = "worker";
-  } else {
-    req.userRole = "member";
-  }
-  next();
-}
-function rejectWorkers(req, res, next) {
-  const authHeader = req.headers.authorization;
-  const cookieToken = req.cookies?.auth_token;
-  const token = cookieToken || (authHeader?.startsWith("Bearer ") ? authHeader.replace("Bearer ", "") : null);
-  if (!token) {
-    next();
-    return;
-  }
-  const isServiceRole = process.env.JWT_SECRET && token === process.env.JWT_SECRET || process.env.SESSION_SECRET && token === process.env.SESSION_SECRET;
-  if (isServiceRole) {
-    next();
-    return;
-  }
-  const user = verifyToken(token);
-  if (!user || !user.roles?.includes("worker")) {
-    next();
-    return;
-  }
-  const allowed = req.path.startsWith("/api/time/") || req.path === "/api/auth/me" || req.path === "/api/auth/logout" || req.path === "/api/auth/google" || req.path === "/api/auth/google/callback" || req.path === "/api/health";
-  if (!allowed) {
-    res.status(403).json({ error: "Worker accounts are restricted to /api/time/* endpoints" });
-    return;
-  }
-  next();
-}
-
-// server/routes/homeAssistant.ts
-init_auth();
-init_storage();
-init_auditLog();
-
-// server/lib/encryption.ts
-import { webcrypto as webcrypto2 } from "crypto";
-var subtle = webcrypto2.subtle;
-async function getEncryptionKey() {
-  const keySource = process.env.ENCRYPTION_KEY || process.env.SESSION_SECRET || "";
-  if (!keySource) {
-    throw new Error(
-      "ENCRYPTION_KEY (or SESSION_SECRET fallback) is not set; cannot encrypt/decrypt tokens"
-    );
-  }
-  const digest = await subtle.digest("SHA-256", new TextEncoder().encode(keySource));
-  return subtle.importKey("raw", new Uint8Array(digest), "AES-GCM", false, ["encrypt", "decrypt"]);
-}
-async function encryptToken(plaintext) {
-  const key = await getEncryptionKey();
-  const iv = webcrypto2.getRandomValues(new Uint8Array(12));
-  const encoded = new TextEncoder().encode(plaintext);
-  const ciphertext = new Uint8Array(await subtle.encrypt({ name: "AES-GCM", iv }, key, encoded));
-  const combined = new Uint8Array(iv.length + ciphertext.length);
-  combined.set(iv);
-  combined.set(ciphertext, iv.length);
-  return Buffer.from(combined).toString("base64");
-}
-async function decryptToken(encrypted) {
-  const key = await getEncryptionKey();
-  const combined = new Uint8Array(Buffer.from(encrypted, "base64"));
-  const iv = combined.slice(0, 12);
-  const ciphertext = combined.slice(12);
-  const decrypted = await subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
-  return new TextDecoder().decode(decrypted);
-}
-
-// server/lib/ssrfGuard.ts
-import { lookup as lookupCb } from "node:dns";
-import net from "node:net";
-import { Agent, fetch as undiciFetch } from "undici";
-function isBlockedIp(ip) {
-  if (net.isIPv4(ip)) {
-    const [a, b2] = ip.split(".").map(Number);
-    if (a === 0 || a === 127 || a === 10) return true;
-    if (a === 172 && b2 >= 16 && b2 <= 31) return true;
-    if (a === 192 && b2 === 168) return true;
-    if (a === 169 && b2 === 254) return true;
-    if (a === 100 && b2 >= 64 && b2 <= 127) return true;
-    if (a >= 224) return true;
-    return false;
-  }
-  if (net.isIPv6(ip)) {
-    const lower = ip.toLowerCase();
-    if (lower === "::" || lower === "::1") return true;
-    if (lower.startsWith("fe8") || lower.startsWith("fe9") || lower.startsWith("fea") || lower.startsWith("feb")) return true;
-    if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
-    if (lower.startsWith("::ffff:")) {
-      const mapped = lower.slice("::ffff:".length);
-      if (net.isIPv4(mapped)) return isBlockedIp(mapped);
-      return true;
-    }
-    return false;
-  }
-  return true;
-}
-function guardedLookup(hostname, options, callback) {
-  if (hostname.toLowerCase() === "supervisor" && (Boolean(process.env.SUPERVISOR_TOKEN) || Boolean(process.env.HASSIO_TOKEN) || process.env.HA_ALLOWED_HOSTS?.includes("supervisor"))) {
-    lookupCb(hostname, options, callback);
-    return;
-  }
-  if (hostname === "localhost" || hostname.endsWith(".localhost")) {
-    callback(Object.assign(new Error(`Blocked host: ${hostname}`), { code: "EBLOCKED" }), "", 4);
-    return;
-  }
-  lookupCb(hostname, { ...options, all: true }, (err, addresses) => {
-    if (err) {
-      callback(err, "", 4);
-      return;
-    }
-    const list = addresses.filter(
-      (a) => !isBlockedIp(a.address)
-    );
-    if (list.length === 0) {
-      callback(
-        Object.assign(new Error(`Blocked host: ${hostname} resolves only to disallowed addresses`), {
-          code: "EBLOCKED"
-        }),
-        "",
-        4
-      );
-      return;
-    }
-    if (options.all) {
-      callback(null, list);
-    } else {
-      callback(null, list[0].address, list[0].family);
-    }
-  });
-}
-var guardedAgent = new Agent({ connect: { lookup: guardedLookup } });
-async function guardedFetch(url, init) {
-  const hostname = new URL(url).hostname.replace(/^\[|\]$/g, "").toLowerCase();
-  if (hostname === "supervisor" && (Boolean(process.env.SUPERVISOR_TOKEN) || Boolean(process.env.HASSIO_TOKEN) || process.env.HA_ALLOWED_HOSTS?.includes("supervisor"))) {
-    return undiciFetch(url, init);
-  }
-  if (hostname === "localhost" || hostname.endsWith(".localhost") || net.isIP(hostname) !== 0 && isBlockedIp(hostname)) {
-    throw new Error(`Blocked host: ${hostname}`);
-  }
-  return undiciFetch(url, { ...init, dispatcher: guardedAgent });
-}
-
-// server/routes/homeAssistant.ts
-init_breakers();
-
-// server/lib/errorSanitizer.ts
-var SENSITIVE_PATTERNS2 = [
-  /Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi,
-  /apikey[=:]\s*["']?[A-Za-z0-9\-._~+/]+["']?/gi,
-  /password[=:]\s*["']?[^\s"',}]+["']?/gi,
-  /secret[=:]\s*["']?[^\s"',}]+["']?/gi,
-  /token[=:]\s*["']?[A-Za-z0-9\-._~+/]+["']?/gi,
-  /eyJ[A-Za-z0-9\-_]+\.eyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_.+/=]*/g
-];
-function sanitizeErrorMessage2(error) {
-  let message;
-  if (error instanceof Error) {
-    message = error.message;
-  } else if (typeof error === "string") {
-    message = error;
-  } else {
-    message = "An internal error occurred";
-  }
-  for (const pattern of SENSITIVE_PATTERNS2) {
-    message = message.replace(pattern, "[REDACTED]");
-  }
-  if (message.length > 200) {
-    message = message.slice(0, 200) + "...";
-  }
-  return message;
-}
-function safeErrorJson(error) {
-  return { error: sanitizeErrorMessage2(error) };
-}
-
-// server/routes/homeAssistant.ts
-init_haWebSocket();
-init_helpers();
-
-// server/lib/castBroadcast.ts
-init_fetchWithTimeout();
-import fs5 from "fs";
-import path6 from "path";
-init_objectStore();
-var JANUS_VOICE_ID = "iLVmqjzCGGvqtMCk6vVQ";
-var VOICE_REPLIES_BUCKET = "voice-replies";
-var BROADCAST_SUBDIR = "broadcasts";
-var MAX_BROADCAST_FILES = 5;
-async function cleanupOldBroadcasts(bucket, subdir, filePrefix, keep) {
-  const dirs = [
-    path6.join(process.cwd(), "public", bucket, subdir),
-    path6.join(process.cwd(), "dist", "public", bucket, subdir)
-  ];
-  for (const dir of dirs) {
-    try {
-      if (!fs5.existsSync(dir)) continue;
-      const entries = await fs5.promises.readdir(dir, { withFileTypes: true });
-      const matched = entries.filter(
-        (e) => e.isFile() && e.name.startsWith(filePrefix) && e.name.endsWith(".mp3")
-      );
-      const withMtime = await Promise.all(
-        matched.map(async (e) => {
-          const mtime = await fs5.promises.stat(path6.join(dir, e.name)).then((s3) => s3.mtimeMs).catch(() => 0);
-          return { name: e.name, mtime };
-        })
-      );
-      withMtime.sort((a, b2) => b2.mtime - a.mtime);
-      for (const f of withMtime.slice(keep)) {
-        await fs5.promises.unlink(path6.join(dir, f.name)).catch(() => {
-        });
-        console.log(`[castBroadcast] Cleaned up old broadcast file: ${f.name}`);
-      }
-    } catch {
-    }
-  }
-  try {
-    const objKeys = await listObjects(VOICE_REPLIES_BUCKET, `${subdir}/`);
-    const matched = objKeys.map((key) => ({ key, base: key.split("/").pop() ?? "" })).filter((o) => o.base.startsWith(filePrefix) && o.base.endsWith(".mp3")).map((o) => {
-      const m = o.base.match(/-(\d+)\.mp3$/);
-      return { key: o.key, ts: m ? Number(m[1]) : 0 };
-    }).sort((a, b2) => b2.ts - a.ts);
-    for (const o of matched.slice(keep)) {
-      await deleteObjectKey(o.key);
-      console.log(`[castBroadcast] Cleaned up old broadcast object: ${o.key}`);
-    }
-  } catch {
-  }
-}
-async function generateAndUploadTTS(message, filePrefix = "broadcast") {
-  const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
-  let supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
-  if (!elevenLabsKey) {
-    console.error("[castBroadcast] ELEVENLABS_API_KEY not set \u2014 cannot generate TTS");
-    return null;
-  }
-  const isDeletedSupabase = !supabaseUrl;
-  if (isDeletedSupabase) {
-    supabaseUrl = `http://localhost:${process.env.PORT || 5e3}`;
-  }
-  console.log(`[castBroadcast] Calling ElevenLabs TTS (${message.length} chars)`);
-  let audioBuffer;
-  try {
-    const ttsRes = await fetchT2(
-      `https://api.elevenlabs.io/v1/text-to-speech/${JANUS_VOICE_ID}`,
-      {
-        method: "POST",
-        headers: {
-          "xi-api-key": elevenLabsKey,
-          "Content-Type": "application/json",
-          Accept: "audio/mpeg"
-        },
-        body: JSON.stringify({
-          text: message,
-          model_id: "eleven_turbo_v2_5",
-          voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.75,
-            style: 0,
-            use_speaker_boost: true
-          }
-        })
-      },
-      3e4
-    );
-    if (!ttsRes.ok) {
-      const errText = await ttsRes.text().catch(() => "");
-      console.error(
-        `[castBroadcast] ElevenLabs TTS failed: HTTP ${ttsRes.status} \u2014 ${errText.slice(0, 300)}`
-      );
-      return null;
-    }
-    audioBuffer = await ttsRes.arrayBuffer();
-    console.log(`[castBroadcast] ElevenLabs TTS generated ${audioBuffer.byteLength} bytes`);
-  } catch (e) {
-    console.error(
-      `[castBroadcast] ElevenLabs TTS error: ${e instanceof Error ? e.message : "unknown"}`
-    );
-    return null;
-  }
-  const timestamp2 = Date.now();
-  const filename = `${BROADCAST_SUBDIR}/${filePrefix}-${timestamp2}.mp3`;
-  const storageUrl = `${supabaseUrl.replace(/\/$/, "")}/storage/v1/object/${VOICE_REPLIES_BUCKET}/${filename}`;
-  const internalKey = process.env.JWT_SECRET || process.env.SESSION_SECRET || "janus-dev-secret-change-in-production";
-  try {
-    const uploadRes = await fetchT2(
-      storageUrl,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${internalKey}`,
-          apikey: internalKey,
-          "Content-Type": "audio/mpeg",
-          "x-upsert": "true"
-        },
-        body: audioBuffer
-      },
-      2e4
-    );
-    if (!uploadRes.ok) {
-      const errText = await uploadRes.text().catch(() => "");
-      console.error(
-        `[castBroadcast] Storage upload failed: HTTP ${uploadRes.status} \u2014 ${errText.slice(0, 300)}`
-      );
-      return null;
-    }
-    console.log(`[castBroadcast] MP3 uploaded: ${filename} (${audioBuffer.byteLength} bytes)`);
-  } catch (e) {
-    console.error(
-      `[castBroadcast] Storage upload error: ${e instanceof Error ? e.message : "unknown"}`
-    );
-    return null;
-  }
-  cleanupOldBroadcasts(VOICE_REPLIES_BUCKET, BROADCAST_SUBDIR, filePrefix, MAX_BROADCAST_FILES).catch(
-    () => {
-    }
-  );
-  const baseUrl = process.env.MEDIA_BASE_URL || process.env.APP_URL || "http://localhost:5000";
-  return `${baseUrl.replace(/\/$/, "")}/storage/v1/object/public/${VOICE_REPLIES_BUCKET}/${filename}`;
-}
-async function verifyPlaybackState(haUrl, haToken, entityId, expectedUrl, announceMode = false) {
-  try {
-    const res = await guardedFetch(`${haUrl.replace(/\/$/, "")}/api/states/${entityId}`, {
-      headers: { Authorization: `Bearer ${haToken}` },
-      signal: AbortSignal.timeout(5e3)
-    });
-    if (!res.ok) return { verified: false, state: null, contentId: null, urlMatch: null };
-    const data = await res.json();
-    const state2 = data?.state ?? "unknown";
-    const contentId = data?.attributes?.media_content_id ?? null;
-    const isPlaying = state2 === "playing";
-    const isUnavailable = state2 === "unavailable";
-    let urlMatch = null;
-    if (expectedUrl) {
-      urlMatch = contentId !== null && contentId === expectedUrl;
-    }
-    let verified;
-    if (announceMode) {
-      verified = !isUnavailable && urlMatch === true;
-    } else {
-      verified = isPlaying && (urlMatch === null || urlMatch === true);
-    }
-    return { verified, state: state2, contentId, urlMatch };
-  } catch {
-    return { verified: false, state: null, contentId: null, urlMatch: null };
-  }
-}
-async function detectSilentDropRisk(haUrl, haToken, speakers, expectedUrl, firstPollDelayMs = 3500) {
-  const TARGET_DELAY_MS = 8e3;
-  const remaining = Math.max(0, TARGET_DELAY_MS - firstPollDelayMs);
-  if (remaining > 0) {
-    await new Promise((r) => setTimeout(r, remaining));
-  }
-  const secondPoll = {};
-  for (const speaker of speakers) {
-    const v = await verifyPlaybackState(haUrl, haToken, speaker, expectedUrl, true);
-    secondPoll[speaker] = { state: v.state, contentId: v.contentId, urlMatch: v.urlMatch };
-  }
-  const entries = Object.values(secondPoll);
-  const silentDropRisk = entries.length > 0 && entries.every((v) => v.urlMatch === true && v.state === "idle");
-  return { silentDropRisk, secondPoll };
-}
-
-// server/routes/homeAssistant.ts
-init_irrigationFlow();
-
-// server/lib/haUrlGuard.ts
-import { isIP } from "node:net";
-import { lookup } from "node:dns/promises";
-function getAllowedHaHosts(env = process.env) {
-  const hosts = /* @__PURE__ */ new Set();
-  if (env.SUPERVISOR_TOKEN || env.HASSIO_TOKEN) {
-    hosts.add("supervisor");
-  }
-  if (env.HA_URL) {
-    try {
-      hosts.add(new URL(env.HA_URL).hostname.toLowerCase());
-    } catch {
-    }
-  }
-  for (const raw of (env.HA_ALLOWED_HOSTS ?? "").split(",")) {
-    const h = raw.trim().toLowerCase();
-    if (h) hosts.add(h);
-  }
-  return hosts;
-}
-function isPrivateOrReservedIp(ip) {
-  const version = isIP(ip);
-  if (version === 4) return isPrivateV4(ip);
-  if (version === 6) return isPrivateV6(ip);
-  return true;
-}
-function isPrivateV4(ip) {
-  const parts = ip.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((p) => Number.isNaN(p) || p < 0 || p > 255)) return true;
-  const [a, b2] = parts;
-  return a === 0 || // 0.0.0.0/8 "this network"
-  a === 10 || // 10.0.0.0/8 private
-  a === 127 || // 127.0.0.0/8 loopback
-  a === 100 && b2 >= 64 && b2 <= 127 || // 100.64.0.0/10 CGNAT
-  a === 169 && b2 === 254 || // 169.254.0.0/16 link-local + cloud metadata
-  a === 172 && b2 >= 16 && b2 <= 31 || // 172.16.0.0/12 private
-  a === 192 && b2 === 168 || // 192.168.0.0/16 private
-  a === 192 && b2 === 0 || // 192.0.0.0/24 IETF protocol assignments
-  a === 198 && (b2 === 18 || b2 === 19) || // 198.18.0.0/15 benchmarking
-  a >= 224;
-}
-function isPrivateV6(ip) {
-  const lower = ip.toLowerCase();
-  const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapped) return isPrivateV4(mapped[1]);
-  const hexMapped = lower.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
-  if (hexMapped) {
-    const hi = parseInt(hexMapped[1], 16);
-    const lo = parseInt(hexMapped[2], 16);
-    return isPrivateV4(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
-  }
-  if (lower === "::" || lower === "::1") return true;
-  if (lower.startsWith("fe80:") || lower.startsWith("fe9") || lower.startsWith("fea") || lower.startsWith("feb")) return true;
-  if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
-  if (lower.startsWith("64:ff9b:")) return true;
-  return false;
-}
-function checkHaUrlSync(rawUrl, env = process.env) {
-  let parsed;
-  try {
-    parsed = new URL(rawUrl);
-  } catch {
-    return { ok: false, reason: "ha_url must be a valid http(s) URL" };
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    return { ok: false, reason: "ha_url must use http or https" };
-  }
-  if (parsed.username || parsed.password) {
-    return { ok: false, reason: "ha_url must not contain embedded credentials" };
-  }
-  const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (hostname === "supervisor" && (env.SUPERVISOR_TOKEN || env.HASSIO_TOKEN || env.HA_ALLOWED_HOSTS?.includes("supervisor"))) {
-    return { ok: true, url: rawUrl };
-  }
-  if (isIP(hostname)) {
-    if (isPrivateOrReservedIp(hostname)) {
-      return { ok: false, reason: "ha_url must not point at a private, loopback, or reserved address" };
-    }
-  }
-  const allowed = getAllowedHaHosts(env);
-  if (allowed.size > 0 && !allowed.has(hostname)) {
-    return { ok: false, reason: "ha_url host is not on the allowed Home Assistant host list" };
-  }
-  return { ok: true, url: rawUrl };
-}
-async function validateHaUrl(rawUrl, env = process.env) {
-  const sync2 = checkHaUrlSync(rawUrl, env);
-  if (!sync2.ok) return sync2;
-  const hostname = new URL(rawUrl).hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (hostname === "supervisor" && (env.SUPERVISOR_TOKEN || env.HASSIO_TOKEN || env.HA_ALLOWED_HOSTS?.includes("supervisor"))) {
-    return sync2;
-  }
-  if (isIP(hostname)) return sync2;
-  let addrs;
-  try {
-    addrs = await lookup(hostname, { all: true, verbatim: true });
-  } catch {
-    return { ok: false, reason: "ha_url hostname could not be resolved" };
-  }
-  if (addrs.length === 0) {
-    return { ok: false, reason: "ha_url hostname could not be resolved" };
-  }
-  for (const { address } of addrs) {
-    if (isPrivateOrReservedIp(address)) {
-      return { ok: false, reason: "ha_url resolves to a private, loopback, or reserved address" };
-    }
-  }
-  return sync2;
-}
-
-// server/routes/homeAssistant.ts
-import { fetch as undiciFetch2 } from "undici";
-var router5 = Router6();
-function requireAdmin(req, res, next) {
-  if (req.userRole !== "admin") {
-    res.status(403).json({ error: "Admin access required" });
-    return;
-  }
-  next();
-}
-var haCredsCache = /* @__PURE__ */ new Map();
-var HA_CREDS_CACHE_TTL_MS = 60 * 1e3;
-function invalidateHACredsCache(userId) {
-  if (userId) haCredsCache.delete(userId);
-  else haCredsCache.clear();
-}
-async function resolveHACreds(userId) {
-  const cacheKey = userId && userId !== "UNKNOWN" ? userId : "__env__";
-  const cached = haCredsCache.get(cacheKey);
-  if (cached && Date.now() - cached.fetchedAt < HA_CREDS_CACHE_TTL_MS) return cached.creds;
-  let creds = null;
-  if (userId && userId !== "UNKNOWN") {
-    try {
-      const settings = await storage.getHomeAssistantSettings(userId);
-      if (settings?.encryptedToken) {
-        const token = await decryptToken(settings.encryptedToken);
-        let url = settings.haUrl || process.env.HA_URL || "";
-        if (url && settings.haUrl) {
-          const check = await validateHaUrl(url);
-          if (!check.ok) {
-            console.warn(`[home-assistant] Stored HA URL for user ${userId} rejected (${check.reason}) \u2014 falling back to env HA_URL`);
-            url = process.env.HA_URL || "";
-          }
-        }
-        if (url && token) creds = { haUrl: url, haToken: token, source: "settings" };
-      }
-    } catch (err) {
-      console.error(
-        `[home-assistant] Failed to load stored HA credentials for user ${userId}; falling back to env:`,
-        err instanceof Error ? err.message : err
-      );
-    }
-  }
-  if (!creds) {
-    const supervisorToken2 = process.env.SUPERVISOR_TOKEN || process.env.HASSIO_TOKEN;
-    const envUrl = process.env.HA_URL || process.env.HOME_ASSISTANT_URL || (supervisorToken2 ? "http://supervisor/core" : "");
-    const envToken = process.env.HA_TOKEN || process.env.HOME_ASSISTANT_TOKEN || supervisorToken2 || "";
-    if (envUrl && envToken) creds = { haUrl: envUrl, haToken: envToken, source: supervisorToken2 ? "supervisor" : "env" };
-  }
-  haCredsCache.set(cacheKey, { creds, fetchedAt: Date.now() });
-  return creds;
-}
-var crestronEntryIdCache = null;
-var crestronEntryIdFetchedAt = 0;
-var CRESTRON_ENTRY_CACHE_TTL_MS = 60 * 60 * 1e3;
-async function getCrestronEntryId(haUrl, haToken) {
-  const now = Date.now();
-  if (crestronEntryIdCache && now - crestronEntryIdFetchedAt < CRESTRON_ENTRY_CACHE_TTL_MS) {
-    return crestronEntryIdCache;
-  }
-  const { status, data } = await callHA(haUrl, haToken, "GET", "/api/config/config_entries/entry");
-  if (status !== 200 || !Array.isArray(data)) return null;
-  const entries = data;
-  const crestron = entries.find(
-    (e) => e.domain === "crestron_home" || typeof e.title === "string" && e.title.toLowerCase().includes("crestron")
-  );
-  if (!crestron) return null;
-  crestronEntryIdCache = crestron.entry_id;
-  crestronEntryIdFetchedAt = now;
-  return crestronEntryIdCache;
-}
-var goveeEntryCache = null;
-var goveeEntryIdCache = null;
-var goveeEntryIdFetchedAt = 0;
-async function getGoveeCloudEntryId(haUrl, haToken) {
-  const now = Date.now();
-  if (goveeEntryCache && goveeEntryIdCache && now - goveeEntryIdFetchedAt < CRESTRON_ENTRY_CACHE_TTL_MS) {
-    return goveeEntryCache;
-  }
-  const { status, data } = await callHA(haUrl, haToken, "GET", "/api/config/config_entries/entry");
-  if (status !== 200 || !Array.isArray(data)) return null;
-  const entries = data;
-  const goveeAll = entries.filter(
-    (e) => e.domain.toLowerCase().includes("govee") || typeof e.title === "string" && e.title.toLowerCase().includes("govee")
-  );
-  const goveeCloud = goveeAll.find(
-    (e) => e.domain === "govee_cloud" || typeof e.title === "string" && e.title.toLowerCase().includes("govee cloud")
-  );
-  const govee = goveeCloud ?? goveeAll[0];
-  if (!govee) return null;
-  goveeEntryCache = govee;
-  goveeEntryIdCache = govee.entry_id;
-  goveeEntryIdFetchedAt = now;
-  return govee;
-}
-router5.post("/crestron/reload", requireAuth2, requireAdmin, async (req, res) => {
-  const creds = await resolveHACreds(req.userId);
-  const HA_URL2 = creds?.haUrl ?? "";
-  const HA_TOKEN2 = creds?.haToken ?? "";
-  const userId = req.userId ?? "unknown";
-  const userInfo = getAuthUser(req);
-  const actorName = userInfo?.name ?? userInfo?.email ?? userId;
-  const t0 = Date.now();
-  if (!HA_URL2 || !HA_TOKEN2) {
-    res.status(503).json({ error: "Home Assistant not configured" });
-    return;
-  }
-  try {
-    const entryId = await getCrestronEntryId(HA_URL2, HA_TOKEN2);
-    if (!entryId) {
-      await logAudit("crestron-reload", {
-        category: "crestron_bridge",
-        event_type: "crestron_reload",
-        severity: "error",
-        actor_id: userId,
-        actor_name: actorName,
-        channel: "web",
-        summary: "Crestron reload failed \u2014 config entry not found",
-        detail: {},
-        status: "error",
-        duration_ms: Date.now() - t0
-      });
-      res.status(404).json({ error: "Crestron Home config entry not found in Home Assistant" });
-      return;
-    }
-    const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/homeassistant/reload_config_entry", {
-      entry_id: entryId
-    });
-    const success = status < 400;
-    let haErrorMsg;
-    if (!success && data) {
-      if (typeof data === "string") haErrorMsg = data.slice(0, 300);
-      else if (typeof data === "object") {
-        const d = data;
-        haErrorMsg = String(d.message ?? d.error ?? JSON.stringify(data)).slice(0, 300);
-      }
-    }
-    await logAudit("crestron-reload", {
-      category: "crestron_bridge",
-      event_type: "crestron_reload",
-      severity: success ? "info" : "warn",
-      actor_id: userId,
-      actor_name: actorName,
-      channel: "web",
-      summary: success ? `Crestron integration reloaded by ${actorName}` : `Crestron reload failed (HTTP ${status})`,
-      detail: { entry_id: entryId, ha_status: status, ...haErrorMsg ? { ha_error: haErrorMsg } : {} },
-      status: success ? "success" : "error",
-      duration_ms: Date.now() - t0
-    });
-    res.status(success ? 200 : 502).json({ success, entry_id: entryId, data });
-  } catch (err) {
-    console.error("[crestron-reload] Error:", err);
-    await logAudit("crestron-reload", {
-      category: "crestron_bridge",
-      event_type: "crestron_reload",
-      severity: "error",
-      actor_id: userId,
-      actor_name: actorName,
-      channel: "web",
-      summary: `Crestron reload error: ${err instanceof Error ? err.message : String(err)}`,
-      detail: { error: err instanceof Error ? err.message : String(err) },
-      status: "error",
-      duration_ms: Date.now() - t0
-    });
-    res.status(500).json({ error: "Failed to reload Crestron integration" });
-  }
-});
-router5.post("/govee/reload", requireAuth2, requireAdmin, async (req, res) => {
-  const creds = await resolveHACreds(req.userId);
-  const HA_URL2 = creds?.haUrl ?? "";
-  const HA_TOKEN2 = creds?.haToken ?? "";
-  const userId = req.userId ?? "unknown";
-  const userInfo = getAuthUser(req);
-  const actorName = userInfo?.name ?? userInfo?.email ?? userId;
-  const t0 = Date.now();
-  if (!HA_URL2 || !HA_TOKEN2) {
-    res.status(503).json({ error: "Home Assistant not configured" });
-    return;
-  }
-  try {
-    const entry = await getGoveeCloudEntryId(HA_URL2, HA_TOKEN2);
-    if (!entry) {
-      await logAudit("govee-reload", {
-        category: "home",
-        event_type: "govee_reload",
-        severity: "error",
-        actor_id: userId,
-        actor_name: actorName,
-        channel: "web",
-        summary: "Govee reload failed \u2014 config entry not found in Home Assistant",
-        detail: {},
-        status: "error",
-        duration_ms: Date.now() - t0
-      });
-      res.status(404).json({ error: "Govee config entry not found in Home Assistant" });
-      return;
-    }
-    const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/homeassistant/reload_config_entry", {
-      entry_id: entry.entry_id
-    });
-    const success = status < 400;
-    let haErrorMsg;
-    if (!success && data) {
-      if (typeof data === "string") haErrorMsg = data.slice(0, 300);
-      else if (typeof data === "object") {
-        const d = data;
-        haErrorMsg = String(d.message ?? d.error ?? JSON.stringify(data)).slice(0, 300);
-      }
-    }
-    goveeEntryCache = null;
-    goveeEntryIdCache = null;
-    goveeEntryIdFetchedAt = 0;
-    await logAudit("govee-reload", {
-      category: "home",
-      event_type: "govee_reload",
-      severity: success ? "info" : "warn",
-      actor_id: userId,
-      actor_name: actorName,
-      channel: "web",
-      summary: success ? `Govee integration (${entry.domain}) reloaded by ${actorName}` : `Govee reload failed (HTTP ${status})`,
-      detail: {
-        entry_id: entry.entry_id,
-        domain: entry.domain,
-        title: entry.title,
-        ha_status: status,
-        ...haErrorMsg ? { ha_error: haErrorMsg } : {}
-      },
-      status: success ? "success" : "error",
-      duration_ms: Date.now() - t0
-    });
-    res.status(success ? 200 : 502).json({ success, entry_id: entry.entry_id, domain: entry.domain, title: entry.title, data });
-  } catch (err) {
-    console.error("[govee-reload] Error:", err);
-    await logAudit("govee-reload", {
-      category: "home",
-      event_type: "govee_reload",
-      severity: "error",
-      actor_id: userId,
-      actor_name: actorName,
-      channel: "web",
-      summary: `Govee reload error: ${err instanceof Error ? err.message : String(err)}`,
-      detail: { error: err instanceof Error ? err.message : String(err) },
-      status: "error",
-      duration_ms: Date.now() - t0
-    });
-    res.status(500).json({ error: "Failed to reload Govee integration" });
-  }
-});
-router5.get("/govee/config-entries", requireAuth2, requireAdmin, async (req, res) => {
-  const creds = await resolveHACreds(req.userId);
-  const HA_URL2 = creds?.haUrl ?? "";
-  const HA_TOKEN2 = creds?.haToken ?? "";
-  if (!HA_URL2 || !HA_TOKEN2) {
-    res.status(503).json({ error: "Home Assistant not configured" });
-    return;
-  }
-  try {
-    const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", "/api/config/config_entries/entry");
-    if (status !== 200 || !Array.isArray(data)) {
-      res.status(502).json({ error: "Failed to fetch config entries from HA" });
-      return;
-    }
-    const entries = data;
-    const goveeEntries = entries.filter(
-      (e) => e.domain.toLowerCase().includes("govee") || typeof e.title === "string" && e.title.toLowerCase().includes("govee")
-    );
-    res.json({ entries: goveeEntries });
-  } catch (err) {
-    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
-  }
-});
-router5.get("/states", requireAuth2, (_req, res) => {
-  if (!isCacheReady()) {
-    res.status(503).json({ error: "State cache not ready yet" });
-    return;
-  }
-  res.json(getEntityCache());
-});
-router5.get("/cameras", requireAuth2, async (req, res) => {
-  try {
-    const creds = await resolveHACreds(req.userId);
-    if (!creds?.haUrl || !creds?.haToken) {
-      res.json({ success: true, cameras: [] });
-      return;
-    }
-    let states = [];
-    if (isCacheReady()) {
-      const cache3 = getEntityCache();
-      states = Object.values(cache3);
-    } else {
-      const { status, data } = await callHA(creds.haUrl, creds.haToken, "GET", "/api/states", void 0, { maxRetries: 1 });
-      if (status === 200 && Array.isArray(data)) {
-        states = data;
-      }
-    }
-    const cameras = states.filter((s3) => s3.entity_id && s3.entity_id.startsWith("camera.")).map((s3) => ({
-      camera_id: s3.entity_id,
-      entity_id: s3.entity_id,
-      name: s3.attributes?.friendly_name || s3.entity_id.replace(/^camera\./, "").replace(/_/g, " "),
-      status: s3.state === "unavailable" ? "offline" : "live",
-      model: s3.attributes?.brand || s3.attributes?.model_name || s3.attributes?.model || "Home Assistant",
-      location: s3.attributes?.area_id || "",
-      thumbnail_url: `/api/ha/camera_proxy/${s3.entity_id}`,
-      stream_url: `/api/ha/camera_stream/${s3.entity_id}`,
-      is_ha: true
-    }));
-    res.json({ success: true, cameras });
-  } catch (err) {
-    console.error("[ha-cameras] Failed to list cameras:", err);
-    res.json({ success: false, cameras: [], error: String(err) });
-  }
-});
-router5.get("/camera_proxy/:entityId", requireAuth2, async (req, res) => {
-  const rawEntityId = req.params.entityId;
-  const entityId = Array.isArray(rawEntityId) ? rawEntityId[0] : rawEntityId;
-  if (!entityId || !entityId.startsWith("camera.")) {
-    res.status(400).json({ error: "Valid camera entityId required" });
-    return;
-  }
-  const creds = await resolveHACreds(req.userId);
-  if (!creds?.haUrl || !creds?.haToken) {
-    res.status(503).json({ error: "Home Assistant not configured" });
-    return;
-  }
-  try {
-    const haUrl = creds.haUrl.replace(/\/$/, "");
-    const proxyUrl = `${haUrl}/api/camera_proxy/${encodeURIComponent(entityId)}`;
-    const haRes = await undiciFetch2(proxyUrl, {
-      method: "GET",
-      headers: {
-        "Authorization": `Bearer ${creds.haToken}`
-      }
-    });
-    if (!haRes.ok) {
-      res.status(haRes.status).json({ error: `HA camera proxy returned ${haRes.status}` });
-      return;
-    }
-    const contentType = haRes.headers.get("content-type") || "image/jpeg";
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Cache-Control", "no-cache, max-age=0, must-revalidate");
-    const buffer = Buffer.from(await haRes.arrayBuffer());
-    res.send(buffer);
-  } catch (err) {
-    console.error(`[ha-camera-proxy] Error proxying ${entityId}:`, err);
-    res.status(500).json({ error: "Failed to fetch camera snapshot" });
-  }
-});
-router5.get("/camera_stream/:entityId", requireAuth2, async (req, res) => {
-  const rawEntityId = req.params.entityId;
-  const entityId = Array.isArray(rawEntityId) ? rawEntityId[0] : rawEntityId;
-  if (!entityId || !entityId.startsWith("camera.")) {
-    res.status(400).json({ error: "Valid camera entityId required" });
-    return;
-  }
-  const creds = await resolveHACreds(req.userId);
-  if (!creds?.haUrl || !creds?.haToken) {
-    res.status(503).json({ error: "Home Assistant not configured" });
-    return;
-  }
-  try {
-    const haUrl = creds.haUrl.replace(/\/$/, "");
-    const streamUrl = `${haUrl}/api/camera_proxy_stream/${encodeURIComponent(entityId)}`;
-    const haRes = await undiciFetch2(streamUrl, {
-      method: "GET",
-      headers: {
-        "Authorization": `Bearer ${creds.haToken}`
-      }
-    });
-    if (!haRes.ok) {
-      res.status(haRes.status).json({ error: `HA camera stream returned ${haRes.status}` });
-      return;
-    }
-    const contentType = haRes.headers.get("content-type") || "multipart/x-mixed-replace; boundary=--frame";
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-    res.setHeader("Connection", "close");
-    if (haRes.body) {
-      const reader = haRes.body.getReader();
-      req.on("close", () => {
-        reader.cancel().catch(() => {
-        });
-      });
-      const pump = async () => {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          res.write(value);
-        }
-        res.end();
-      };
-      pump().catch(() => res.end());
-    } else {
-      res.status(500).json({ error: "No stream body available" });
-    }
-  } catch (err) {
-    console.error(`[ha-camera-stream] Error streaming ${entityId}:`, err);
-    if (!res.headersSent) res.status(500).json({ error: "Failed to stream camera" });
-  }
-});
-router5.get("/govee-ids", requireAuth2, (_req, res) => {
-  res.json(getGoveeEntityIdsFromCache());
-});
-var HA_TOKEN_ALERT_COOLDOWN_MS = 60 * 60 * 1e3;
-async function callHA(haUrl, haToken, method, path12, body, opts) {
-  const url = `${haUrl.replace(/\/$/, "")}${path12}`;
-  const MAX_RETRIES = opts?.maxRetries ?? 3;
-  const retryOn401 = opts?.retryOn401 ?? true;
-  let lastError = null;
-  let lastStatus = 0;
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const init = {
-        method,
-        headers: {
-          "Authorization": `Bearer ${haToken}`,
-          "Content-Type": "application/json"
-        },
-        body: body ? JSON.stringify(body) : void 0,
-        // Never follow redirects: a redirecting host could bounce the request
-        // (and its bearer token) to an unvalidated internal destination.
-        // HA's REST API does not redirect in normal operation; a 3xx is
-        // surfaced to the caller as-is.
-        redirect: "manual"
-      };
-      const res = await breakers.ha.execute(() => opts?.dispatcher ? undiciFetch2(url, { ...init, dispatcher: opts.dispatcher }) : guardedFetch(url, init));
-      const text2 = await res.text();
-      let data;
-      try {
-        data = JSON.parse(text2);
-      } catch {
-        data = text2;
-      }
-      lastStatus = res.status;
-      if (res.status >= 500 && attempt < MAX_RETRIES) {
-        console.warn(`callHA: HA returned ${res.status} on attempt ${attempt}/${MAX_RETRIES} for ${method} ${path12} \u2014 retrying in 2s`);
-        await new Promise((r) => setTimeout(r, 2e3));
-        continue;
-      }
-      if (retryOn401 && res.status === 401 && attempt < MAX_RETRIES) {
-        console.warn(`callHA: HA returned 401 on attempt ${attempt}/${MAX_RETRIES} for ${method} ${path12} \u2014 retrying in 2s`);
-        await new Promise((r) => setTimeout(r, 2e3));
-        continue;
-      }
-      if (retryOn401 && res.status === 401 && attempt === MAX_RETRIES) {
-        console.error(`callHA: HA returned 401 after ${MAX_RETRIES} attempts for ${method} ${path12} \u2014 HA token likely expired or revoked`);
-        logAudit("home-assistant-proxy", {
-          category: "home",
-          event_type: "ha_auth_failure",
-          severity: "critical",
-          actor_id: "system",
-          actor_name: "System",
-          channel: "system",
-          summary: `CRITICAL: Home Assistant rejected auth (401) for ${method} ${path12} after ${MAX_RETRIES} retries. Token may need rotation.`,
-          detail: { method, path: path12, attempts: MAX_RETRIES },
-          status: "error"
-        });
-      }
-      return { status: res.status, data };
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-      if (err instanceof CircuitOpenError) {
-        console.warn(`callHA: breaker open for HA, skipping remaining ${MAX_RETRIES - attempt} retries for ${method} ${path12}`);
-        throw err;
-      }
-      console.warn(`callHA attempt ${attempt}/${MAX_RETRIES} failed for ${method} ${path12}: ${lastError.message}`);
-      if (attempt < MAX_RETRIES) {
-        await new Promise((r) => setTimeout(r, 500));
-      }
-    }
-  }
-  throw lastError;
-}
-function prettifyEntityId(id) {
-  const zoneLabel = getZoneFlow(id)?.label;
-  if (zoneLabel) return zoneLabel;
-  const raw = id.replace(/^[^.]+\./, "");
-  const parts = raw.split("_");
-  if (parts.length >= 3) {
-    for (let len = Math.floor(parts.length / 2); len >= 1; len--) {
-      const a = parts.slice(0, len).join("_");
-      const b2 = parts.slice(len, len * 2).join("_");
-      if (a === b2) {
-        parts.splice(0, len);
-        break;
-      }
-    }
-  }
-  return parts.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
-}
-var JANUS_LOGO_URL = process.env.APP_LOGO_URL || "/icon.svg";
-function resolveTargetSpeakers(target) {
-  const cached = getEntityCache();
-  const allMediaPlayers = cached.map((e) => e.entity_id).filter((id) => id.startsWith("media_player."));
-  if (allMediaPlayers.length === 0) {
-    if (target === "bedrooms") {
-      return { speakers: ["media_player.bedroom_speaker"], tvs: [], displays: [] };
-    }
-    return {
-      speakers: ["media_player.living_room_speaker", "media_player.bedroom_speaker"],
-      tvs: ["media_player.living_room_tv"],
-      displays: ["media_player.kitchen_display"]
-    };
-  }
-  const tvs = allMediaPlayers.filter((id) => id.includes("_tv") || id.includes("television"));
-  const displays = allMediaPlayers.filter((id) => id.includes("display") || id.includes("hub"));
-  if (target === "bedrooms") {
-    const bedroomSpeakers = allMediaPlayers.filter(
-      (id) => (id.includes("bedroom") || id.includes("room") || id.includes("closet")) && !tvs.includes(id)
-    );
-    return {
-      speakers: bedroomSpeakers.length > 0 ? bedroomSpeakers : allMediaPlayers.filter((id) => !tvs.includes(id)),
-      tvs: [],
-      displays: []
-    };
-  }
-  if (target === "google-home") {
-    const ghSpeakers = allMediaPlayers.filter(
-      (id) => !tvs.includes(id) && (id.includes("speaker") || id.includes("display") || id.includes("google"))
-    );
-    return {
-      speakers: ghSpeakers.length > 0 ? ghSpeakers : allMediaPlayers.filter((id) => !tvs.includes(id)),
-      tvs: [],
-      displays
-    };
-  }
-  return {
-    speakers: allMediaPlayers,
-    tvs,
-    displays
-  };
-}
-router5.post("/", requireAuth2, async (req, res) => {
-  const authUser = getAuthUser(req);
-  const userId = authUser?.userId || req.userId || "UNKNOWN";
-  const actorName = authUser?.displayName || authUser?.email || "UNKNOWN";
-  const isAdmin2 = authUser?.roles?.includes("admin") || req.userRole === "admin";
-  try {
-    const body = req.body;
-    const { action, path: path12, method = "GET", payload } = body;
-    if (action === "save-settings") {
-      if (userId === "UNKNOWN") {
-        res.status(401).json({ error: "Authentication required" });
-        return;
-      }
-      if (!isAdmin2) {
-        res.status(403).json({ error: "Admin privileges required to save Home Assistant configuration" });
-        return;
-      }
-      const haUrlInput = typeof body.ha_url === "string" ? body.ha_url.trim().replace(/\/$/, "") : "";
-      const tokenInput = typeof body.access_token === "string" ? body.access_token.trim() : "";
-      if (!haUrlInput) {
-        res.status(400).json({ error: "ha_url is required" });
-        return;
-      }
-      const urlCheck = await validateHaUrl(haUrlInput);
-      if (!urlCheck.ok) {
-        res.status(400).json({ error: urlCheck.reason });
-        return;
-      }
-      const existing = await storage.getHomeAssistantSettings(userId);
-      if (!tokenInput && !existing?.encryptedToken) {
-        res.status(400).json({ error: "access_token is required" });
-        return;
-      }
-      const update = { userId, haUrl: haUrlInput };
-      if (tokenInput) {
-        update.encryptedToken = await encryptToken(tokenInput);
-      }
-      await storage.upsertHomeAssistantSettings(update);
-      invalidateHACredsCache(userId);
-      logAudit("home-assistant-proxy", {
-        category: "home",
-        event_type: "ha_settings_saved",
-        severity: "info",
-        actor_id: userId,
-        actor_name: actorName,
-        channel: "web",
-        summary: tokenInput ? `Home Assistant settings saved (URL + new token) by ${actorName}` : `Home Assistant URL updated by ${actorName}`,
-        detail: { ha_url: haUrlInput, token_updated: Boolean(tokenInput) },
-        status: "success"
-      });
-      res.json({ success: true, ha_url: haUrlInput, token_saved: Boolean(tokenInput) });
-      return;
-    }
-    if (action === "get-settings") {
-      if (userId === "UNKNOWN") {
-        res.status(401).json({ error: "Authentication required" });
-        return;
-      }
-      const settings = await storage.getHomeAssistantSettings(userId);
-      res.json({
-        settings: settings ? {
-          id: settings.id,
-          ha_url: settings.haUrl,
-          is_connected: settings.isConnected,
-          last_connected_at: settings.lastConnectedAt,
-          has_token: Boolean(settings.encryptedToken)
-        } : null
-      });
-      return;
-    }
-    if (action === "disconnect") {
-      if (userId === "UNKNOWN") {
-        res.status(401).json({ error: "Authentication required" });
-        return;
-      }
-      if (!isAdmin2) {
-        res.status(403).json({ error: "Admin privileges required to disconnect Home Assistant" });
-        return;
-      }
-      const existing = await storage.getHomeAssistantSettings(userId);
-      if (existing) {
-        await storage.upsertHomeAssistantSettings({
-          userId,
-          haUrl: existing.haUrl,
-          encryptedToken: null,
-          isConnected: false
-        });
-        invalidateHACredsCache(userId);
-        logAudit("home-assistant-proxy", {
-          category: "home",
-          event_type: "ha_disconnected",
-          severity: "info",
-          actor_id: userId,
-          actor_name: actorName,
-          channel: "web",
-          summary: `Home Assistant disconnected by ${actorName}`,
-          detail: { ha_url: existing.haUrl },
-          status: "success"
-        });
-      }
-      res.json({ success: true });
-      return;
-    }
-    const creds = await resolveHACreds(userId);
-    if (action === "test-connection") {
-      const suppliedUrl = typeof body.ha_url === "string" ? body.ha_url.trim().replace(/\/$/, "") : "";
-      const suppliedToken = typeof body.access_token === "string" ? body.access_token.trim() : "";
-      let testUrl;
-      let testToken;
-      if (suppliedToken) {
-        testUrl = suppliedUrl || creds?.haUrl || "";
-        testToken = suppliedToken;
-      } else {
-        if (suppliedUrl && creds && suppliedUrl !== creds.haUrl) {
-          res.status(400).json({ error: "To test a new URL, provide its access token too" });
-          return;
-        }
-        testUrl = creds?.haUrl || "";
-        testToken = creds?.haToken || "";
-      }
-      if (!testUrl || !testToken) {
-        res.status(503).json({ unavailable: true, reason: "not_configured", message: "ha_not_configured" });
-        return;
-      }
-      const urlCheck = await validateHaUrl(testUrl);
-      if (!urlCheck.ok) {
-        res.status(400).json({ error: urlCheck.reason });
-        return;
-      }
-      const { status } = await callHA(testUrl, testToken, "GET", "/api/");
-      const connected = status === 200;
-      if (connected && userId && userId !== "UNKNOWN") {
-        const existing = await storage.getHomeAssistantSettings(userId);
-        if (existing) {
-          await storage.upsertHomeAssistantSettings({
-            userId,
-            isConnected: true,
-            lastConnectedAt: /* @__PURE__ */ new Date()
-          });
-        }
-      }
-      logAudit("home-assistant-proxy", {
-        category: "home",
-        event_type: "ha_test_connection",
-        severity: "info",
-        actor_id: userId,
-        actor_name: actorName,
-        channel: "web",
-        summary: connected ? "Home Assistant connection test succeeded" : `Home Assistant connection test failed (HTTP ${status})`,
-        detail: { status, connected },
-        status: connected ? "success" : "error"
-      });
-      res.json({ connected });
-      return;
-    }
-    if (!creds) {
-      res.status(503).json({ unavailable: true, reason: "not_configured", message: "ha_not_configured" });
-      return;
-    }
-    const HA_URL2 = creds.haUrl;
-    const HA_TOKEN2 = creds.haToken;
-    if (action === "proxy" && path12) {
-      if (typeof path12 !== "string" || !path12.startsWith("/") || path12.startsWith("//") || path12.includes("\\")) {
-        res.status(400).json({ error: "path must be an absolute URL path" });
-        return;
-      }
-      const t0 = Date.now();
-      const { status, data } = await callHA(HA_URL2, HA_TOKEN2, method, path12, payload);
-      if (status >= 400 && path12.startsWith("/api/calendars/")) {
-        console.warn(`Calendar endpoint returned ${status} \u2014 returning empty array`);
-        logAudit("home-assistant-proxy", {
-          category: "home",
-          event_type: "ha_proxy_error",
-          severity: "warn",
-          actor_id: userId,
-          actor_name: actorName,
-          channel: "web",
-          summary: `Home Assistant calendar proxy ${method} ${path12} returned HTTP ${status} (suppressed)`,
-          detail: { method, path: path12, status, suppressed: true },
-          status: "error",
-          duration_ms: Date.now() - t0
-        });
-        res.json([]);
-        return;
-      }
-      if (status >= 400) {
-        const payloadBytes = payload ? JSON.stringify(payload).length : 0;
-        const responseBytes = JSON.stringify(data).length;
-        const errorDetail = typeof data === "object" && data !== null ? data.message || data.error || void 0 : void 0;
-        logAudit("home-assistant-proxy", {
-          category: "home",
-          event_type: "ha_proxy_error",
-          severity: "warn",
-          actor_id: userId,
-          actor_name: actorName,
-          channel: "web",
-          summary: `Home Assistant proxy ${method} ${path12} returned HTTP ${status}`,
-          detail: {
-            method,
-            path: path12,
-            status,
-            request_bytes: payloadBytes || void 0,
-            response_bytes: responseBytes,
-            ...errorDetail ? { error: errorDetail } : {}
-          },
-          status: "error",
-          duration_ms: Date.now() - t0
-        });
-      } else if (method !== "GET") {
-        const responseBytes = JSON.stringify(data).length;
-        const payloadBytes = payload ? JSON.stringify(payload).length : 0;
-        logAudit("home-assistant-proxy", {
-          category: "home",
-          event_type: "ha_proxy_request",
-          severity: "info",
-          actor_id: userId,
-          actor_name: actorName,
-          channel: "web",
-          summary: `HA proxy ${method} ${path12}`,
-          detail: { method, path: path12, status, request_bytes: payloadBytes || void 0, response_bytes: responseBytes },
-          status: "success",
-          duration_ms: Date.now() - t0
-        });
-      }
-      res.status(status).json(data);
-      return;
-    }
-    if (action === "get-states") {
-      const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", "/api/states");
-      const entityIds = body.entity_ids;
-      if (entityIds && Array.isArray(entityIds) && entityIds.length > 0 && Array.isArray(data)) {
-        const idSet = new Set(entityIds);
-        const filtered = data.filter((s3) => idSet.has(s3.entity_id));
-        res.status(status).json(filtered);
-        return;
-      }
-      res.status(status).json(data);
-      return;
-    }
-    if (action === "get-state") {
-      const { entity_id } = body;
-      if (!entity_id) {
-        res.status(400).json({ error: "entity_id required" });
-        return;
-      }
-      const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", `/api/states/${entity_id}`);
-      res.status(status).json(data);
-      return;
-    }
-    if (action === "get-domain") {
-      const { domain } = body;
-      if (!domain) {
-        res.status(400).json({ error: "domain required" });
-        return;
-      }
-      const { status: domainStatus, data: allStates } = await callHA(HA_URL2, HA_TOKEN2, "GET", "/api/states");
-      const statesArray = Array.isArray(allStates) ? allStates : [];
-      const states = statesArray.filter((s3) => s3.entity_id?.startsWith(`${domain}.`));
-      res.status(domainStatus < 400 ? 200 : domainStatus).json(states);
-      return;
-    }
-    if (action === "call-service") {
-      if (!isAdmin2) {
-        res.status(403).json({ error: "Device control requires admin privileges" });
-        return;
-      }
-      const { domain: svcDomain, service, service_data } = body;
-      if (!svcDomain || !service) {
-        res.status(400).json({ error: "domain and service required" });
-        return;
-      }
-      const t0 = Date.now();
-      const entityId = service_data?.entity_id;
-      const svcPath = `/api/services/${svcDomain}/${service}`;
-      const svcPayload = service_data || {};
-      let callResult;
-      if (svcDomain === "climate" && creds.source === "env") {
-        try {
-          const wsResult = await callHAService(svcDomain, service, svcPayload);
-          console.log(
-            `[HA climate] WebSocket call succeeded for entity_id=${entityId ?? "unknown"} service=${service}`
-          );
-          callResult = { status: 200, data: wsResult ?? [] };
-        } catch (wsErr) {
-          const wsErrMsg = wsErr instanceof Error ? wsErr.message : String(wsErr);
-          console.warn(
-            `[HA climate] WebSocket call failed for entity_id=${entityId ?? "unknown"} service=${service} error=${wsErrMsg} \u2014 falling back to REST`
-          );
-          try {
-            const restResult = await callHA(HA_URL2, HA_TOKEN2, "POST", svcPath, svcPayload, { maxRetries: 1, retryOn401: false });
-            if (restResult.status >= 400) {
-              console.error(
-                `[HA climate] REST fallback returned ${restResult.status} for entity_id=${entityId ?? "unknown"} service=${service} (WS error: ${wsErrMsg})`
-              );
-              callResult = { status: 500, data: { error: `Climate control failed \u2014 WS: ${wsErrMsg}, REST: HTTP ${restResult.status}` } };
-            } else {
-              callResult = restResult;
-            }
-          } catch (restErr) {
-            const restErrMsg = restErr instanceof Error ? restErr.message : String(restErr);
-            console.error(
-              `[HA climate] REST fallback also threw for entity_id=${entityId ?? "unknown"} service=${service} ws_error=${wsErrMsg} rest_error=${restErrMsg}`
-            );
-            callResult = { status: 500, data: { error: `Climate control failed \u2014 WS: ${wsErrMsg}, REST: ${restErrMsg}` } };
-          }
-        }
-      } else {
-        callResult = await callHA(HA_URL2, HA_TOKEN2, "POST", svcPath, svcPayload);
-      }
-      const { status, data } = callResult;
-      const ids = entityId ? Array.isArray(entityId) ? entityId : [entityId] : [];
-      const count = ids.length;
-      const verbMap = {
-        turn_on: svcDomain === "scene" ? "Activated scene" : "Turned on",
-        turn_off: "Turned off",
-        toggle: "Toggled",
-        set_temperature: service_data?.temperature != null ? `Set temperature to ${service_data.temperature}\xB0F` : "Set temperature",
-        set_hvac_mode: service_data?.hvac_mode ? `Set mode to ${service_data.hvac_mode}` : "Set HVAC mode",
-        volume_set: service_data?.volume_level != null ? `Set volume to ${Math.round(service_data.volume_level * 100)}%` : "Set volume",
-        select_source: service_data?.source ? `Selected source ${service_data.source} on` : "Selected source on",
-        activate: "Activated scene"
-      };
-      const verb = verbMap[service] || service.replace(/_/g, " ");
-      let summary;
-      if (count === 0) {
-        summary = `${verb} (${svcDomain})`;
-      } else if (count === 1) {
-        summary = `${verb} ${prettifyEntityId(ids[0])}`;
-      } else if (count <= 2) {
-        summary = `${verb} ${ids.map(prettifyEntityId).join(" & ")}`;
-      } else {
-        summary = `${verb} ${ids.slice(0, 2).map(prettifyEntityId).join(", ")} +${count - 2} more`;
-      }
-      const extras = [];
-      if (service_data?.brightness != null && !verbMap[service]?.includes("brightness"))
-        extras.push(`brightness ${Math.round(service_data.brightness / 255 * 100)}%`);
-      if (extras.length) summary += ` (${extras.join(", ")})`;
-      if (status >= 400 && svcDomain === "climate") {
-        const responseBody = typeof data === "object" ? JSON.stringify(data) : String(data ?? "");
-        console.error(
-          `[HA climate] call-service failed: entity_id=${entityId ?? "unknown"} service=${service} status=${status} body=${responseBody}`
-        );
-      }
-      logAudit("home-assistant-proxy", {
-        category: "home",
-        event_type: "ha_call_service",
-        severity: "info",
-        actor_id: userId,
-        actor_name: actorName,
-        channel: "web",
-        summary,
-        detail: { domain: svcDomain, service, entity_id: entityId, service_data, status },
-        duration_ms: Date.now() - t0,
-        status: status < 400 ? "success" : "error"
-      });
-      res.status(status).json(data);
-      return;
-    }
-    if (action === "get-climate-debug") {
-      const t0 = Date.now();
-      const { status, data: allStates } = await callHA(HA_URL2, HA_TOKEN2, "GET", "/api/states");
-      const statesArray = Array.isArray(allStates) ? allStates : [];
-      const climateEntities = statesArray.filter((s3) => s3.entity_id?.startsWith("climate."));
-      const poolSpaFilter = /pool|spa/i;
-      const debug = climateEntities.map((e) => ({
-        entity_id: e.entity_id,
-        friendly_name: e.attributes?.friendly_name || e.entity_id,
-        state: e.state,
-        hvac_modes: e.attributes?.hvac_modes || [],
-        current_temperature: e.attributes?.current_temperature ?? null,
-        target_temperature: e.attributes?.temperature ?? null,
-        hvac_action: e.attributes?.hvac_action ?? null,
-        is_pool_spa: poolSpaFilter.test(e.entity_id),
-        category: poolSpaFilter.test(e.entity_id) ? "pool_spa" : "hvac"
-      }));
-      const hvacCount = debug.filter((d) => d.category === "hvac").length;
-      const poolSpaCount = debug.filter((d) => d.category === "pool_spa").length;
-      logAudit("home-assistant-proxy", {
-        category: "home",
-        event_type: "ha_climate_debug",
-        severity: "info",
-        actor_id: userId,
-        actor_name: actorName,
-        channel: "web",
-        summary: `Climate debug: ${climateEntities.length} entities (${hvacCount} HVAC, ${poolSpaCount} pool/spa)`,
-        duration_ms: Date.now() - t0,
-        status: status < 400 ? "success" : "error"
-      });
-      res.json({
-        total_climate_entities: climateEntities.length,
-        hvac_count: hvacCount,
-        pool_spa_count: poolSpaCount,
-        total_ha_entities: statesArray.length,
-        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-        entities: debug
-      });
-      return;
-    }
-    if (action === "get-history") {
-      const { entity_id, hours = 24 } = body;
-      const end = (/* @__PURE__ */ new Date()).toISOString();
-      const start = new Date(Date.now() - hours * 3600 * 1e3).toISOString();
-      let histPath = `/api/history/period/${start}?end_time=${encodeURIComponent(end)}&minimal_response`;
-      if (entity_id) histPath += `&filter_entity_id=${entity_id}`;
-      const t0 = Date.now();
-      const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", histPath);
-      const entityLabel = entity_id ? prettifyEntityId(entity_id) : "all entities";
-      logAudit("home-assistant-proxy", {
-        category: "home",
-        event_type: "ha_get_history",
-        severity: "info",
-        actor_id: userId,
-        actor_name: actorName,
-        channel: "web",
-        summary: `Retrieved ${hours}h history for ${entityLabel}`,
-        detail: { entity_id: entity_id || void 0, hours },
-        status: status < 400 ? "success" : "error",
-        duration_ms: Date.now() - t0
-      });
-      res.status(status).json(data);
-      return;
-    }
-    if (action === "get-logbook") {
-      const { hours = 24, entity_id } = body;
-      const start = new Date(Date.now() - hours * 3600 * 1e3).toISOString();
-      let logPath = `/api/logbook/${start}`;
-      if (entity_id) logPath += `?entity=${entity_id}`;
-      const t0 = Date.now();
-      const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", logPath);
-      const entityLabel = entity_id ? prettifyEntityId(entity_id) : "all entities";
-      const entryCount = Array.isArray(data) ? data.length : 0;
-      logAudit("home-assistant-proxy", {
-        category: "home",
-        event_type: "ha_get_logbook",
-        severity: "info",
-        actor_id: userId,
-        actor_name: actorName,
-        channel: "web",
-        summary: `Retrieved ${entryCount} logbook entries (${hours}h) for ${entityLabel}`,
-        detail: { entity_id: entity_id || void 0, hours, entry_count: entryCount },
-        status: status < 400 ? "success" : "error",
-        duration_ms: Date.now() - t0
-      });
-      res.status(status).json(data);
-      return;
-    }
-    if (action === "get-services") {
-      const t0 = Date.now();
-      const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", "/api/services");
-      const domainCount = Array.isArray(data) ? data.length : 0;
-      logAudit("home-assistant-proxy", {
-        category: "home",
-        event_type: "ha_get_services",
-        severity: "info",
-        actor_id: userId,
-        actor_name: actorName,
-        channel: "web",
-        summary: `Fetched HA service list (${domainCount} domain${domainCount !== 1 ? "s" : ""})`,
-        detail: { domain_count: domainCount },
-        status: status < 400 ? "success" : "error",
-        duration_ms: Date.now() - t0
-      });
-      res.status(status).json(data);
-      return;
-    }
-    if (action === "get-config") {
-      const t0 = Date.now();
-      const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", "/api/config");
-      logAudit("home-assistant-proxy", {
-        category: "home",
-        event_type: "ha_get_config",
-        severity: "info",
-        actor_id: userId,
-        actor_name: actorName,
-        channel: "web",
-        summary: "Fetched Home Assistant configuration",
-        detail: {},
-        status: status < 400 ? "success" : "error",
-        duration_ms: Date.now() - t0
-      });
-      res.status(status).json(data);
-      return;
-    }
-    if (action === "broadcast-all") {
-      const { speakers, tvs, displays } = resolveTargetSpeakers("all");
-      const requestedVolumeAll = Number.isFinite(body.volume) ? body.volume : 0.75;
-      const volumeLevelAll = Math.min(1, Math.max(0, requestedVolumeAll));
-      await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/turn_on", { entity_id: speakers });
-      await new Promise((r) => setTimeout(r, 3e3));
-      await Promise.all([
-        callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/volume_set", {
-          entity_id: speakers,
-          volume_level: volumeLevelAll
-        }),
-        ...displays.length > 0 ? [
-          callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/play_media", {
-            entity_id: displays,
-            media_content_id: JANUS_LOGO_URL,
-            media_content_type: "image/png"
-          })
-        ] : []
-      ]);
-      await new Promise((r) => setTimeout(r, 1500));
-      const t0 = Date.now();
-      await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/tts/speak", {
-        entity_id: "tts.elevenlabs_text_to_speech",
-        media_player_entity_id: speakers,
-        message: body.message,
-        options: { voice: "iLVmqjzCGGvqtMCk6vVQ" }
-      });
-      if (tvs.length > 0) {
-        setTimeout(async () => {
-          try {
-            await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/turn_off", { entity_id: tvs });
-          } catch {
-          }
-        }, 6e4);
-      }
-      logAudit("home-assistant-proxy", {
-        category: "home",
-        event_type: "broadcast_all",
-        severity: "info",
-        actor_id: userId,
-        actor_name: actorName,
-        channel: "web",
-        summary: `Broadcast to ${speakers.length} devices (vol ${Math.round(volumeLevelAll * 100)}%)`,
-        detail: { message: body.message?.slice(0, 100), volume: volumeLevelAll },
-        duration_ms: Date.now() - t0,
-        status: "success"
-      });
-      res.json({ success: true, devices: speakers.length });
-      return;
-    }
-    if (action === "broadcast-bedrooms" || action === "broadcast-girls") {
-      const { speakers } = resolveTargetSpeakers("bedrooms");
-      const requestedVolumeBedrooms = Number.isFinite(body.volume) ? body.volume : 0.85;
-      const volumeLevelBedrooms = Math.min(1, Math.max(0, requestedVolumeBedrooms));
-      await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/turn_on", { entity_id: speakers });
-      await new Promise((r) => setTimeout(r, 3e3));
-      await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/volume_set", {
-        entity_id: speakers,
-        volume_level: volumeLevelBedrooms
-      });
-      await new Promise((r) => setTimeout(r, 1500));
-      const t0 = Date.now();
-      await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/tts/speak", {
-        entity_id: "tts.elevenlabs_text_to_speech",
-        media_player_entity_id: speakers,
-        message: body.message,
-        options: { voice: "iLVmqjzCGGvqtMCk6vVQ" }
-      });
-      logAudit("home-assistant-proxy", {
-        category: "home",
-        event_type: "broadcast_bedrooms",
-        severity: "info",
-        actor_id: userId,
-        actor_name: actorName,
-        channel: "web",
-        summary: `Broadcast to bedrooms (${speakers.length} speakers)`,
-        detail: { message: body.message?.slice(0, 100) },
-        duration_ms: Date.now() - t0,
-        status: "success"
-      });
-      res.json({ success: true, devices: speakers.length });
-      return;
-    }
-    if (action === "broadcast-google-home") {
-      const { speakers, displays } = resolveTargetSpeakers("google-home");
-      const requestedVolumeGH = Number.isFinite(body.volume) ? body.volume : 0.75;
-      const volumeLevelGH = Math.min(1, Math.max(0, requestedVolumeGH));
-      await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/turn_on", { entity_id: speakers });
-      await new Promise((r) => setTimeout(r, 3e3));
-      await Promise.all([
-        callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/volume_set", {
-          entity_id: speakers,
-          volume_level: volumeLevelGH
-        }),
-        callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/play_media", {
-          entity_id: displays,
-          media_content_id: JANUS_LOGO_URL,
-          media_content_type: "image/png"
-        })
-      ]);
-      await new Promise((r) => setTimeout(r, 1500));
-      const t0 = Date.now();
-      const messageText = typeof body.message === "string" ? body.message : "";
-      let ttsOk = true;
-      let ttsError = null;
-      let whatsappFallback = false;
-      let whatsappAlert = false;
-      const audioUrl = await generateAndUploadTTS(messageText, "google-home-broadcast");
-      if (audioUrl) {
-        const speakerErrors = [];
-        for (const speaker of speakers) {
-          const { status: playStatus } = await callHA(
-            HA_URL2,
-            HA_TOKEN2,
-            "POST",
-            "/api/services/media_player/play_media",
-            {
-              entity_id: speaker,
-              media_content_id: audioUrl,
-              media_content_type: "audio/mpeg",
-              announce: true,
-              extra: {
-                metadata: { metadataType: 3, title: "Home Announcement", artist: "Janus" }
-              }
-            }
-          );
-          if (playStatus >= 400) {
-            speakerErrors.push(`${speaker}: HTTP ${playStatus}`);
-            console.warn(`[home-assistant-proxy] play_media failed on ${speaker}: HTTP ${playStatus}`);
-          } else {
-            console.log(`[home-assistant-proxy] \u2713 play_media accepted on ${speaker}`);
-          }
-          await new Promise((r) => setTimeout(r, 400));
-        }
-        if (speakerErrors.length > 0) {
-          ttsOk = false;
-          ttsError = `play_media failed on ${speakerErrors.length} speaker(s): ${speakerErrors.join("; ")}`;
-        }
-      } else {
-        ttsOk = false;
-        ttsError = "ElevenLabs TTS or storage upload failed";
-      }
-      if (!ttsOk) {
-        try {
-          const fallbackPhone = await getBroadcastFallbackPhone();
-          whatsappFallback = await sendWhatsAppTo(fallbackPhone, `\u{1F4E2} Home broadcast: ${messageText}`);
-          if (whatsappFallback) {
-            console.log("[home-assistant-proxy] WhatsApp fallback sent for broadcast-google-home");
-          } else {
-            console.warn("[home-assistant-proxy] WhatsApp fallback failed for broadcast-google-home");
-          }
-        } catch (e) {
-          console.error("[home-assistant-proxy] WhatsApp fallback error:", e);
-        }
-        try {
-          const alertPhone = await getAlertPhoneNumber();
-          const fallbackNote = whatsappFallback ? " WhatsApp fallback sent to family." : " WhatsApp fallback failed.";
-          whatsappAlert = await sendWhatsAppTo(
-            alertPhone,
-            `\u26A0\uFE0F All Google Home broadcast failed: ${ttsError ?? "unknown TTS error"}.${fallbackNote}`
-          );
-        } catch (e) {
-          console.error("[home-assistant-proxy] WhatsApp alert error:", e);
-        }
-      }
-      logAudit("home-assistant-proxy", {
-        category: "home",
-        event_type: "broadcast_google_home",
-        severity: ttsOk ? "info" : "warn",
-        actor_id: userId,
-        actor_name: actorName,
-        channel: "web",
-        summary: ttsOk ? `Broadcast to ${speakers.length} Google Home devices (vol ${Math.round(volumeLevelGH * 100)}%)` : `Broadcast to ${speakers.length} Google Home devices FAILED (vol ${Math.round(volumeLevelGH * 100)}%)`,
-        detail: {
-          message: messageText.slice(0, 100),
-          volume: volumeLevelGH,
-          ttsError,
-          whatsappFallback,
-          whatsappAlert
-        },
-        duration_ms: Date.now() - t0,
-        status: ttsOk ? "success" : "error"
-      });
-      res.json({
-        success: ttsOk,
-        devices: speakers.length,
-        ttsError,
-        whatsappFallback,
-        whatsappAlert
-      });
-      if (ttsOk && audioUrl) {
-        setTimeout(async () => {
-          const tVerify = Date.now();
-          const verifications = {};
-          let verifiedCount = 0;
-          for (const speaker of speakers) {
-            const v = await verifyPlaybackState(HA_URL2, HA_TOKEN2, speaker, audioUrl, true);
-            verifications[speaker] = v;
-            if (v.verified) {
-              verifiedCount++;
-              console.log(`[home-assistant-proxy] \u2713 Cast state verified: ${speaker} loaded correct content (announce-mode, state=${v.state})`);
-            } else {
-              console.warn(
-                `[home-assistant-proxy] \u26A0 Cast state check: ${speaker} state=${v.state ?? "null"} urlMatch=${v.urlMatch} (announce-mode: urlMatch must be true and state must not be unavailable)`
-              );
-            }
-          }
-          const allVerified = verifiedCount === speakers.length;
-          let silentDropRisk = false;
-          if (allVerified) {
-            const { silentDropRisk: risk } = await detectSilentDropRisk(
-              HA_URL2,
-              HA_TOKEN2,
-              speakers,
-              audioUrl,
-              3500
-            );
-            silentDropRisk = risk;
-            if (risk) {
-              console.warn(
-                `[home-assistant-proxy] \u26A0 silent_drop_risk: all speakers urlMatch=true but still idle at ~8s \u2014 audio may have been silently dropped (no failure alert raised)`
-              );
-            }
-          }
-          logAudit("home-assistant-proxy", {
-            category: "home",
-            event_type: "broadcast_cast_verification",
-            severity: allVerified && !silentDropRisk ? "info" : "warn",
-            actor_id: userId,
-            actor_name: actorName,
-            channel: "web",
-            summary: silentDropRisk ? `Cast state verified ${verifiedCount}/${speakers.length} Google Home speakers (silent-drop risk: still idle at 8s)` : `Cast state verified ${verifiedCount}/${speakers.length} Google Home speakers`,
-            detail: {
-              broadcast: "all-google-home",
-              expectedUrl: audioUrl,
-              verifiedCount,
-              totalSpeakers: speakers.length,
-              verifications,
-              silent_drop_risk: silentDropRisk
-            },
-            duration_ms: Date.now() - tVerify,
-            status: allVerified ? "success" : "warning"
-          });
-        }, 3500).unref?.();
-      }
-      return;
-    }
-    res.status(400).json({ error: `Unknown action: ${action}` });
-  } catch (err) {
-    console.error("Home Assistant proxy error:", err);
-    res.status(500).json(safeErrorJson(err));
-  }
-});
-var homeAssistant_default = router5;
+// server/routes.ts
+init_homeAssistant();
 
 // server/routes/govee.ts
 init_auth();
@@ -21189,9 +21423,10 @@ router6.get("/av-closet", requireAuth, async (_req, res) => {
 var govee_default = router6;
 
 // server/routes/tesla.ts
-import { Router as Router9 } from "express";
+init_auth2();
 init_auth();
 init_auditLog();
+import { Router as Router9 } from "express";
 
 // server/lib/rateLimiter.ts
 var buckets = /* @__PURE__ */ new Map();
@@ -21217,6 +21452,7 @@ function checkRateLimit(userId, functionName, config = DEFAULT_CONFIG2) {
 init_circuit_breaker();
 
 // server/routes/tesla.ts
+init_errorSanitizer();
 init_correlation();
 init_db2();
 
@@ -21226,12 +21462,14 @@ init_auditLog();
 init_db2();
 
 // server/routes/verkada.ts
-import { Router as Router8 } from "express";
+init_auth2();
 init_auth();
 init_auditLog();
+init_errorSanitizer();
 init_db2();
 init_db();
 init_socket();
+import { Router as Router8 } from "express";
 import { webcrypto as webcrypto3 } from "crypto";
 var router7 = Router8();
 var VERKADA_BASE = "https://api.verkada.com";
@@ -22976,6 +23214,7 @@ function startScheduledTasks() {
 }
 
 // server/routes/tesla.ts
+init_homeAssistant();
 var router8 = Router9();
 var TESLA_API_BASE4 = "https://fleet-api.prd.na.vn.cloud.tesla.com";
 var TESLA_AUTH_BASE4 = "https://fleet-auth.prd.vn.cloud.tesla.com";
@@ -23427,8 +23666,8 @@ router8.get("/map", requireAuth2, async (req, res) => {
     res.status(500).json({ error: "Google Maps API key not configured" });
     return;
   }
-  const HOME_LAT5 = 34.0522;
-  const HOME_LNG5 = -118.2437;
+  const HOME_LAT5 = Number(process.env.HOME_LAT) || 34.0522;
+  const HOME_LNG5 = Number(process.env.HOME_LNG) || -118.2437;
   const action = req.query.action;
   if (action === "api-key") {
     res.json({ api_key: apiKey });
@@ -23460,12 +23699,14 @@ router8.post("/battery-monitor", requireAuth2, async (_req, res) => {
 var tesla_default = router8;
 
 // server/routes/pool.ts
-import { Router as Router10 } from "express";
+init_auth2();
 init_auditLog();
+init_errorSanitizer();
 init_fetchWithTimeout();
 init_db2();
 init_notifications();
 init_janus_tools();
+import { Router as Router10 } from "express";
 
 // server/utils/google-weather.ts
 var GOOGLE_WEATHER_BASE = "https://weather.googleapis.com/v1";
@@ -23628,132 +23869,8 @@ function googleTypeToWMO(type) {
   }
 }
 
-// server/lib/estateConfig.ts
-var cachedConfig = null;
-var lastFetchTime = 0;
-var CACHE_TTL_MS2 = 10 * 60 * 1e3;
-async function getEstateConfig() {
-  const now = Date.now();
-  if (cachedConfig && now - lastFetchTime < CACHE_TTL_MS2) {
-    return cachedConfig;
-  }
-  const fallback = {
-    latitude: Number(process.env.HOME_LAT) || 37.7749,
-    longitude: Number(process.env.HOME_LNG) || -122.4194,
-    elevation: 0,
-    timeZone: process.env.TZ || process.env.TIME_ZONE || "UTC",
-    unitSystem: {
-      length: "mi",
-      mass: "lb",
-      pressure: "psi",
-      temperature: "\xB0F",
-      volume: "gal"
-    },
-    locationName: process.env.HOME_LOCATION || "Home"
-  };
-  const haUrl = process.env.HA_URL || "http://supervisor/core";
-  const haToken = process.env.HA_TOKEN || process.env.SUPERVISOR_TOKEN;
-  if (!haToken) {
-    cachedConfig = fallback;
-    lastFetchTime = now;
-    return cachedConfig;
-  }
-  try {
-    const { status, data } = await callHA(haUrl, haToken, "GET", "/api/config", void 0, { maxRetries: 1 });
-    if (status === 200 && data && typeof data === "object") {
-      const d = data;
-      cachedConfig = {
-        latitude: typeof d.latitude === "number" ? d.latitude : fallback.latitude,
-        longitude: typeof d.longitude === "number" ? d.longitude : fallback.longitude,
-        elevation: typeof d.elevation === "number" ? d.elevation : fallback.elevation,
-        timeZone: d.time_zone || fallback.timeZone,
-        unitSystem: d.unit_system || fallback.unitSystem,
-        locationName: d.location_name || fallback.locationName
-      };
-      lastFetchTime = now;
-      return cachedConfig;
-    }
-  } catch (err) {
-    console.warn("[estateConfig] Failed to fetch HA /api/config, using fallback:", err instanceof Error ? err.message : err);
-  }
-  cachedConfig = fallback;
-  lastFetchTime = now;
-  return cachedConfig;
-}
-function getEstateTimezone() {
-  if (cachedConfig?.timeZone) return cachedConfig.timeZone;
-  return process.env.TZ || process.env.TIME_ZONE || "UTC";
-}
-var cachedEntityMappings = null;
-var lastEntityMappingsFetchTime = 0;
-async function getEntityMappings() {
-  const now = Date.now();
-  if (cachedEntityMappings && now - lastEntityMappingsFetchTime < CACHE_TTL_MS2) {
-    return cachedEntityMappings;
-  }
-  const fallback = {
-    energy: [],
-    irrigation: [],
-    pool: {
-      pool_heater: "switch.pool_heater",
-      spa_heater: "switch.spa_heater",
-      pool_temp: "sensor.pool_temp",
-      spa_temp: "sensor.spa_temp",
-      pool_pump: "switch.pool_pump",
-      spa_pump: "switch.spa_pump"
-    },
-    climate: [],
-    cameras: [],
-    vehicles: [],
-    speedtest: {
-      download: "sensor.speedtest_download",
-      upload: "sensor.speedtest_upload",
-      ping: "sensor.speedtest_ping"
-    },
-    utility_rates: {
-      electricity_kwh_cost: 0.28,
-      water_hcf_cost: 12.5
-    }
-  };
-  try {
-    const { query: query2 } = await Promise.resolve().then(() => (init_db2(), db_exports));
-    const res = await query2(
-      `SELECT value FROM system_configs WHERE key = 'entity_mappings' LIMIT 1`
-    );
-    if (res?.rows?.[0]?.value) {
-      const parsed = typeof res.rows[0].value === "string" ? JSON.parse(res.rows[0].value) : res.rows[0].value;
-      cachedEntityMappings = {
-        ...fallback,
-        ...parsed,
-        pool: {
-          ...fallback.pool,
-          ...parsed.pool || {}
-        },
-        speedtest: {
-          ...fallback.speedtest,
-          ...parsed.speedtest || {}
-        },
-        utility_rates: {
-          ...fallback.utility_rates,
-          ...parsed.utility_rates || {}
-        }
-      };
-      lastEntityMappingsFetchTime = now;
-      return cachedEntityMappings;
-    }
-  } catch (err) {
-    console.warn("[estateConfig] Failed to fetch entity_mappings from system_configs:", err instanceof Error ? err.message : err);
-  }
-  cachedEntityMappings = fallback;
-  lastEntityMappingsFetchTime = now;
-  return cachedEntityMappings;
-}
-function invalidateEntityMappingsCache() {
-  cachedEntityMappings = null;
-  lastEntityMappingsFetchTime = 0;
-}
-
 // server/routes/pool.ts
+init_estateConfig();
 var router9 = Router10();
 var ZODIAC_BASE = "https://prod.zodiac-io.com";
 var IAQUALINK_BASE = "https://r-api.iaqualink.net";
@@ -23913,8 +24030,8 @@ router9.post("/", requireAuth2, async (req, res) => {
     res.status(500).json({ success: false, ...safeErrorJson(error) });
   }
 });
-var LAT = 34.0522;
-var LON = -118.2437;
+var LAT = Number(process.env.HOME_LAT) || 34.0522;
+var LON = Number(process.env.HOME_LNG) || -118.2437;
 var POOL_HEATER_ENTITY = "switch.pool_heater";
 var SPA_HEATER_ENTITY = "switch.spa_heater";
 var POOL_CLIMATE_ENTITY = "climate.pool";
@@ -24313,8 +24430,9 @@ Please verify if this is intentional and turn it off if not needed.
 var pool_default = router9;
 
 // server/routes/generac.ts
-import { Router as Router11 } from "express";
+init_auth2();
 init_fetchWithTimeout();
+import { Router as Router11 } from "express";
 var router10 = Router11();
 var API_BASE = "https://app.mobilelinkgen.com/api";
 var FORM_ENCODED = "application/x-www-form-urlencoded;charset=UTF-8";
@@ -24530,11 +24648,12 @@ router10.get("/", requireAuth2, async (req, res) => {
 var generac_default = router10;
 
 // server/routes/automation.ts
-import { Router as Router12 } from "express";
+init_auth2();
 init_auditLog();
 init_fetchWithTimeout();
 init_db2();
 init_helpers();
+import { Router as Router12 } from "express";
 var router11 = Router12();
 async function callHA2(body) {
   const haUrl = process.env.HA_URL;
@@ -24954,12 +25073,13 @@ Fix: Check repository permissions and GITHUB_TOKEN.`;
 var automation_default = router11;
 
 // server/routes/energySavings.ts
-import { Router as Router13 } from "express";
+init_auth2();
 init_auth();
 init_auditLog();
 init_fetchWithTimeout();
 init_db2();
 init_haWebSocket();
+import { Router as Router13 } from "express";
 var router12 = Router13();
 var CLOSET_MAX_MS = 30 * 60 * 1e3;
 var BATHROOM_MAX_MS = 15 * 60 * 1e3;
@@ -26630,12 +26750,14 @@ var notion_default = router14;
 
 // server/routes/broadcast.ts
 init_helpers();
-import { Router as Router16 } from "express";
+init_castBroadcast();
 init_fetchWithTimeout();
 init_circuit_breaker();
 init_error_sanitizer();
+init_auth2();
 init_schoolMorningBriefing();
 init_haWebSocket();
+import { Router as Router16 } from "express";
 var router15 = Router16();
 function getMorningSpeakers() {
   if (process.env.JANUS_BROADCAST_SPEAKERS) {
@@ -26738,8 +26860,8 @@ async function maybeAlertSilentDropStreak(dateStr) {
 }
 var SCHOOL_YEAR_START = { month: 8, day: 24 };
 var SCHOOL_YEAR_END = { month: 6, day: 3 };
-var BROADCAST_HOME_LAT = 34.0522;
-var BROADCAST_HOME_LNG = -118.2437;
+var BROADCAST_HOME_LAT = Number(process.env.HOME_LAT) || 34.0522;
+var BROADCAST_HOME_LNG = Number(process.env.HOME_LNG) || -118.2437;
 function googleConditionToWords(type) {
   switch (type) {
     case "CLEAR":
@@ -27833,6 +27955,7 @@ router16.post("/accountability", async (_req, res) => {
 var followup_default = router16;
 
 // server/routes/reports.ts
+init_auth2();
 init_helpers();
 import { Router as Router18 } from "express";
 
@@ -29525,13 +29648,19 @@ router17.post("/morning-weather", requireAuth2, async (_req, res) => {
       console.log("[morning-weather] Skipping: OPENROUTER_API_KEY not configured");
       return res.status(200).json({ ok: true, skipped: true, reason: "openrouter_api_key_not_configured", period: mwDate });
     }
+    if (!process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+      console.log("[morning-weather] Skipping: GOOGLE_SERVICE_ACCOUNT_KEY not configured");
+      return res.status(200).json({ ok: true, skipped: true, reason: "google_service_account_not_configured", period: mwDate });
+    }
     const saKey = getSaKey();
+    const { getEstateTimezone: getEstateTimezone2 } = await Promise.resolve().then(() => (init_estateConfig(), estateConfig_exports));
+    const estateTz = getEstateTimezone2();
     const today = (/* @__PURE__ */ new Date()).toLocaleDateString("en-US", {
       weekday: "long",
       month: "long",
       day: "numeric",
       year: "numeric",
-      timeZone: "America/Los_Angeles"
+      timeZone: estateTz
     });
     const CHILDREN = [
       {
@@ -30025,9 +30154,11 @@ async function syncConcerts(db2) {
       size: "100",
       sort: "date,asc"
     }));
+    const lat = process.env.HOME_LAT || "34.0522";
+    const lng = process.env.HOME_LNG || "-118.2437";
     const geoQuery = {
       classificationName: "music",
-      latlong: "34.0522,-118.2437",
+      latlong: `${lat},${lng}`,
       radius: "30",
       unit: "miles",
       startDateTime: startDate,
@@ -30069,9 +30200,11 @@ async function syncConcerts(db2) {
     console.log(`[syncConcerts] Ticketmaster: ${allConcerts.length} raw events`);
   }
   if (sgKey) {
+    const lat = process.env.HOME_LAT || "34.0522";
+    const lng = process.env.HOME_LNG || "-118.2437";
     const sgQueries = [
-      { "taxonomies.name": "concert", lat: "34.0522", lon: "-118.2437", range: "30mi", per_page: "200", "datetime_utc.gte": now.toISOString().slice(0, 10), "datetime_utc.lte": endDateSg, sort: "datetime_utc.asc" },
-      { "taxonomies.name": "concert", lat: "34.0522", lon: "-118.2437", range: "30mi", per_page: "200", "datetime_utc.gte": now.toISOString().slice(0, 10), "datetime_utc.lte": endDateSg, sort: "score.desc" }
+      { "taxonomies.name": "concert", lat, lon: lng, range: "30mi", per_page: "200", "datetime_utc.gte": now.toISOString().slice(0, 10), "datetime_utc.lte": endDateSg, sort: "datetime_utc.asc" },
+      { "taxonomies.name": "concert", lat, lon: lng, range: "30mi", per_page: "200", "datetime_utc.gte": now.toISOString().slice(0, 10), "datetime_utc.lte": endDateSg, sort: "score.desc" }
     ];
     const beforeSg = allConcerts.length;
     for (const q of sgQueries) {
@@ -30480,11 +30613,13 @@ async function syncShows(db2) {
   if (sgKey) {
     const sgShowTypes = ["theater", "broadway_tickets_national", "comedy", "family"];
     const beforeSg = allShows.length;
+    const lat = process.env.HOME_LAT || "34.0522";
+    const lng = process.env.HOME_LNG || "-118.2437";
     for (const taxo of sgShowTypes) {
       const events = await fetchSeatGeekEvents({
         "taxonomies.name": taxo,
-        lat: "34.0522",
-        lon: "-118.2437",
+        lat,
+        lon: lng,
         range: "30mi",
         per_page: "100",
         "datetime_utc.gte": now.toISOString().slice(0, 10),
@@ -31334,8 +31469,8 @@ var entertainment_default = router18;
 init_auditLog();
 import { Router as Router20 } from "express";
 var router19 = Router20();
-var HOME_LAT3 = 34.0522;
-var HOME_LNG3 = -118.2437;
+var HOME_LAT3 = Number(process.env.HOME_LAT) || 34.0522;
+var HOME_LNG3 = Number(process.env.HOME_LNG) || -118.2437;
 var cachedData = null;
 var CACHE_TTL_MS3 = 5 * 60 * 1e3;
 router19.post("/api/weather-dashboard", async (req, res) => {
@@ -31544,13 +31679,14 @@ router19.post("/api/weather-forecast", async (_req, res) => {
 var weather_default = router19;
 
 // server/routes/monitoring.ts
+init_auth2();
+init_storage();
+init_auditLog();
+init_helpers();
 import { Router as Router21 } from "express";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { createHash as createHash2 } from "crypto";
-init_storage();
-init_auditLog();
-init_helpers();
 
 // shared/scheduleWindows.ts
 var GYM_SCHEDULE = {
@@ -31625,6 +31761,7 @@ function findAvClosetTempSensor(states, preferredEntityId) {
 }
 
 // server/routes/monitoring.ts
+init_estateConfig();
 var execFileAsync = promisify(execFile);
 var router20 = Router21();
 var GA_SDK_DEDUP_HOURS = 6;
@@ -34177,9 +34314,10 @@ var scraping_default = router21;
 // server/routes/shopping.ts
 init_storage();
 init_auth();
-import { Router as Router23 } from "express";
+init_auth2();
 init_auditLog();
 init_helpers();
+import { Router as Router23 } from "express";
 var router22 = Router23();
 function fetchT8(input, init, timeoutMs = 3e4) {
   const controller = new AbortController();
@@ -34459,15 +34597,16 @@ ${details.snippet}
     res.json({ processed, total_found: allMessageIds.size });
   } catch (e) {
     console.error("package-arrival-monitor error:", e);
-    res.status(500).json({ error: e.message });
+    res.status(200).json({ skipped: true, reason: "error", error: e.message });
   }
 });
 var shopping_default = router22;
 
 // server/routes/admin.ts
 init_storage();
-import { Router as Router24 } from "express";
+init_errorSanitizer();
 init_auditLog();
+import { Router as Router24 } from "express";
 
 // server/lib/failed-jobs-constants.ts
 var FAILED_JOBS_MAX_ATTEMPTS = 5;
@@ -35196,8 +35335,9 @@ var admin_default = router23;
 init_storage();
 init_supabase();
 init_helpers();
-import { Router as Router25 } from "express";
+init_auth2();
 init_auditLog();
+import { Router as Router25 } from "express";
 var router24 = Router25();
 var ADMIN_EMAIL5 = process.env.ADMIN_EMAIL || "admin@example.com";
 var GMAIL_API2 = "https://gmail.googleapis.com/gmail/v1/users/me";
@@ -36707,8 +36847,9 @@ router26.post("/search", requireAuth, async (req, res) => {
 var perplexity_default = router26;
 
 // server/routes/fortigate.ts
-import { Router as Router28 } from "express";
+init_auth2();
 init_fortigate();
+import { Router as Router28 } from "express";
 
 // server/deviceClassifier.ts
 init_deviceRulesCache();
@@ -39221,6 +39362,7 @@ router27.get("/api/fortigate/dns-blocks", requireAuth2, requireAdmin2, async (re
 var fortigate_default = router27;
 
 // server/routes/wireless.ts
+init_auth2();
 import { Router as Router29 } from "express";
 init_db2();
 init_auditLog();
@@ -40006,8 +40148,9 @@ router28.get("/api/wireless/events", requireAuth2, requireAdmin3, async (req, re
 var wireless_default = router28;
 
 // server/routes/network-devices.ts
-import { Router as Router30 } from "express";
+init_auth2();
 init_network_devices();
+import { Router as Router30 } from "express";
 var router29 = Router30();
 function requireAdmin4(req, res, next) {
   if (req.userRole !== "admin") {
@@ -41406,8 +41549,10 @@ router33.post("/api/deploy/webhook", async (req, res) => {
 var deploy_default = router33;
 
 // server/routes/electricity.ts
-import { Router as Router35 } from "express";
+init_auth2();
 init_auditLog();
+init_errorSanitizer();
+import { Router as Router35 } from "express";
 
 // server/lib/ladwpRates.ts
 var RATE_SCHEDULE = [
@@ -43519,8 +43664,8 @@ router34.get("/live-rate", requireAuth2, async (_req, res) => {
 var INSIGHTS_MIN_DAYS = 14;
 var INSIGHTS_TARGET_DAYS = 30;
 var INSIGHTS_CONTEXT_CACHE_MS = 30 * 60 * 1e3;
-var HOME_LAT4 = 34.0522;
-var HOME_LNG4 = -118.2437;
+var HOME_LAT4 = Number(process.env.HOME_LAT) || 34.0522;
+var HOME_LNG4 = Number(process.env.HOME_LNG) || -118.2437;
 var insightsContextCache = null;
 function addIsoDays(date2, days) {
   return new Date((/* @__PURE__ */ new Date(`${date2}T00:00:00Z`)).getTime() + days * 864e5).toISOString().slice(0, 10);
@@ -43830,11 +43975,13 @@ router34.patch("/insights/:findingId/investigation", requireAuth2, requireElectr
 var electricity_default = router34;
 
 // server/routes/water.ts
-import { Router as Router36 } from "express";
+init_auth2();
 init_auditLog();
+init_errorSanitizer();
 init_fetchWithTimeout();
 init_haWebSocket();
 init_storage();
+import { Router as Router36 } from "express";
 
 // server/lib/ladwpWater.ts
 var GALLONS_PER_HCF = 748;
@@ -44890,9 +45037,10 @@ router37.post("/api/updates-autogen", async (req, res) => {
 var updates_autogen_default = router37;
 
 // server/routes/irrigation.ts
-import { Router as Router39 } from "express";
+init_auth2();
 init_storage();
 init_irrigationFlow();
+import { Router as Router39 } from "express";
 var router38 = Router39();
 function requireAdmin5(req, res, next) {
   if (req.userRole !== "admin") {
@@ -47031,9 +47179,12 @@ ${payment.confirmation_ref ? `<p>Zelle Confirmation: ${payment.confirmation_ref}
 var time_default = router39;
 
 // server/routes/estate.ts
-import { Router as Router41 } from "express";
+init_estateConfig();
 init_db2();
+init_auth2();
 init_auth();
+init_homeAssistant();
+import { Router as Router41 } from "express";
 var router40 = Router41();
 router40.get("/config", async (_req, res) => {
   try {
@@ -47162,6 +47313,7 @@ router40.get("/ha/discover-entities", requireAuth2, async (_req, res) => {
 var estate_default = router40;
 
 // server/routes.ts
+init_auth2();
 var SUPABASE_COMPAT_MAP = {
   "home-assistant-proxy": "/api/home-assistant",
   "verkada-proxy": "/api/verkada",
@@ -47846,6 +47998,7 @@ init_auditLog();
 init_correlation();
 import cron from "node-cron";
 init_fortigate();
+init_estateConfig();
 var BASE_URL2 = process.env.BASE_URL || `http://localhost:${process.env.PORT || 5e3}`;
 async function triggerRoute(path12, body = {}) {
   const t0 = Date.now();
@@ -48023,11 +48176,11 @@ function initCronJobs() {
   cron.schedule("0 9 * * 1,3,5", () => {
     console.log("[cron] Stopping Morning Sauna after 30 minutes (9:00 AM PT Mon/Wed/Fri)");
     triggerRoute("/api/automation/morning-sauna/stop");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("20 9 * * 2,4", () => {
     console.log("[cron] Stopping Morning Sauna after 30 minutes (9:20 AM PT Tue/Thu)");
     triggerRoute("/api/automation/morning-sauna/stop");
-  }, { timezone: "America/Los_Angeles" });
+  }, { timezone: tz });
   cron.schedule("*/30 * * * *", () => {
     triggerRoute("/api/pool/temp-monitor");
   }, { timezone: tz });
@@ -48055,7 +48208,7 @@ function initCronJobs() {
     triggerRoute("/cron/rina-monday");
   }, { timezone: tz });
   cron.schedule("0 7 * * *", () => {
-    if (!process.env.OPENROUTER_API_KEY) return;
+    if (!process.env.OPENROUTER_API_KEY || !process.env.GOOGLE_SERVICE_ACCOUNT_KEY) return;
     console.log("[cron] Running Morning Weather Email (7:00 AM daily)");
     triggerRoute("/api/reports/morning-weather");
   }, { timezone: tz });

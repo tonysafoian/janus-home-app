@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.20
+
+- **Real Home Assistant User Role Mapping (WebSocket `config/auth/list`)**: Janus no longer treats all Home Assistant users as administrators. Ingress sessions query the real Home Assistant user role over the Core WebSocket API, verifying `is_owner`, `is_admin`, and `group_ids` (`system-admin`) with fallback to member role for non-admins.
+- **Dynamic Estate Timezone, Location & GPS Decoupling**: Completely decoupled timezone and GPS coordinates from code. Weather, entertainment, broadcast, and crons dynamically query `/api/estate/config` or use environment fallbacks, replacing hardcoded California coordinates and `America/Los_Angeles` timestamps.
+- **Fail-Safe Cron Monitors & Zero 500 Sweeps**: Protected package arrival and morning weather crons from returning 500 when external Google credentials or keys are not configured or expired, returning graceful skipped statuses.
+- **Add-on Schema & DOCS Alignment**: Synchronized `janus/config.yaml` schema with `janus/DOCS.md`, adding `anthropic_api_key`, `openai_api_key`, `verkada_api_key`, `verkada_org_id`, `fortigate_host`, `fortigate_api_key`, `ruckus_host`, `wati_phone_number`, and `alert_phone_number`.
+- **Zero Personal Names In Code/Comments**: Scrubbed all remaining personal name references and internal room/device identifiers across skill files, tests, and schema comments.
+
 ## 1.0.19
 
 - **Ingress Anti-Spoofing & HA RBAC**: Required authentic `SUPERVISOR_TOKEN` to accept `X-Remote-User-*` headers (preventing header spoofing in standalone environments); added `panel_admin: true` to `janus/config.yaml` to restrict sidebar access to Home Assistant administrators.

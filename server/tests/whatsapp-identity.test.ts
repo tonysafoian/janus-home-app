@@ -3,31 +3,31 @@ import { query } from "../lib/db";
 async function verifyWhatsAppIdentityResolution() {
   const results: { test: string; passed: boolean; detail: string }[] = [];
 
-  const { rows: tonyHM } = await query(
+  const { rows: adminHM } = await query(
     `SELECT display_name, whatsapp_number, role FROM household_members WHERE email = 'admin@example.com'`
   );
   results.push({
     test: "Admin exists in household_members with phone",
-    passed: tonyHM.length === 1 && tonyHM[0].whatsapp_number === "15550100",
-    detail: tonyHM.length ? `phone=${tonyHM[0].whatsapp_number}, role=${tonyHM[0].role}` : "NOT FOUND",
+    passed: adminHM.length === 1 && adminHM[0].whatsapp_number === "15550100",
+    detail: adminHM.length ? `phone=${adminHM[0].whatsapp_number}, role=${adminHM[0].role}` : "NOT FOUND",
   });
 
-  const { rows: tonyProfile } = await query(
+  const { rows: adminProfile } = await query(
     `SELECT phone_number, user_id FROM profiles WHERE user_id = 'google_sample_admin_uid'`
   );
   results.push({
     test: "Admin exists in profiles with phone",
-    passed: tonyProfile.length === 1 && tonyProfile[0].phone_number === "15550100",
-    detail: tonyProfile.length ? `phone=${tonyProfile[0].phone_number}` : "NOT FOUND",
+    passed: adminProfile.length === 1 && adminProfile[0].phone_number === "15550100",
+    detail: adminProfile.length ? `phone=${adminProfile[0].phone_number}` : "NOT FOUND",
   });
 
-  const { rows: tonyRole } = await query(
+  const { rows: adminRole } = await query(
     `SELECT role FROM user_roles WHERE user_id = 'google_sample_admin_uid'`
   );
   results.push({
     test: "Admin has admin role in user_roles",
-    passed: tonyRole.length === 1 && tonyRole[0].role === "admin",
-    detail: tonyRole.length ? `role=${tonyRole[0].role}` : "NOT FOUND",
+    passed: adminRole.length === 1 && adminRole[0].role === "admin",
+    detail: adminRole.length ? `role=${adminRole[0].role}` : "NOT FOUND",
   });
 
   const familyMembers = [

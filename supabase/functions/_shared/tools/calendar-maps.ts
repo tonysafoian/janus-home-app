@@ -94,17 +94,19 @@ function normalizeToPacific(dt: string): string {
 
 // ─── Calendar Events ──────────────────────────────────────────────────────────
 
+const PRIMARY_CALENDAR_EMAIL = process.env.ADMIN_EMAIL || process.env.PRIMARY_CALENDAR_EMAIL || "admin@household.local";
+
 export async function executeGetCalendarEvents(calendarId?: string, timeMin?: string, timeMax?: string, maxResults?: number): Promise<string> {
   try {
-    const effectiveCalId = calendarId || "tony@household.local";
+    const effectiveCalId = calendarId || PRIMARY_CALENDAR_EMAIL;
     const timeMinVal = timeMin || new Date().toISOString();
     const timeMaxVal = timeMax || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     const perCalMax = Math.min(maxResults || 25, 50);
 
-    const isTonyDefault = !calendarId || effectiveCalId === "tony@household.local";
+    const isPrimaryDefault = !calendarId || effectiveCalId.toLowerCase() === PRIMARY_CALENDAR_EMAIL.toLowerCase();
     let calendarIds: string[] = [effectiveCalId];
 
-    if (isTonyDefault) {
+    if (isPrimaryDefault) {
       try {
         const listData = await callCalendarProxy({ action: "list-calendars", calendarId: effectiveCalId });
         if (listData.success && Array.isArray(listData.calendars)) {
@@ -130,7 +132,7 @@ export async function executeGetCalendarEvents(calendarId?: string, timeMin?: st
         if (!data.success) return [];
         return (data.events || []).map((e) => {
           const myAttendee = e.attendees?.find(
-            (a) => a.email?.toLowerCase() === "tony@household.local" || a.self === true
+            (a) => a.email?.toLowerCase() === PRIMARY_CALENDAR_EMAIL.toLowerCase() || a.self === true
           );
           const myStatus = myAttendee?.responseStatus || "accepted";
           if (myStatus === "declined") return null;
@@ -173,33 +175,32 @@ export async function executeGetCalendarEvents(calendarId?: string, timeMin?: st
 
 export async function executeCreateCalendarEvent(calendarId?: string, title?: string, start?: string, end?: string, description?: string, location?: string, attendees?: string[]): Promise<string> {
   try {
-    const effectiveCalId = calendarId || "tony@household.local";
+    const effectiveCalId = calendarId || PRIMARY_CALENDAR_EMAIL;
 
     const normalizedStart = start ? normalizeToPacific(start) : start;
     const normalizedEnd = end ? normalizeToPacific(end) : end;
 
-    // Hardcoded conflict guard: ALWAYS check Tony's availability before creating
-    const TONY_EMAIL = "tony@household.local";
-    const isTonysCalendar = effectiveCalId.toLowerCase() === TONY_EMAIL;
-    const involvesTony = isTonysCalendar || (attendees || []).some(a => a.toLowerCase() === TONY_EMAIL);
+    // Conflict guard: ALWAYS check primary availability before creating
+    const isPrimaryCalendar = effectiveCalId.toLowerCase() === PRIMARY_CALENDAR_EMAIL.toLowerCase();
+    const involvesPrimary = isPrimaryCalendar || (attendees || []).some(a => a.toLowerCase() === PRIMARY_CALENDAR_EMAIL.toLowerCase());
 
-    if (involvesTony && normalizedStart && normalizedEnd) {
+    if (involvesPrimary && normalizedStart && normalizedEnd) {
       try {
         const availData = await callCalendarProxy({
           action: "check-availability",
-          emails: [TONY_EMAIL],
+          emails: [PRIMARY_CALENDAR_EMAIL],
           timeMin: normalizedStart,
           timeMax: normalizedEnd,
         });
         if (availData.success && availData.availability) {
-          const tonyBusy = availData.availability[TONY_EMAIL] || availData.availability[Object.keys(availData.availability)[0]];
-          if (Array.isArray(tonyBusy) && tonyBusy.length > 0) {
-            const conflicts = tonyBusy.map((b) => `${b.start} – ${b.end}`).join(", ");
+          const primaryBusy = availData.availability[PRIMARY_CALENDAR_EMAIL] || availData.availability[Object.keys(availData.availability)[0]];
+          if (Array.isArray(primaryBusy) && primaryBusy.length > 0) {
+            const conflicts = primaryBusy.map((b) => `${b.start} – ${b.end}`).join(", ");
             return JSON.stringify({
               success: false,
               blocked_by_conflict: true,
-              conflicts: tonyBusy,
-              message: `CANNOT CREATE EVENT: Tony has ${tonyBusy.length} conflict(s) during this time: ${conflicts}. You MUST find alternative times. Use check_availability to find open slots, then present 2-3 options to Tony.`,
+              conflicts: primaryBusy,
+              message: `CANNOT CREATE EVENT: Primary attendee has ${primaryBusy.length} conflict(s) during this time: ${conflicts}. You MUST find alternative times. Use check_availability to find open slots, then present 2-3 options.`,
             });
           }
         }
@@ -239,7 +240,7 @@ export async function executeCreateCalendarEvent(calendarId?: string, title?: st
 export async function executeDeleteCalendarEvent(calendarId?: string, eventId?: string): Promise<string> {
   try {
     if (!eventId) return "Error: event_id is required.";
-    const effectiveCalId = calendarId || "tony@household.local";
+    const effectiveCalId = calendarId || PRIMARY_CALENDAR_EMAIL;
     const data = await callCalendarProxy({ action: "delete-event", calendarId: effectiveCalId, eventId });
     if (!data.success) return `Failed to delete event: ${data.error || "unknown"}`;
     return JSON.stringify({ success: true, eventId, calendarId: effectiveCalId, confirmation: `Event ${eventId} deleted from ${effectiveCalId}.` });

@@ -3,8 +3,8 @@
 // keep the frontend (thermostats view) and backend (monitor + logger) matching the
 // exact same entity and thresholds.
 
-export const AV_CLOSET_WARN_TEMP = 90; // °F — email Tony, Sandra & Jesse above this
-export const AV_CLOSET_CRITICAL_TEMP = 100; // °F — WhatsApp Tony above this
+export const AV_CLOSET_WARN_TEMP = 90; // °F — email household admins above this
+export const AV_CLOSET_CRITICAL_TEMP = 100; // °F — WhatsApp admin above this
 
 // Shared copy so the persistent AV Closet card reads the same on every page,
 // whether the Govee H5103 sensor has been discovered in HA yet or not.

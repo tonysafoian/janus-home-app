@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { timingSafeEqual } from 'node:crypto';
 import { verifyToken } from '../auth.js';
+import { isHAUserAdminSync } from '../lib/haWebSocket.js';
 
 export interface AuthenticatedRequest extends Request {
   userId?: string;
@@ -63,7 +64,13 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
   const haUserId = (req.headers['x-remote-user-id'] as string) || (req.headers['x-ingress-user-id'] as string);
   if (isHAEnvironment && haUserId) {
     const haAdminHeader = req.headers['x-remote-user-is-admin'];
-    const isAdmin = haAdminHeader === undefined || haAdminHeader === '' || (String(haAdminHeader).toLowerCase() !== 'false' && haAdminHeader !== '0');
+    let isAdmin = false;
+    if (haAdminHeader !== undefined && haAdminHeader !== '') {
+      isAdmin = String(haAdminHeader).toLowerCase() === 'true' || haAdminHeader === '1';
+    } else {
+      const haUserName = (req.headers['x-remote-user-name'] as string) || (req.headers['x-remote-user-display-name'] as string);
+      isAdmin = isHAUserAdminSync(haUserId, haUserName);
+    }
     req.userId = `ha:${haUserId}`;
     req.userRole = isAdmin ? 'admin' : 'member';
     next();

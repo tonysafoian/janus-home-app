@@ -61,40 +61,38 @@ the result when the user asked for a specific outcome.
 
 ## Printers
 
-| Device | Entity ID | Notes |
-|--------|-----------|-------|
-| Sandra's Office Printer | sensor.hp_color_laserjet_pro_mfp_3301_2 | Status: idle/printing/stopped |
-| — Black Toner | sensor.hp_color_laserjet_pro_mfp_3301_black_cartridge_2 | |
-| — Cyan Toner | sensor.hp_color_laserjet_pro_mfp_3301_cyan_cartridge_2 | |
-| — Magenta Toner | sensor.hp_color_laserjet_pro_mfp_3301_magenta_cartridge_2 | |
-| — Yellow Toner | sensor.hp_color_laserjet_pro_mfp_3301_yellow_cartridge_2 | |
-| TigerDen Printer | sensor.hp_color_laserjet_pro_mfp_3301 | Status: idle/printing/stopped |
-| — Black Toner | sensor.hp_color_laserjet_pro_mfp_3301_black_cartridge | |
-| — Cyan Toner | sensor.hp_color_laserjet_pro_mfp_3301_cyan_cartridge | |
-| — Magenta Toner | sensor.hp_color_laserjet_pro_mfp_3301_magenta_cartridge | |
-| — Yellow Toner | sensor.hp_color_laserjet_pro_mfp_3301_yellow_cartridge | |
+| Office Printer | sensor.office_printer | Status: idle/printing/stopped |
+| — Black Toner | sensor.office_printer_black_cartridge | |
+| — Cyan Toner | sensor.office_printer_cyan_cartridge | |
+| — Magenta Toner | sensor.office_printer_magenta_cartridge | |
+| — Yellow Toner | sensor.office_printer_yellow_cartridge | |
+| Den Printer | sensor.den_printer | Status: idle/printing/stopped |
+| — Black Toner | sensor.den_printer_black_cartridge | |
+| — Cyan Toner | sensor.den_printer_cyan_cartridge | |
+| — Magenta Toner | sensor.den_printer_magenta_cartridge | |
+| — Yellow Toner | sensor.den_printer_yellow_cartridge | |
 
 ## Media Players
 
 | Device | Entity ID |
 |--------|-----------|
-| FAM TV | media_player.fam_tv |
+| Main TV | media_player.main_tv |
 | Kitchen TV | media_player.kitchen_tv |
 | Gym TV | media_player.gym_tv |
 | Family Room TV | media_player.family_room_tv |
-| Tony's Office TV | media_player.tony_office_tv |
+| Office TV | media_player.office_tv |
 | Theater TV | media_player.theater_tv |
-| Theater Receiver | media_player.theater_reciever_2 (inputs: PS5, Apple TV, Switch, GoogleTV, etc.) |
-| Glam Room Speaker | media_player.glam_room_speaker |
-| Tony's Office Speaker | media_player.tonys_office_speaker |
+| Theater Receiver | media_player.theater_receiver (inputs: PS5, Apple TV, Switch, GoogleTV, etc.) |
+| Lounge Speaker | media_player.lounge_speaker |
+| Office Speaker | media_player.office_speaker |
 | Kitchen Display | media_player.kitchen_display_1 |
-| Tony's Closet Display | media_player.tonys_closet_display |
-| Emme's Room Speaker | media_player.emme_s_room_speaker |
+| Primary Closet Display | media_player.primary_closet_display |
+| Bedroom 1 Speaker | media_player.bedroom_1_speaker |
 | Master Bedroom Speaker | media_player.master_bedroom_speaker |
 | Playroom Speaker | media_player.playroom_speaker |
 | Bathroom Speaker | media_player.bathroom_speaker |
-| TigerDen Speaker | media_player.tigerden |
+| Den Speaker | media_player.den_speaker |
 | Family Room Display | media_player.family_room_display |
 | Gym Speaker | media_player.gym_speaker |
-| Lana's Closet Speaker | media_player.lanas_closet_speaker |
+| Dressing Room Speaker | media_player.dressing_room_speaker |
 | Main Rack Speaker | media_player.main_rack_speaker |

@@ -36,12 +36,12 @@ const early = composeSchoolMorningAnnouncement({
   weatherClause: "it's 58 and cloudy out — grab a sweater.",
 });
 const late = composeSchoolMorningAnnouncement({ slot: "730am" });
-assert(early.startsWith("Good morning, Emme and Isla."), "6:50 is not personalized");
+assert(early.startsWith("Good morning!"), "6:50 does not start with greeting");
 assert(early.includes("58") && early.includes("sweater"), "6:50 lacks weather/clothing guidance");
 assert(early.includes("be downstairs by 7:30"), "6:50 lacks the practical deadline");
 assert(!early.includes("world stories") && !late.includes("Markets"), "wake-up still includes non-actionable briefing content");
 assert(
-  late.includes("leaving in five minutes or less") && late.endsWith("everything you need for school."),
+  late.includes("leaving in five minutes or less") && late.includes("bring everything you need"),
   "7:30 does not end with departure instruction",
 );
 const totalWords = countBriefingWords(early, late);
@@ -56,7 +56,7 @@ assert(
   "weather failure suppressed wake-up essentials",
 );
 const totalLateFailure = composeSchoolMorningAnnouncement({ slot: "730am" });
-assert(totalLateFailure.includes("come downstairs"), "7:30 departure instruction is missing");
+assert(totalLateFailure.includes("head downstairs"), "7:30 departure instruction is missing");
 
 const consecutiveGreetings = ["2026-09-08", "2026-09-09", "2026-09-10"].map((dateKey) =>
   composeSchoolMorningAnnouncement({ slot: "650am", dateKey }),

@@ -7,8 +7,8 @@ import { format, parseISO } from 'date-fns';
 import { apiClient } from '@/lib/apiClient';
 
 
-const LAT = 34.0522;
-const LON = -118.2437;
+const DEFAULT_LAT = 34.0522;
+const DEFAULT_LON = -118.2437;
 
 interface DayForecast {
   date: string;
@@ -73,6 +73,17 @@ function pollenColor(category: string): string {
 
 export function WeatherStrip() {
   const navigate = useNavigate();
+
+  const { data: estateConfig } = useQuery<{ latitude?: number; longitude?: number }>({
+    queryKey: ['estate-config'],
+    queryFn: async () => {
+      const res = await apiClient.get('/api/estate/config');
+      return res as any;
+    },
+    staleTime: 60 * 60_000,
+  });
+  const LAT = estateConfig?.latitude ?? DEFAULT_LAT;
+  const LON = estateConfig?.longitude ?? DEFAULT_LON;
 
   const { data: weatherData, isLoading: loading } = useQuery({
     queryKey: ['weather-strip'],

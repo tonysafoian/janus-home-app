@@ -1802,14 +1802,22 @@ router.post("/morning-weather", requireAuth, async (_req: Request, res: Response
       return res.status(200).json({ ok: true, skipped: true, reason: "openrouter_api_key_not_configured", period: mwDate });
     }
 
+    if (!process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+      console.log("[morning-weather] Skipping: GOOGLE_SERVICE_ACCOUNT_KEY not configured");
+      return res.status(200).json({ ok: true, skipped: true, reason: "google_service_account_not_configured", period: mwDate });
+    }
+
     const saKey = getSaKey();
+
+    const { getEstateTimezone } = await import("../lib/estateConfig.js");
+    const estateTz = getEstateTimezone();
 
     const today = new Date().toLocaleDateString("en-US", {
       weekday: "long",
       month: "long",
       day: "numeric",
       year: "numeric",
-      timeZone: "America/Los_Angeles",
+      timeZone: estateTz,
     });
 
     const CHILDREN = [

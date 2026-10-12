@@ -245,12 +245,12 @@ export function initCronJobs(): void {
   cron.schedule('0 9 * * 1,3,5', () => {
     console.log('[cron] Stopping Morning Sauna after 30 minutes (9:00 AM PT Mon/Wed/Fri)');
     triggerRoute('/api/automation/morning-sauna/stop');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
   cron.schedule('20 9 * * 2,4', () => {
     console.log('[cron] Stopping Morning Sauna after 30 minutes (9:20 AM PT Tue/Thu)');
     triggerRoute('/api/automation/morning-sauna/stop');
-  }, { timezone: 'America/Los_Angeles' });
+  }, { timezone: tz });
 
   cron.schedule('*/30 * * * *', () => {
     triggerRoute('/api/pool/temp-monitor');
@@ -292,7 +292,7 @@ export function initCronJobs(): void {
   }, { timezone: tz });
 
   cron.schedule('0 7 * * *', () => {
-    if (!process.env.OPENROUTER_API_KEY) return;
+    if (!process.env.OPENROUTER_API_KEY || !process.env.GOOGLE_SERVICE_ACCOUNT_KEY) return;
     console.log('[cron] Running Morning Weather Email (7:00 AM daily)');
     triggerRoute('/api/reports/morning-weather');
   }, { timezone: tz });

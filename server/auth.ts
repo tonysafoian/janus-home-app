@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { storage } from "./storage";
 import "./types";
 import { query } from "./lib/db.js";
+import { isHAUserAdminSync } from "./lib/haWebSocket.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET || (() => {
   console.warn("[AUTH] WARNING: Neither JWT_SECRET nor SESSION_SECRET was configured. Generating secure random secret.");
@@ -72,7 +73,12 @@ export function getAuthUser(req: Request): AuthUser | null {
   if (isHAEnvironment && haUserId) {
     const haUserName = (req.headers['x-remote-user-name'] as string) || (req.headers['x-remote-user-display-name'] as string) || 'HA User';
     const haAdminHeader = req.headers['x-remote-user-is-admin'];
-    const isAdmin = haAdminHeader === undefined || haAdminHeader === '' || (String(haAdminHeader).toLowerCase() !== 'false' && haAdminHeader !== '0');
+    let isAdmin = false;
+    if (haAdminHeader !== undefined && haAdminHeader !== '') {
+      isAdmin = String(haAdminHeader).toLowerCase() === 'true' || haAdminHeader === '1';
+    } else {
+      isAdmin = isHAUserAdminSync(haUserId, haUserName);
+    }
     return {
       userId: `ha:${haUserId}`,
       email: `${haUserName.toLowerCase().replace(/[^a-z0-9]/g, '.')}@homeassistant.local`,
