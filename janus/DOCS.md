@@ -38,6 +38,7 @@ All options in the add-on configuration are optional. API keys are masked as pas
 | `computer_admin_token` | password | `""` | Optional high-entropy token for machine agents (`X-Computer-Token`). |
 | `home_location` | string | `""` | Estate or home label (e.g. "Main Residence"). Falls back to Home Assistant location name. |
 | `home_lat`, `home_lng` | float | `""` | Estate GPS coordinates for weather and vehicle distance tracking. Falls back to Home Assistant Core coordinates. |
+| `electricity_rate_per_kwh` | float | `""` | Custom flat electricity rate in $/kWh (e.g. `0.22`). When set, Janus calculates bills using this rate instead of tiered utility defaults. |
 | `staff_emails` | string | `""` | Comma-separated list of household staff email addresses for operational notifications. |
 | `assistant_email` | string | `""` | Estate manager / executive assistant email address. |
 | `enable_goaccess` | boolean | `false` | Enables real-time GoAccess web log analytics polling if installed on host. |

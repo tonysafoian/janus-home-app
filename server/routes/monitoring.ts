@@ -292,9 +292,18 @@ async function logRun(db: any, automationId: string, status: string, output: Rec
 router.post('/api/internet-health-monitor', requireAuth, async (req: any, res: any) => {
   try {
     const db = storage;
-    const { rows: [automation] } = await db.query(`SELECT id, is_active FROM family_automations WHERE name = 'Internet Health Monitor' LIMIT 1`);
-    if (!automation) return res.status(200).json({ skipped: true, reason: 'Automation not found in DB' });
-    if (!automation.is_active) return res.json({ skipped: true, reason: 'Automation is disabled' });
+    let { rows: [automation] } = await db.query(`SELECT id, is_active FROM family_automations WHERE name = 'Internet Health Monitor' OR automation_type = 'internet-health' LIMIT 1`);
+    if (!automation) {
+      try {
+        const ins = await db.query(
+          `INSERT INTO family_automations (name, automation_type, schedule, is_active, description)
+           VALUES ('Internet Health Monitor', 'internet-health', '*/15 * * * *', true, 'Monitors internet via HA Speedtest')
+           RETURNING id, is_active`
+        );
+        automation = ins.rows[0];
+      } catch {}
+    }
+    if (automation && !automation.is_active) return res.json({ skipped: true, reason: 'Automation is disabled' });
     if (!isHAConfigured()) {
       console.log('[internet-health-monitor] Home Assistant not configured — skipping.');
       return res.json({ skipped: true, reason: 'Home Assistant not configured' });
@@ -546,9 +555,18 @@ function buildIssueKey(printer: string, type: string, detail: string): string {
 router.post('/api/printer-health-monitor', requireAuth, async (req: any, res: any) => {
   try {
     const db = storage;
-    const { rows: [automation] } = await db.query(`SELECT id, is_active FROM family_automations WHERE name = 'Printer Health Monitor' LIMIT 1`);
-    if (!automation) return res.status(200).json({ skipped: true, reason: 'Automation not found in DB' });
-    if (!automation.is_active) return res.json({ skipped: true, reason: 'Automation is disabled' });
+    let { rows: [automation] } = await db.query(`SELECT id, is_active FROM family_automations WHERE name = 'Printer Health Monitor' OR automation_type = 'printer-health' LIMIT 1`);
+    if (!automation) {
+      try {
+        const ins = await db.query(
+          `INSERT INTO family_automations (name, automation_type, schedule, is_active, description)
+           VALUES ('Printer Health Monitor', 'printer-health', '*/30 * * * *', true, 'Monitors HP printers and Bambu Lab 3D printers')
+           RETURNING id, is_active`
+        );
+        automation = ins.rows[0];
+      } catch {}
+    }
+    if (automation && !automation.is_active) return res.json({ skipped: true, reason: 'Automation is disabled' });
     if (!isHAConfigured()) {
       console.log('[printer-health-monitor] Home Assistant not configured — skipping.');
       return res.json({ skipped: true, reason: 'Home Assistant not configured' });
@@ -561,7 +579,10 @@ router.post('/api/printer-health-monitor', requireAuth, async (req: any, res: an
     const issues: any[] = [];
     const printerSummaries: any[] = [];
 
-    for (const printer of PRINTERS) {
+    // Filter to only printers that exist in this Home Assistant instance
+    const availablePrinters = PRINTERS.filter(p => states[p.statusEntity] || p.cartridges.some(c => states[c.entity]));
+
+    for (const printer of availablePrinters) {
       const statusVal = states[printer.statusEntity]?.state ?? 'unavailable';
       const isNotConnected = statusVal === 'unavailable' || statusVal === 'unknown';
       const cartridgeLevels: Record<string, number> = {};
@@ -667,9 +688,18 @@ router.post('/api/printer-health-monitor', requireAuth, async (req: any, res: an
 router.post('/api/ha-server-health-monitor', requireAuth, async (req: any, res: any) => {
   try {
     const db = storage;
-    const { rows: [automation] } = await db.query(`SELECT id, is_active FROM family_automations WHERE name = 'HA Server Health Monitor' LIMIT 1`);
-    if (!automation) return res.status(200).json({ skipped: true, reason: 'Automation not found in DB' });
-    if (!automation.is_active) return res.json({ skipped: true, reason: 'Automation is disabled' });
+    let { rows: [automation] } = await db.query(`SELECT id, is_active FROM family_automations WHERE name = 'HA Server Health Monitor' OR automation_type = 'ha-server-health' LIMIT 1`);
+    if (!automation) {
+      try {
+        const ins = await db.query(
+          `INSERT INTO family_automations (name, automation_type, schedule, is_active, description)
+           VALUES ('HA Server Health Monitor', 'ha-server-health', '*/5 * * * *', true, 'Emails admin when CPU or RAM stay critically high for 15+ minutes')
+           RETURNING id, is_active`
+        );
+        automation = ins.rows[0];
+      } catch {}
+    }
+    if (automation && !automation.is_active) return res.json({ skipped: true, reason: 'Automation is disabled' });
     if (!isHAConfigured()) {
       console.log('[ha-server-health-monitor] Home Assistant not configured — skipping.');
       return res.json({ skipped: true, reason: 'Home Assistant not configured' });

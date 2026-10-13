@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.21
+
+- **Configurable Electricity Rates & Open-Source Utility Engine**: Added `electricity_rate_per_kwh` option in `janus/config.yaml` and dynamic resolution in `server/routes/electricity.ts`. Users outside Los Angeles or with flat-rate power tariffs can now set their rate directly in add-on options or Settings, bypassing hardcoded LADWP tiered rates.
+- **Home Assistant Person Auto-Sync**: Janus now automatically queries Home Assistant Core's `person.*` entities and syncs real household members directly into `household_members`, automatically deactivating default placeholder records.
+- **Dynamic Printer Auto-Discovery**: Replaced hardcoded office printer IDs in `PrintersCard.tsx` and `monitoring.ts` with dynamic IPP, Brother, HP, Canon, Epson, and Bambu 3D printer discovery with clean empty states when no printers exist.
+- **Generic Hardware Fallbacks & Empty States**: Added graceful empty states and dynamic entity detection across Electrical Monitoring (`EmporiaEnergyCard.tsx`), Fireplaces (`CrestronFireplacesCard.tsx`), and WAN interfaces (`SpectrumCard.tsx`), making the dashboard 100% vendor-agnostic for open-source users.
+- **Self-Healing Automations**: `ha-server-health`, `internet-health`, and `printer-health` automations now auto-seed if missing in database, eliminating "Automation not found in DB" warnings on fresh installs.
+
 ## 1.0.20
 
 - **Real Home Assistant User Role Mapping (WebSocket `config/auth/list`)**: Janus no longer treats all Home Assistant users as administrators. Ingress sessions query the real Home Assistant user role over the Core WebSocket API, verifying `is_owner`, `is_admin`, and `group_ids` (`system-admin`) with fallback to member role for non-admins.

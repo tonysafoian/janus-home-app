@@ -291,10 +291,11 @@ export function SpectrumCard() {
               : 'No Data';
 
   const overallStatus = allLoading ? 'idle' as const : isDown ? 'offline' as const : isOnline ? 'online' as const : 'offline' as const;
+  const cardTitle = latest?.provider ? `${latest.provider.charAt(0).toUpperCase() + latest.provider.slice(1)} Internet` : 'Internet & WAN';
 
   return (
     <SystemCard
-      title="Spectrum Internet"
+      title={cardTitle}
       icon={<Wifi className="h-6 w-6 text-blue-400" />}
       status={overallStatus}
       statusText={statusText}
@@ -410,7 +411,7 @@ export function SpectrumCard() {
           {hasFgData && (
             <>
               <div>
-                <SectionLabel>FortiGate WAN1 (Spectrum) — Live</SectionLabel>
+                <SectionLabel>WAN Interface — Live</SectionLabel>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="bg-muted/30 rounded-lg p-3">
                     <div className="flex items-center gap-2 mb-1">

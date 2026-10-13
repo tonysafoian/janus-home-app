@@ -203,6 +203,49 @@ export function isHAUserAdminSync(userId?: string, userName?: string): boolean {
   return false;
 }
 
+export async function syncPersonsFromHA(): Promise<void> {
+  const persons = Array.from(entityCache.values()).filter(e => e.entity_id.startsWith('person.'));
+  if (persons.length === 0) return;
+
+  try {
+    const { query } = await import('./db.js');
+    let realCount = 0;
+    for (const p of persons) {
+      const friendlyName = (p.attributes?.friendly_name as string) || p.entity_id.replace('person.', '').replace(/_/g, ' ');
+      if (!friendlyName || friendlyName.toLowerCase().includes('demo') || friendlyName.toLowerCase().includes('admin user')) continue;
+
+      const userId = p.attributes?.user_id as string | undefined;
+      const isAdmin = isHAUserAdminSync(userId, friendlyName);
+      const role = isAdmin ? 'admin' : 'member';
+
+      // Check if person already exists by display_name
+      const { rows } = await query<{ id: string }>(
+        `SELECT id FROM household_members WHERE LOWER(display_name) = LOWER($1) LIMIT 1`,
+        [friendlyName]
+      );
+      if (rows.length === 0) {
+        await query(
+          `INSERT INTO household_members (display_name, role, is_active, aliases)
+           VALUES ($1, $2, true, $3)`,
+          [friendlyName, role, [p.entity_id]]
+        );
+        realCount++;
+      }
+    }
+
+    if (realCount > 0) {
+      console.log(`[HA-WS] Synced ${realCount} real person(s) from Home Assistant into household_members`);
+      // Deactivate generic placeholder accounts if real members were added
+      await query(
+        `UPDATE household_members SET is_active = false
+         WHERE id IN ('00000000-0000-4000-a000-000000000001', '00000000-0000-4000-a000-000000000002', '00000000-0000-4000-a000-000000000003')`
+      );
+    }
+  } catch (err) {
+    console.warn('[HA-WS] syncPersonsFromHA failed:', err instanceof Error ? err.message : err);
+  }
+}
+
 export function sendHAWSCommand(command: Record<string, unknown>, timeoutMs = 30_000): Promise<unknown> {
   return new Promise((resolve, reject) => {
     if (!wsClient || wsClient.readyState !== WebSocket.OPEN) {
@@ -304,7 +347,7 @@ export function startHAWebSocket(): void {
         if (wsClient && wsClient.readyState === WebSocket.OPEN) {
           console.log('[HA-WS] Safety sync: refreshing all states from HA');
           send(wsClient, { id: nextId(), type: 'get_states' });
-          refreshHAUsers().catch(() => {});
+          refreshHAUsers().then(() => syncPersonsFromHA()).catch(() => {});
         }
       }, SAFETY_SYNC_INTERVAL);
 
@@ -341,6 +384,7 @@ export function startHAWebSocket(): void {
         }
         cacheReady = true;
         console.log(`[HA-WS] Loaded ${states.length} entity states into cache`);
+        syncPersonsFromHA().catch(e => console.warn('[HA-WS] Person sync failed:', e));
         // Note: we defer the initial Crestron bridge check until after Govee IDs
         // have been resolved so Govee lights are properly excluded from the count.
 

@@ -385,6 +385,58 @@ function BambuPrinterCard({ printer }: { printer: BambuPrinter }) {
   );
 }
 
+function discoverOfficePrinters(entities: HAEntity[]): PrinterConfig[] {
+  const discovered: PrinterConfig[] = [];
+  const knownEntities = new Set<string>();
+
+  // Include predefined printers only if their entities exist in this HA instance
+  for (const p of OFFICE_PRINTERS) {
+    if (entities.some(e => e.entity_id === p.statusEntity || p.cartridges.some(c => c.entity === e.entity_id))) {
+      discovered.push(p);
+      p.cartridges.forEach(c => knownEntities.add(c.entity));
+      knownEntities.add(p.statusEntity);
+    }
+  }
+
+  // Next, auto-discover any generic IPP or printer toner sensors not already tracked
+  const tonerSensors = entities.filter(e =>
+    e.entity_id.startsWith('sensor.') &&
+    (e.entity_id.includes('_cartridge') || e.entity_id.includes('_toner') || e.entity_id.includes('ink_level')) &&
+    !knownEntities.has(e.entity_id)
+  );
+
+  // Group by printer prefix
+  const groups = new Map<string, HAEntity[]>();
+  for (const s of tonerSensors) {
+    const parts = s.entity_id.replace(/^sensor\./, '').split('_');
+    const prefix = parts.slice(0, Math.min(parts.length - 1, 3)).join('_');
+    if (!groups.has(prefix)) groups.set(prefix, []);
+    groups.get(prefix)!.push(s);
+  }
+
+  for (const [prefix, sensors] of groups.entries()) {
+    const statusEnt = entities.find(e => e.entity_id === `sensor.${prefix}` || e.entity_id === `sensor.${prefix}_status`);
+    const name = statusEnt?.attributes?.friendly_name || prefix.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    discovered.push({
+      name: String(name),
+      statusEntity: statusEnt?.entity_id || sensors[0].entity_id,
+      cartridges: sensors.map(s => {
+        const fn = (s.attributes?.friendly_name as string) || s.entity_id;
+        const color = s.entity_id.includes('cyan') ? '#06b6d4' :
+                      s.entity_id.includes('magenta') ? '#ec4899' :
+                      s.entity_id.includes('yellow') ? '#eab308' : '#374151';
+        return {
+          label: fn.replace(/.*(Black|Cyan|Magenta|Yellow|Toner|Cartridge|Ink).*/i, '$1') || 'Toner',
+          entity: s.entity_id,
+          color,
+        };
+      }),
+    });
+  }
+
+  return discovered;
+}
+
 export function PrintersCard() {
   const { entities, loading, refetch } = useHAEntities();
 
@@ -395,7 +447,12 @@ export function PrintersCard() {
     return isNaN(val) ? -1 : val;
   };
 
-  const hasLowToner = OFFICE_PRINTERS.some(p => {
+  const officePrinters = useMemo(() => discoverOfficePrinters(entities), [entities]);
+  const bambuPrinters = useMemo(() => discoverBambuPrinters(entities), [entities]);
+  const hasOffice = officePrinters.length > 0;
+  const hasBambu = bambuPrinters.length > 0;
+
+  const hasLowToner = officePrinters.some(p => {
     const cartridgeLow = p.cartridges.some(c => {
       const l = getLevel(c.entity);
       return l >= 0 && l < LOW_THRESHOLD;
@@ -408,16 +465,13 @@ export function PrintersCard() {
   });
 
   const officeErrors: { printer: string; message: string }[] = [];
-  for (const p of OFFICE_PRINTERS) {
+  for (const p of officePrinters) {
     const state = getEntity(p.statusEntity)?.state ?? 'unknown';
     const msg = getOfficeErrorMessage(state);
     if (msg) officeErrors.push({ printer: p.name, message: msg });
   }
 
-  const bambuPrinters = discoverBambuPrinters(entities);
-  const hasBambu = bambuPrinters.length > 0;
   const bambuHasIssues = bambuPrinters.some(p => p.hasError);
-
   const hasAnyIssue = hasLowToner || officeErrors.length > 0 || bambuHasIssues;
 
   return (
@@ -446,7 +500,15 @@ export function PrintersCard() {
       <CardContent className="space-y-4">
         {loading && entities.length === 0 ? (
           <p className="text-sm text-muted-foreground">Loading printer data…</p>
-        ) : hasBambu ? (
+        ) : !hasOffice && !hasBambu ? (
+          <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground">
+            <Printer className="h-10 w-10 text-muted-foreground/40 mb-3" />
+            <p className="text-sm font-medium text-foreground">No Printers Detected</p>
+            <p className="text-xs max-w-sm mt-1">
+              No network printers or 3D printers were detected in Home Assistant. Connect your printers in Home Assistant (IPP, HP, Brother, Canon, Epson, or Bambu Lab) to monitor status and supplies here.
+            </p>
+          </div>
+        ) : hasBambu && hasOffice ? (
           <Tabs defaultValue="office" className="w-full">
             <TabsList className="w-full">
               <TabsTrigger value="office" className="flex-1 gap-1.5" data-testid="tab-office-printers">
@@ -461,7 +523,7 @@ export function PrintersCard() {
               </TabsTrigger>
             </TabsList>
             <TabsContent value="office" className="mt-4 space-y-4">
-              <OfficePrintersSection printers={OFFICE_PRINTERS} getEntity={getEntity} getLevel={getLevel} errors={officeErrors} />
+              <OfficePrintersSection printers={officePrinters} getEntity={getEntity} getLevel={getLevel} errors={officeErrors} />
             </TabsContent>
             <TabsContent value="bambu" className="mt-4 space-y-4">
               {bambuPrinters.map(p => (
@@ -469,8 +531,14 @@ export function PrintersCard() {
               ))}
             </TabsContent>
           </Tabs>
+        ) : hasBambu ? (
+          <div className="space-y-4">
+            {bambuPrinters.map(p => (
+              <BambuPrinterCard key={p.prefix} printer={p} />
+            ))}
+          </div>
         ) : (
-          <OfficePrintersSection printers={OFFICE_PRINTERS} getEntity={getEntity} getLevel={getLevel} errors={officeErrors} />
+          <OfficePrintersSection printers={officePrinters} getEntity={getEntity} getLevel={getLevel} errors={officeErrors} />
         )}
       </CardContent>
     </Card>
