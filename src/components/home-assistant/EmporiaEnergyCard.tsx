@@ -920,11 +920,30 @@ export function EmporiaEnergyCard() {
   }
   const sortLabel = sortMode === 'watts' ? 'Watts' : sortMode === 'name' ? 'Name' : 'Category';
 
+  const hasEmporiaPanels = useMemo(() => {
+    return PANEL_CATALOG.some(p => entities.some(e => e.entity_id === p.mainEntityId)) ||
+           RAW_CIRCUITS.some(c => entities.some(e => e.entity_id === c.entityId));
+  }, [entities]);
+
+  const discoveredEnergyMonitors = useMemo(() => {
+    return entities.filter(e =>
+      e.entity_id.startsWith('sensor.') &&
+      (e.attributes?.unit_of_measurement === 'W' ||
+       e.attributes?.unit_of_measurement === 'kW' ||
+       e.attributes?.device_class === 'power' ||
+       e.attributes?.device_class === 'energy')
+    );
+  }, [entities]);
+
+  const hasAnyEnergyData = hasEmporiaPanels || discoveredEnergyMonitors.length > 0;
+
   const statusText = loading
     ? 'Loading…'
-    : viewMode === 'panel'
-      ? `${PANEL_CATALOG.length} panels · ${formatWatts(liveTotalWatts)} live`
-      : `${activeCircuits} active circuits · ${formatWatts(liveTotalWatts)} total`;
+    : !hasAnyEnergyData
+      ? 'Not configured'
+      : viewMode === 'panel'
+        ? `${PANEL_CATALOG.length} panels · ${formatWatts(liveTotalWatts)} live`
+        : `${activeCircuits} active circuits · ${formatWatts(liveTotalWatts)} total`;
 
   const isLive = timeRange === 'live';
 
@@ -933,11 +952,11 @@ export function EmporiaEnergyCard() {
       <SystemCard
         title="Electrical Monitoring"
         icon={<Zap className="h-6 w-6 text-yellow-400" />}
-        status={loading ? 'idle' : 'online'}
+        status={loading ? 'idle' : !hasAnyEnergyData ? 'idle' : 'online'}
         statusText={statusText}
         accentColor="bg-yellow-500/10"
         defaultExpanded={true}
-        metrics={[
+        metrics={!hasAnyEnergyData ? [{ label: 'Status', value: 'Not Configured' }] : [
           { label: 'Live Load', value: loading ? '…' : formatWatts(liveTotalWatts) },
           { label: 'Panels', value: loading ? '…' : String(PANEL_CATALOG.length) },
           { label: 'Circuits', value: loading ? '…' : String(circuitData.length) },
@@ -946,6 +965,16 @@ export function EmporiaEnergyCard() {
         {loading ? (
           <div className="flex justify-center py-10">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : !hasAnyEnergyData ? (
+          <div className="flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground">
+            <div className="rounded-full bg-yellow-500/10 p-3 mb-3">
+              <Zap className="h-8 w-8 text-yellow-400" />
+            </div>
+            <p className="text-sm font-semibold text-foreground">No Energy Monitors Detected</p>
+            <p className="text-xs max-w-sm mt-1">
+              No electrical power or energy sensors were detected in Home Assistant. Connect your energy monitors (such as Emporia Vue, Shelly EM, Sense, SolarEdge, or Enphase) or map your sensors in Settings → Device &amp; Entity Mappings to track real-time consumption and costs.
+            </p>
           </div>
         ) : (
           <div className="space-y-4 pt-1">

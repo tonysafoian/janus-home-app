@@ -50,8 +50,25 @@ const router = Router();
 // "True cost of the next kWh" — used for the live hero and per-circuit $ figures.
 const LA_UTILITY_TAX = 0.10;
 const STATE_SURCHARGE = 0.0003;
-function allInMarginalRate(tierRate: number): number {
+function allInMarginalRate(tierRate: number, customRate?: number | null): number {
+  if (customRate != null && customRate > 0) return customRate;
   return +(tierRate * (1 + LA_UTILITY_TAX) + STATE_SURCHARGE).toFixed(5);
+}
+
+export async function getEffectiveRateConfig(): Promise<{ rate: number | null; isCustom: boolean }> {
+  const envRate = parseFloat(process.env.ELECTRICITY_RATE_PER_KWH || '');
+  if (!isNaN(envRate) && envRate > 0) {
+    return { rate: envRate, isCustom: true };
+  }
+  try {
+    const { getEntityMappings } = await import('../lib/estateConfig.js');
+    const mappings = await getEntityMappings();
+    const mappingRate = mappings?.utility_rates?.electricity_kwh_cost;
+    if (typeof mappingRate === 'number' && mappingRate > 0 && mappingRate !== 0.28) {
+      return { rate: mappingRate, isCustom: true };
+    }
+  } catch {}
+  return { rate: null, isCustom: false };
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -181,12 +198,13 @@ router.get('/live-cost', requireAuth, async (_req: AuthenticatedRequest, res: Re
       } catch { /* best-effort */ }
     }
 
-    // Current tier rate
-    const tierInfo = getCurrentTierRate(totalKwh);
-    const marginalAllIn = allInMarginalRate(tierInfo.rate);
+    // Current tier rate and custom rate override
+    const rateConfig = await getEffectiveRateConfig();
+    const tierInfo = getCurrentTierRate(totalKwh, now, rateConfig.rate);
+    const marginalAllIn = allInMarginalRate(tierInfo.rate, rateConfig.rate);
 
     // Estimate bill so far
-    const billSoFar = computeLadwpBill(totalKwh, cycleStart, now);
+    const billSoFar = computeLadwpBill(totalKwh, cycleStart, now, undefined, rateConfig.rate);
 
     // Project to end of ~60-day cycle. Daily average divides cycle kWh by the
     // number of elapsed days ACTUALLY covered (DB days + stats-filled days +
@@ -198,7 +216,7 @@ router.get('/live-cost', requireAuth, async (_req: AuthenticatedRequest, res: Re
     const remainingDays = Math.max(0, 60 - daysInCycle);
     const projectedTotalKwh = totalKwh + avgDailyKwh * remainingDays;
     const cycleEnd = new Date(cycleStart.getTime() + 60 * 24 * 60 * 60 * 1000);
-    const projectedBill = computeLadwpBill(projectedTotalKwh, cycleStart, cycleEnd);
+    const projectedBill = computeLadwpBill(projectedTotalKwh, cycleStart, cycleEnd, undefined, rateConfig.rate);
 
     // Today's consumption — live from _energy_today counter state.
     const today = getTodayConsumptionFromStates();
@@ -224,8 +242,8 @@ router.get('/live-cost', requireAuth, async (_req: AuthenticatedRequest, res: Re
 
     // Projection range (best/worst ±10% on pace) + last cycle's actual bill so
     // the UI gauge can scale to a meaningful target rather than a fixed $12k.
-    const bestBill = computeLadwpBill(projectedTotalKwh * 0.9, cycleStart, cycleEnd);
-    const worstBill = computeLadwpBill(projectedTotalKwh * 1.1, cycleStart, cycleEnd);
+    const bestBill = computeLadwpBill(projectedTotalKwh * 0.9, cycleStart, cycleEnd, undefined, rateConfig.rate);
+    const worstBill = computeLadwpBill(projectedTotalKwh * 1.1, cycleStart, cycleEnd, undefined, rateConfig.rate);
     let lastCycleActual: number | null = null;
     try {
       const { rows } = await storage.query(
@@ -305,10 +323,11 @@ router.get('/breakdown', requireAuth, async (req: AuthenticatedRequest, res: Res
 
     // Resolve per-circuit kWh from the robust sources for cycle/today, and the
     // recorder for week. tierInfo/rate is derived from the cycle-to-date total.
+    const rateConfig = await getEffectiveRateConfig();
     const cycleStart = estimateBillingCycleStart();
     const cycleRobust = await getCycleConsumptionRobust(cycleStart);
-    const tierInfo = getCurrentTierRate(cycleRobust.totalKwh);
-    const rate = allInMarginalRate(tierInfo.rate);
+    const tierInfo = getCurrentTierRate(cycleRobust.totalKwh, undefined, rateConfig.rate);
+    const rate = allInMarginalRate(tierInfo.rate, rateConfig.rate);
 
     let perCircuit: CircuitTodayKwh[];
     let startTime: Date;
@@ -430,11 +449,12 @@ router.get('/projection', requireAuth, async (_req: AuthenticatedRequest, res: R
     const cycleLength = 60; // bi-monthly
     const projectedKwh = avgDailyKwh * cycleLength;
     const cycleEnd = new Date(cycleStart.getTime() + cycleLength * 24 * 60 * 60 * 1000);
-    const projected = computeLadwpBill(projectedKwh, cycleStart, cycleEnd);
+    const rateConfig = await getEffectiveRateConfig();
+    const projected = computeLadwpBill(projectedKwh, cycleStart, cycleEnd, undefined, rateConfig.rate);
 
     // Also compute a "best case" (10% reduction) and "worst case" (10% increase)
-    const bestCase = computeLadwpBill(projectedKwh * 0.9, cycleStart, cycleEnd);
-    const worstCase = computeLadwpBill(projectedKwh * 1.1, cycleStart, cycleEnd);
+    const bestCase = computeLadwpBill(projectedKwh * 0.9, cycleStart, cycleEnd, undefined, rateConfig.rate);
+    const worstCase = computeLadwpBill(projectedKwh * 1.1, cycleStart, cycleEnd, undefined, rateConfig.rate);
 
     res.json({
       cycleStart: cycleStart.toISOString(),
@@ -747,12 +767,34 @@ router.get('/comparison', requireAuth, async (_req: AuthenticatedRequest, res: R
 
 // ── GET /rates ─────────────────────────────────────────────────────────
 // Returns the current rate schedule (useful for the UI).
-router.get('/rates', requireAuth, (_req: AuthenticatedRequest, res: Response) => {
+router.get('/rates', requireAuth, async (_req: AuthenticatedRequest, res: Response) => {
+  const rateConfig = await getEffectiveRateConfig();
+  if (rateConfig.isCustom && rateConfig.rate) {
+    return res.json({
+      isCustom: true,
+      current: {
+        season: 'Standard Flat Rate',
+        isSummer: false,
+        tier1: rateConfig.rate,
+        tier2: rateConfig.rate,
+        tier3: rateConfig.rate,
+      },
+      customRatePerKwh: rateConfig.rate,
+      allotments: { tier1: Infinity, tier2: 0 },
+      pac: { tier: 'Standard', monthlyCharge: 0 },
+      utilityTaxRate: 0,
+      stateEnergySurcharge: 0,
+      zone: 1,
+      billingFrequency: 'monthly',
+    });
+  }
+
   const now = new Date();
   const current = getSeasonalRate(now);
   const tierInfo = getCurrentTierRate(0, now); // What tier 1 rate looks like
 
   res.json({
+    isCustom: false,
     current: {
       season: current.label,
       isSummer: current.isSummer,
@@ -1235,10 +1277,11 @@ router.get('/panel-history', requireAuth, async (req: AuthenticatedRequest, res:
 router.get('/live-rate', requireAuth, async (_req: AuthenticatedRequest, res: Response) => {
   try {
     const cycleStart = estimateBillingCycleStart();
+    const rateConfig = await getEffectiveRateConfig();
     const robust = await getCycleConsumptionRobust(cycleStart);
-    const tierInfo = getCurrentTierRate(robust.totalKwh);
+    const tierInfo = getCurrentTierRate(robust.totalKwh, undefined, rateConfig.rate);
     const season = getSeasonalRate(new Date());
-    const marginal = allInMarginalRate(tierInfo.rate);
+    const marginal = allInMarginalRate(tierInfo.rate, rateConfig.rate);
     const liveWatts = getLiveTotalWatts();
     const liveKw = +(liveWatts / 1000).toFixed(2);
 
@@ -1249,8 +1292,8 @@ router.get('/live-rate', requireAuth, async (_req: AuthenticatedRequest, res: Re
       tierRatePerKwh: tierInfo.rate,
       dollarsPerHour: +(liveKw * marginal).toFixed(2),
       tier: tierInfo.tier,
-      seasonLabel: season.label,
-      isSummer: season.isSummer,
+      seasonLabel: rateConfig.isCustom ? 'Standard Rate' : season.label,
+      isSummer: rateConfig.isCustom ? false : season.isSummer,
     });
   } catch (err) {
     console.error('[electricity] live-rate error:', err);

@@ -164,9 +164,39 @@ export function computeLadwpBill(
   periodStartDate: Date,
   periodEndDate: Date,
   peakMonthlyKwh?: number,
+  customRate?: number | null,
 ): LadwpBillBreakdown {
   const days = Math.max(1, Math.round((periodEndDate.getTime() - periodStartDate.getTime()) / (1000 * 60 * 60 * 24)));
   const months = Math.max(1, Math.round(days / 30));
+
+  if (customRate != null && customRate > 0) {
+    const subtotalEnergy = +(totalKwh * customRate).toFixed(2);
+    return {
+      totalKwh,
+      days,
+      seasonLabel: 'Standard Rate',
+      isSummer: false,
+      tier1Kwh: totalKwh,
+      tier2Kwh: 0,
+      tier3Kwh: 0,
+      tier1Rate: customRate,
+      tier2Rate: customRate,
+      tier3Rate: customRate,
+      tier1Cost: subtotalEnergy,
+      tier2Cost: 0,
+      tier3Cost: 0,
+      subtotalEnergy,
+      pacTier: 'Standard',
+      pacMonthlyCharge: 0,
+      pacTotal: 0,
+      utilityTax: 0,
+      stateEnergySurcharge: 0,
+      totalElectricCharges: subtotalEnergy,
+      effectiveRate: customRate,
+      dailyCost: +(subtotalEnergy / days).toFixed(2),
+      monthlyCost: +(subtotalEnergy / months).toFixed(2),
+    };
+  }
 
   // Determine the seasonal rate LADWP applies to the whole bill. Bi-monthly
   // cycles span two seasons; LADWP applies the summer rate flat to any cycle
@@ -223,7 +253,17 @@ export function computeLadwpBill(
 export function getCurrentTierRate(
   accumulatedKwhThisCycle: number,
   date?: Date,
+  customRate?: number | null,
 ): { tier: number; rate: number; label: string; nextTierAt: number | null } {
+  if (customRate != null && customRate > 0) {
+    return {
+      tier: 1,
+      rate: customRate,
+      label: `Standard Rate — $${customRate.toFixed(4)}/kWh`,
+      nextTierAt: null,
+    };
+  }
+
   const seasonRate = getSeasonalRate(date ?? new Date());
 
   if (accumulatedKwhThisCycle <= TIER_ALLOTMENTS.tier1) {

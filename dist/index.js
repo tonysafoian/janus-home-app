@@ -3912,6 +3912,42 @@ function isHAUserAdminSync(userId, userName) {
   }
   return false;
 }
+async function syncPersonsFromHA() {
+  const persons = Array.from(entityCache.values()).filter((e) => e.entity_id.startsWith("person."));
+  if (persons.length === 0) return;
+  try {
+    const { query: query2 } = await Promise.resolve().then(() => (init_db2(), db_exports));
+    let realCount = 0;
+    for (const p of persons) {
+      const friendlyName = p.attributes?.friendly_name || p.entity_id.replace("person.", "").replace(/_/g, " ");
+      if (!friendlyName || friendlyName.toLowerCase().includes("demo") || friendlyName.toLowerCase().includes("admin user")) continue;
+      const userId = p.attributes?.user_id;
+      const isAdmin2 = isHAUserAdminSync(userId, friendlyName);
+      const role = isAdmin2 ? "admin" : "member";
+      const { rows } = await query2(
+        `SELECT id FROM household_members WHERE LOWER(display_name) = LOWER($1) LIMIT 1`,
+        [friendlyName]
+      );
+      if (rows.length === 0) {
+        await query2(
+          `INSERT INTO household_members (display_name, role, is_active, aliases)
+           VALUES ($1, $2, true, $3)`,
+          [friendlyName, role, [p.entity_id]]
+        );
+        realCount++;
+      }
+    }
+    if (realCount > 0) {
+      console.log(`[HA-WS] Synced ${realCount} real person(s) from Home Assistant into household_members`);
+      await query2(
+        `UPDATE household_members SET is_active = false
+         WHERE id IN ('00000000-0000-4000-a000-000000000001', '00000000-0000-4000-a000-000000000002', '00000000-0000-4000-a000-000000000003')`
+      );
+    }
+  } catch (err) {
+    console.warn("[HA-WS] syncPersonsFromHA failed:", err instanceof Error ? err.message : err);
+  }
+}
 function sendHAWSCommand(command, timeoutMs = 3e4) {
   return new Promise((resolve2, reject) => {
     if (!wsClient || wsClient.readyState !== WebSocket.OPEN) {
@@ -3990,7 +4026,7 @@ function startHAWebSocket() {
         if (wsClient && wsClient.readyState === WebSocket.OPEN) {
           console.log("[HA-WS] Safety sync: refreshing all states from HA");
           send(wsClient, { id: nextId(), type: "get_states" });
-          refreshHAUsers().catch(() => {
+          refreshHAUsers().then(() => syncPersonsFromHA()).catch(() => {
           });
         }
       }, SAFETY_SYNC_INTERVAL);
@@ -4027,6 +4063,7 @@ function startHAWebSocket() {
         }
         cacheReady = true;
         console.log(`[HA-WS] Loaded ${states.length} entity states into cache`);
+        syncPersonsFromHA().catch((e) => console.warn("[HA-WS] Person sync failed:", e));
         goveeTemplateId = nextId();
         send(wsClient, {
           id: goveeTemplateId,
@@ -31978,9 +32015,19 @@ async function logRun2(db2, automationId, status, output, errorMessage) {
 router20.post("/api/internet-health-monitor", requireAuth2, async (req, res) => {
   try {
     const db2 = storage;
-    const { rows: [automation] } = await db2.query(`SELECT id, is_active FROM family_automations WHERE name = 'Internet Health Monitor' LIMIT 1`);
-    if (!automation) return res.status(200).json({ skipped: true, reason: "Automation not found in DB" });
-    if (!automation.is_active) return res.json({ skipped: true, reason: "Automation is disabled" });
+    let { rows: [automation] } = await db2.query(`SELECT id, is_active FROM family_automations WHERE name = 'Internet Health Monitor' OR automation_type = 'internet-health' LIMIT 1`);
+    if (!automation) {
+      try {
+        const ins = await db2.query(
+          `INSERT INTO family_automations (name, automation_type, schedule, is_active, description)
+           VALUES ('Internet Health Monitor', 'internet-health', '*/15 * * * *', true, 'Monitors internet via HA Speedtest')
+           RETURNING id, is_active`
+        );
+        automation = ins.rows[0];
+      } catch {
+      }
+    }
+    if (automation && !automation.is_active) return res.json({ skipped: true, reason: "Automation is disabled" });
     if (!isHAConfigured2()) {
       console.log("[internet-health-monitor] Home Assistant not configured \u2014 skipping.");
       return res.json({ skipped: true, reason: "Home Assistant not configured" });
@@ -32200,9 +32247,19 @@ function buildIssueKey(printer, type, detail) {
 router20.post("/api/printer-health-monitor", requireAuth2, async (req, res) => {
   try {
     const db2 = storage;
-    const { rows: [automation] } = await db2.query(`SELECT id, is_active FROM family_automations WHERE name = 'Printer Health Monitor' LIMIT 1`);
-    if (!automation) return res.status(200).json({ skipped: true, reason: "Automation not found in DB" });
-    if (!automation.is_active) return res.json({ skipped: true, reason: "Automation is disabled" });
+    let { rows: [automation] } = await db2.query(`SELECT id, is_active FROM family_automations WHERE name = 'Printer Health Monitor' OR automation_type = 'printer-health' LIMIT 1`);
+    if (!automation) {
+      try {
+        const ins = await db2.query(
+          `INSERT INTO family_automations (name, automation_type, schedule, is_active, description)
+           VALUES ('Printer Health Monitor', 'printer-health', '*/30 * * * *', true, 'Monitors HP printers and Bambu Lab 3D printers')
+           RETURNING id, is_active`
+        );
+        automation = ins.rows[0];
+      } catch {
+      }
+    }
+    if (automation && !automation.is_active) return res.json({ skipped: true, reason: "Automation is disabled" });
     if (!isHAConfigured2()) {
       console.log("[printer-health-monitor] Home Assistant not configured \u2014 skipping.");
       return res.json({ skipped: true, reason: "Home Assistant not configured" });
@@ -32214,7 +32271,8 @@ router20.post("/api/printer-health-monitor", requireAuth2, async (req, res) => {
     }
     const issues = [];
     const printerSummaries = [];
-    for (const printer of PRINTERS) {
+    const availablePrinters = PRINTERS.filter((p) => states[p.statusEntity] || p.cartridges.some((c) => states[c.entity]));
+    for (const printer of availablePrinters) {
       const statusVal = states[printer.statusEntity]?.state ?? "unavailable";
       const isNotConnected = statusVal === "unavailable" || statusVal === "unknown";
       const cartridgeLevels = {};
@@ -32320,9 +32378,19 @@ router20.post("/api/printer-health-monitor", requireAuth2, async (req, res) => {
 router20.post("/api/ha-server-health-monitor", requireAuth2, async (req, res) => {
   try {
     const db2 = storage;
-    const { rows: [automation] } = await db2.query(`SELECT id, is_active FROM family_automations WHERE name = 'HA Server Health Monitor' LIMIT 1`);
-    if (!automation) return res.status(200).json({ skipped: true, reason: "Automation not found in DB" });
-    if (!automation.is_active) return res.json({ skipped: true, reason: "Automation is disabled" });
+    let { rows: [automation] } = await db2.query(`SELECT id, is_active FROM family_automations WHERE name = 'HA Server Health Monitor' OR automation_type = 'ha-server-health' LIMIT 1`);
+    if (!automation) {
+      try {
+        const ins = await db2.query(
+          `INSERT INTO family_automations (name, automation_type, schedule, is_active, description)
+           VALUES ('HA Server Health Monitor', 'ha-server-health', '*/5 * * * *', true, 'Emails admin when CPU or RAM stay critically high for 15+ minutes')
+           RETURNING id, is_active`
+        );
+        automation = ins.rows[0];
+      } catch {
+      }
+    }
+    if (automation && !automation.is_active) return res.json({ skipped: true, reason: "Automation is disabled" });
     if (!isHAConfigured2()) {
       console.log("[ha-server-health-monitor] Home Assistant not configured \u2014 skipping.");
       return res.json({ skipped: true, reason: "Home Assistant not configured" });
@@ -41668,9 +41736,37 @@ function getSeasonalRateForPeriod(start, end) {
   }
   return getSeasonalRate(end);
 }
-function computeLadwpBill(totalKwh, periodStartDate, periodEndDate, peakMonthlyKwh) {
+function computeLadwpBill(totalKwh, periodStartDate, periodEndDate, peakMonthlyKwh, customRate) {
   const days = Math.max(1, Math.round((periodEndDate.getTime() - periodStartDate.getTime()) / (1e3 * 60 * 60 * 24)));
   const months = Math.max(1, Math.round(days / 30));
+  if (customRate != null && customRate > 0) {
+    const subtotalEnergy2 = +(totalKwh * customRate).toFixed(2);
+    return {
+      totalKwh,
+      days,
+      seasonLabel: "Standard Rate",
+      isSummer: false,
+      tier1Kwh: totalKwh,
+      tier2Kwh: 0,
+      tier3Kwh: 0,
+      tier1Rate: customRate,
+      tier2Rate: customRate,
+      tier3Rate: customRate,
+      tier1Cost: subtotalEnergy2,
+      tier2Cost: 0,
+      tier3Cost: 0,
+      subtotalEnergy: subtotalEnergy2,
+      pacTier: "Standard",
+      pacMonthlyCharge: 0,
+      pacTotal: 0,
+      utilityTax: 0,
+      stateEnergySurcharge: 0,
+      totalElectricCharges: subtotalEnergy2,
+      effectiveRate: customRate,
+      dailyCost: +(subtotalEnergy2 / days).toFixed(2),
+      monthlyCost: +(subtotalEnergy2 / months).toFixed(2)
+    };
+  }
   const rate = getSeasonalRateForPeriod(periodStartDate, periodEndDate);
   const tier1Kwh = Math.min(totalKwh, TIER_ALLOTMENTS.tier1);
   const tier2Kwh = Math.min(Math.max(totalKwh - TIER_ALLOTMENTS.tier1, 0), TIER_ALLOTMENTS.tier2);
@@ -41715,7 +41811,15 @@ function computeLadwpBill(totalKwh, periodStartDate, periodEndDate, peakMonthlyK
     monthlyCost
   };
 }
-function getCurrentTierRate(accumulatedKwhThisCycle, date2) {
+function getCurrentTierRate(accumulatedKwhThisCycle, date2, customRate) {
+  if (customRate != null && customRate > 0) {
+    return {
+      tier: 1,
+      rate: customRate,
+      label: `Standard Rate \u2014 $${customRate.toFixed(4)}/kWh`,
+      nextTierAt: null
+    };
+  }
   const seasonRate = getSeasonalRate(date2 ?? /* @__PURE__ */ new Date());
   if (accumulatedKwhThisCycle <= TIER_ALLOTMENTS.tier1) {
     return {
@@ -42725,8 +42829,25 @@ init_storage();
 var router34 = Router35();
 var LA_UTILITY_TAX = 0.1;
 var STATE_SURCHARGE = 3e-4;
-function allInMarginalRate(tierRate) {
+function allInMarginalRate(tierRate, customRate) {
+  if (customRate != null && customRate > 0) return customRate;
   return +(tierRate * (1 + LA_UTILITY_TAX) + STATE_SURCHARGE).toFixed(5);
+}
+async function getEffectiveRateConfig() {
+  const envRate = parseFloat(process.env.ELECTRICITY_RATE_PER_KWH || "");
+  if (!isNaN(envRate) && envRate > 0) {
+    return { rate: envRate, isCustom: true };
+  }
+  try {
+    const { getEntityMappings: getEntityMappings2 } = await Promise.resolve().then(() => (init_estateConfig(), estateConfig_exports));
+    const mappings = await getEntityMappings2();
+    const mappingRate = mappings?.utility_rates?.electricity_kwh_cost;
+    if (typeof mappingRate === "number" && mappingRate > 0 && mappingRate !== 0.28) {
+      return { rate: mappingRate, isCustom: true };
+    }
+  } catch {
+  }
+  return { rate: null, isCustom: false };
 }
 function asRecord(value) {
   if (value && typeof value === "object" && !Array.isArray(value)) {
@@ -42813,15 +42934,16 @@ router34.get("/live-cost", requireAuth2, async (_req, res) => {
       } catch {
       }
     }
-    const tierInfo = getCurrentTierRate(totalKwh);
-    const marginalAllIn = allInMarginalRate(tierInfo.rate);
-    const billSoFar = computeLadwpBill(totalKwh, cycleStart, now);
+    const rateConfig = await getEffectiveRateConfig();
+    const tierInfo = getCurrentTierRate(totalKwh, now, rateConfig.rate);
+    const marginalAllIn = allInMarginalRate(tierInfo.rate, rateConfig.rate);
+    const billSoFar = computeLadwpBill(totalKwh, cycleStart, now, void 0, rateConfig.rate);
     const daysCovered = Math.max(1, Math.min(robust.daysWithData, daysInCycle));
     const avgDailyKwh = totalKwh / daysCovered;
     const remainingDays = Math.max(0, 60 - daysInCycle);
     const projectedTotalKwh = totalKwh + avgDailyKwh * remainingDays;
     const cycleEnd = new Date(cycleStart.getTime() + 60 * 24 * 60 * 60 * 1e3);
-    const projectedBill = computeLadwpBill(projectedTotalKwh, cycleStart, cycleEnd);
+    const projectedBill = computeLadwpBill(projectedTotalKwh, cycleStart, cycleEnd, void 0, rateConfig.rate);
     const today = getTodayConsumptionFromStates();
     const todayKwh = today.totalKwh;
     const todayCost = +(todayKwh * marginalAllIn).toFixed(2);
@@ -42837,8 +42959,8 @@ router34.get("/live-cost", requireAuth2, async (_req, res) => {
     const liveWatts = getLiveTotalWatts();
     const liveKw = +(liveWatts / 1e3).toFixed(2);
     const dollarsPerHour = +(liveKw * marginalAllIn).toFixed(2);
-    const bestBill = computeLadwpBill(projectedTotalKwh * 0.9, cycleStart, cycleEnd);
-    const worstBill = computeLadwpBill(projectedTotalKwh * 1.1, cycleStart, cycleEnd);
+    const bestBill = computeLadwpBill(projectedTotalKwh * 0.9, cycleStart, cycleEnd, void 0, rateConfig.rate);
+    const worstBill = computeLadwpBill(projectedTotalKwh * 1.1, cycleStart, cycleEnd, void 0, rateConfig.rate);
     let lastCycleActual = null;
     try {
       const { rows } = await storage.query(
@@ -42913,10 +43035,11 @@ router34.get("/breakdown", requireAuth2, async (req, res) => {
     const t0 = Date.now();
     const range = req.query.range || "cycle";
     const now = /* @__PURE__ */ new Date();
+    const rateConfig = await getEffectiveRateConfig();
     const cycleStart = estimateBillingCycleStart();
     const cycleRobust = await getCycleConsumptionRobust(cycleStart);
-    const tierInfo = getCurrentTierRate(cycleRobust.totalKwh);
-    const rate = allInMarginalRate(tierInfo.rate);
+    const tierInfo = getCurrentTierRate(cycleRobust.totalKwh, void 0, rateConfig.rate);
+    const rate = allInMarginalRate(tierInfo.rate, rateConfig.rate);
     let perCircuit;
     let startTime;
     if (range === "hour") {
@@ -43038,9 +43161,10 @@ router34.get("/projection", requireAuth2, async (_req, res) => {
     const cycleLength = 60;
     const projectedKwh = avgDailyKwh * cycleLength;
     const cycleEnd = new Date(cycleStart.getTime() + cycleLength * 24 * 60 * 60 * 1e3);
-    const projected = computeLadwpBill(projectedKwh, cycleStart, cycleEnd);
-    const bestCase = computeLadwpBill(projectedKwh * 0.9, cycleStart, cycleEnd);
-    const worstCase = computeLadwpBill(projectedKwh * 1.1, cycleStart, cycleEnd);
+    const rateConfig = await getEffectiveRateConfig();
+    const projected = computeLadwpBill(projectedKwh, cycleStart, cycleEnd, void 0, rateConfig.rate);
+    const bestCase = computeLadwpBill(projectedKwh * 0.9, cycleStart, cycleEnd, void 0, rateConfig.rate);
+    const worstCase = computeLadwpBill(projectedKwh * 1.1, cycleStart, cycleEnd, void 0, rateConfig.rate);
     res.json({
       cycleStart: cycleStart.toISOString(),
       daysElapsed: daysInCycle,
@@ -43276,11 +43400,32 @@ router34.get("/comparison", requireAuth2, async (_req, res) => {
     res.status(500).json(safeErrorJson(err));
   }
 });
-router34.get("/rates", requireAuth2, (_req, res) => {
+router34.get("/rates", requireAuth2, async (_req, res) => {
+  const rateConfig = await getEffectiveRateConfig();
+  if (rateConfig.isCustom && rateConfig.rate) {
+    return res.json({
+      isCustom: true,
+      current: {
+        season: "Standard Flat Rate",
+        isSummer: false,
+        tier1: rateConfig.rate,
+        tier2: rateConfig.rate,
+        tier3: rateConfig.rate
+      },
+      customRatePerKwh: rateConfig.rate,
+      allotments: { tier1: Infinity, tier2: 0 },
+      pac: { tier: "Standard", monthlyCharge: 0 },
+      utilityTaxRate: 0,
+      stateEnergySurcharge: 0,
+      zone: 1,
+      billingFrequency: "monthly"
+    });
+  }
   const now = /* @__PURE__ */ new Date();
   const current = getSeasonalRate(now);
   const tierInfo = getCurrentTierRate(0, now);
   res.json({
+    isCustom: false,
     current: {
       season: current.label,
       isSummer: current.isSummer,
@@ -43640,10 +43785,11 @@ router34.get("/panel-history", requireAuth2, async (req, res) => {
 router34.get("/live-rate", requireAuth2, async (_req, res) => {
   try {
     const cycleStart = estimateBillingCycleStart();
+    const rateConfig = await getEffectiveRateConfig();
     const robust = await getCycleConsumptionRobust(cycleStart);
-    const tierInfo = getCurrentTierRate(robust.totalKwh);
+    const tierInfo = getCurrentTierRate(robust.totalKwh, void 0, rateConfig.rate);
     const season = getSeasonalRate(/* @__PURE__ */ new Date());
-    const marginal = allInMarginalRate(tierInfo.rate);
+    const marginal = allInMarginalRate(tierInfo.rate, rateConfig.rate);
     const liveWatts = getLiveTotalWatts();
     const liveKw = +(liveWatts / 1e3).toFixed(2);
     res.json({
@@ -43653,8 +43799,8 @@ router34.get("/live-rate", requireAuth2, async (_req, res) => {
       tierRatePerKwh: tierInfo.rate,
       dollarsPerHour: +(liveKw * marginal).toFixed(2),
       tier: tierInfo.tier,
-      seasonLabel: season.label,
-      isSummer: season.isSummer
+      seasonLabel: rateConfig.isCustom ? "Standard Rate" : season.label,
+      isSummer: rateConfig.isCustom ? false : season.isSummer
     });
   } catch (err) {
     console.error("[electricity] live-rate error:", err);
