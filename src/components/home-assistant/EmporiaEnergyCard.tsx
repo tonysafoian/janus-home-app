@@ -110,7 +110,56 @@ const RAW_CIRCUITS: Array<Omit<CircuitConfig, 'energyEntityId'>> = [
   { entityId: 'sensor.wen_air_purifier_power_minute_average', label: 'Wen Air Purifier', category: 'Other', color: 'text-slate-400' },
 ];
 
-const CIRCUITS: CircuitConfig[] = RAW_CIRCUITS.map(c => ({ ...c, energyEntityId: energyIdFor(c.entityId) }));
+function discoverCircuits(entities: Array<{ entity_id: string; attributes?: Record<string, unknown> }>): CircuitConfig[] {
+  // First, check matching known circuit configurations that actually exist in this HA instance
+  const matched = RAW_CIRCUITS.filter(c => entities.some(e => e.entity_id === c.entityId))
+    .map(c => ({ ...c, energyEntityId: energyIdFor(c.entityId) }));
+
+  const knownIds = new Set(matched.map(c => c.entityId));
+
+  // Second, auto-discover any other power sensors in HA
+  for (const e of entities) {
+    if (knownIds.has(e.entity_id)) continue;
+    const isPower =
+      e.entity_id.startsWith('sensor.') &&
+      (e.entity_id.includes('_power_minute_average') ||
+       e.entity_id.endsWith('_power') ||
+       e.attributes?.device_class === 'power' ||
+       e.attributes?.unit_of_measurement === 'W');
+    if (!isPower) continue;
+
+    const friendlyName = (e.attributes?.friendly_name as string) || e.entity_id.replace(/^sensor\./, '').replace(/_/g, ' ');
+    const lower = (e.entity_id + ' ' + friendlyName).toLowerCase();
+    const category =
+      lower.includes('panel') ? 'Panels' :
+      lower.includes('ac') || lower.includes('hvac') || lower.includes('furnace') || lower.includes('climate') ? 'HVAC' :
+      lower.includes('charger') || lower.includes('tesla') || lower.includes('ev') || lower.includes('car') ? 'Vehicles' :
+      lower.includes('kitchen') || lower.includes('fridge') || lower.includes('oven') || lower.includes('dishwasher') ? 'Kitchen' :
+      lower.includes('light') ? 'Lighting' :
+      lower.includes('outdoor') || lower.includes('pool') || lower.includes('pump') || lower.includes('gate') || lower.includes('sauna') ? 'Outdoor' :
+      'Other';
+
+    const color =
+      category === 'Panels' ? 'text-violet-400' :
+      category === 'HVAC' ? 'text-blue-400' :
+      category === 'Vehicles' ? 'text-green-400' :
+      category === 'Kitchen' ? 'text-amber-400' :
+      category === 'Lighting' ? 'text-yellow-400' :
+      category === 'Outdoor' ? 'text-cyan-400' :
+      'text-slate-400';
+
+    matched.push({
+      entityId: e.entity_id,
+      energyEntityId: energyIdFor(e.entity_id),
+      label: friendlyName,
+      category,
+      color,
+    });
+    knownIds.add(e.entity_id);
+  }
+
+  return matched;
+}
 
 // ── Panel Catalog ─────────────────────────────────────────────────────
 // Authoritative mapping of each panel → its named child circuits.
@@ -770,8 +819,38 @@ export function EmporiaEnergyCard() {
     return m;
   }, [todayData]);
 
+  const discoveredCircuits = useMemo(() => {
+    return discoverCircuits(entities);
+  }, [entities]);
+
+  const activePanels = useMemo(() => {
+    const matched = PANEL_CATALOG.filter(p =>
+      entities.some(e => e.entity_id === p.mainEntityId || p.childEntityIds.some(cid => e.entity_id === cid))
+    );
+    if (matched.length > 0) return matched;
+    const powerSensors = entities.filter(e =>
+      e.entity_id.startsWith('sensor.') &&
+      (e.entity_id.includes('_power_minute_average') ||
+       e.entity_id.endsWith('_power') ||
+       e.attributes?.device_class === 'power' ||
+       e.attributes?.unit_of_measurement === 'W')
+    );
+    if (powerSensors.length > 0) {
+      return [{
+        id: 'main_panel',
+        label: 'Main Energy Panel',
+        mainEntityId: powerSensors[0].entity_id,
+        childEntityIds: powerSensors.map(s => s.entity_id),
+        color: 'text-violet-400',
+        borderColor: 'border-violet-500/40',
+        bgColor: 'bg-violet-500/8',
+      }];
+    }
+    return [];
+  }, [entities]);
+
   const circuitData: CircuitData[] = useMemo(() => {
-    return CIRCUITS.map(cfg => {
+    return discoveredCircuits.map(cfg => {
       const entity = entities.find(e => e.entity_id === cfg.entityId);
       const raw = entity ? parseFloat(entity.state) : NaN;
       const watts = isNaN(raw) || raw < 0 ? 0 : raw;
@@ -784,7 +863,7 @@ export function EmporiaEnergyCard() {
         todayCost: t?.cost ?? 0,
       };
     });
-  }, [entities, todayByEntity]);
+  }, [discoveredCircuits, entities, todayByEntity]);
 
   // Lookup map: power entity ID → CircuitData
   const circuitByPowerId = useMemo(() => {
@@ -793,13 +872,16 @@ export function EmporiaEnergyCard() {
     return m;
   }, [circuitData]);
 
-  // Live house total = sum of 5 panel mains only (no double-counting)
+  // Live house total = sum of active panel mains if panels exist, or sum of discovered circuits
   const liveTotalWatts = useMemo(() => {
-    return PANEL_CATALOG.reduce((sum, p) => {
-      const c = circuitByPowerId.get(p.mainEntityId);
-      return sum + (c?.watts ?? 0);
-    }, 0);
-  }, [circuitByPowerId]);
+    if (activePanels.length > 0) {
+      return activePanels.reduce((sum, p) => {
+        const c = circuitByPowerId.get(p.mainEntityId);
+        return sum + (c?.watts ?? 0);
+      }, 0);
+    }
+    return circuitData.reduce((sum, c) => sum + (c.watts ?? 0), 0);
+  }, [activePanels, circuitByPowerId, circuitData]);
 
   // For non-live panel view: build kWh lookup from the appropriate breakdown dataset
   const kwhByEnergyId = useMemo(() => {
@@ -833,7 +915,7 @@ export function EmporiaEnergyCard() {
   // Build panel value maps for the panel control view
   const panelData = useMemo(() => {
     const isLive = timeRange === 'live';
-    return PANEL_CATALOG.map(panel => {
+    return activePanels.map(panel => {
       const mainValue = isLive
         ? (circuitByPowerId.get(panel.mainEntityId)?.watts ?? 0)
         : (kwhByEnergyId.get(energyIdFor(panel.mainEntityId)) ?? 0);
@@ -854,7 +936,7 @@ export function EmporiaEnergyCard() {
 
       return { panel, mainValue, mainCost, childValues, childCosts };
     });
-  }, [timeRange, circuitByPowerId, kwhByEnergyId, costByEnergyId]);
+  }, [timeRange, activePanels, circuitByPowerId, kwhByEnergyId, costByEnergyId]);
 
   const houseTotalValue = useMemo(() => {
     return panelData.reduce((s, d) => s + d.mainValue, 0);
@@ -870,7 +952,7 @@ export function EmporiaEnergyCard() {
   const topCircuits = useMemo<TopCircuitEntry[]>(() => {
     if (timeRange === 'live') return [];
     const entries: TopCircuitEntry[] = [];
-    for (const panel of PANEL_CATALOG) {
+    for (const panel of activePanels) {
       for (const childId of panel.childEntityIds) {
         const energyId = energyIdFor(childId);
         const cost = costByEnergyId.get(energyId) ?? 0;
@@ -921,9 +1003,8 @@ export function EmporiaEnergyCard() {
   const sortLabel = sortMode === 'watts' ? 'Watts' : sortMode === 'name' ? 'Name' : 'Category';
 
   const hasEmporiaPanels = useMemo(() => {
-    return PANEL_CATALOG.some(p => entities.some(e => e.entity_id === p.mainEntityId)) ||
-           RAW_CIRCUITS.some(c => entities.some(e => e.entity_id === c.entityId));
-  }, [entities]);
+    return activePanels.length > 0 || discoveredCircuits.length > 0;
+  }, [activePanels, discoveredCircuits]);
 
   const discoveredEnergyMonitors = useMemo(() => {
     return entities.filter(e =>
@@ -942,7 +1023,7 @@ export function EmporiaEnergyCard() {
     : !hasAnyEnergyData
       ? 'Not configured'
       : viewMode === 'panel'
-        ? `${PANEL_CATALOG.length} panels · ${formatWatts(liveTotalWatts)} live`
+        ? `${activePanels.length} panel${activePanels.length === 1 ? '' : 's'} · ${formatWatts(liveTotalWatts)} live`
         : `${activeCircuits} active circuits · ${formatWatts(liveTotalWatts)} total`;
 
   const isLive = timeRange === 'live';
@@ -958,7 +1039,7 @@ export function EmporiaEnergyCard() {
         defaultExpanded={true}
         metrics={!hasAnyEnergyData ? [{ label: 'Status', value: 'Not Configured' }] : [
           { label: 'Live Load', value: loading ? '…' : formatWatts(liveTotalWatts) },
-          { label: 'Panels', value: loading ? '…' : String(PANEL_CATALOG.length) },
+          { label: 'Panels', value: loading ? '…' : String(activePanels.length) },
           { label: 'Circuits', value: loading ? '…' : String(circuitData.length) },
         ]}
       >
@@ -1039,10 +1120,10 @@ export function EmporiaEnergyCard() {
                     <button
                       type="button"
                       onClick={() => setHistoryPanel({
-                        energyEntityIds: PANEL_CATALOG.map(p => energyIdFor(p.mainEntityId)),
+                        energyEntityIds: activePanels.map(p => energyIdFor(p.mainEntityId)),
                         label: 'Whole House',
                         color: 'text-amber-400',
-                        breakdown: PANEL_CATALOG.map(p => ({
+                        breakdown: activePanels.map(p => ({
                           energyEntityId: energyIdFor(p.mainEntityId),
                           label: p.label,
                           color: p.color,
@@ -1143,7 +1224,7 @@ export function EmporiaEnergyCard() {
                 )}
 
                 <p className="text-[10px] text-muted-foreground/50 text-center pt-1">
-                  Emporia Vue 3 · {CIRCUITS.length} circuits · updates every ~60s · tap a circuit for history
+                  Electrical Monitoring · {circuitData.length} circuit{circuitData.length === 1 ? '' : 's'} · updates every ~60s · tap a circuit for history
                 </p>
               </>
             )}

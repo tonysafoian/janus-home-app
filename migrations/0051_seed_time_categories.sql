@@ -4,7 +4,7 @@
 -- Idempotent: existing categories with the same name are left untouched.
 
 INSERT INTO tt_categories (name, sort_order) VALUES
-  ('Club 34 Maintenance', 1),
-  ('TigerDen', 2),
-  ('Club34 Errands + Childcare', 3)
+  ('Home Maintenance', 1),
+  ('Property Projects', 2),
+  ('Errands & Services', 3)
 ON CONFLICT (name) DO NOTHING;

@@ -8,6 +8,7 @@
 
 import { sendHAWSCommand, getEntityCache } from './haWebSocket.js';
 import { query } from './db.js';
+import { getEstateTimezone } from './estateConfig.js';
 
 // ── Emporia circuit entity map ─────────────────────────────────────────
 // These are the _energy_today_ entities (kWh, total_increasing) — not the power (W) entities.
@@ -298,19 +299,20 @@ export async function getGridConsumption(
  * Get kWh consumed today so far (since midnight LA time).
  */
 export async function getTodayConsumption(): Promise<{ totalKwh: number; circuits: CircuitEnergyData[] }> {
-  // Midnight in LA timezone
+  // Midnight in local estate timezone (auto-discovered from HA Core /api/config or env)
+  const tz = getEstateTimezone();
   const now = new Date();
-  const laFormatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Los_Angeles',
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
     year: 'numeric', month: '2-digit', day: '2-digit',
   });
-  const parts = laFormatter.formatToParts(now);
+  const parts = formatter.formatToParts(now);
   const y = parts.find(p => p.type === 'year')!.value;
   const m = parts.find(p => p.type === 'month')!.value;
   const d = parts.find(p => p.type === 'day')!.value;
-  const midnightLA = new Date(`${y}-${m}-${d}T00:00:00-07:00`);
+  const midnight = new Date(`${y}-${m}-${d}T00:00:00`);
 
-  return getGridConsumption(midnightLA, now, 'hour');
+  return getGridConsumption(midnight, now, 'hour');
 }
 
 /**

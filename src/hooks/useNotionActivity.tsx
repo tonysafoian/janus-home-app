@@ -91,9 +91,6 @@ export interface DailyActivity {
   updates: number;
   new: number;
   completions: number;
-  tigerden_updates: number;
-  tigerden_new: number;
-  tigerden_completions: number;
   janus_updates: number;
   janus_new: number;
   janus_completions: number;
@@ -101,12 +98,8 @@ export interface DailyActivity {
 
 const EMPTY_DAY = {
   updates: 0, new: 0, completions: 0,
-  tigerden_updates: 0, tigerden_new: 0, tigerden_completions: 0,
   janus_updates: 0, janus_new: 0, janus_completions: 0,
 };
-
-const TIGERDEN_DATABASE_ID = '2b8e96d8-93fa-80cc-b1fa-fa4eef48c6fe';
-const JANUS_DATABASE_ID = '2b8e96d8-93fa-80bb-9428-cd132f827553';
 
 const BOT_AUTHOR_IDS = new Set([
   '00000000-0000-0000-0000-000000000005',
@@ -117,26 +110,6 @@ function isHumanAuthored(payload: NotionPayload | null): boolean {
   const authorId = payload.authors[0]?.id;
   if (!authorId) return true;
   return !BOT_AUTHOR_IDS.has(authorId);
-}
-
-function getProjectFromPayload(
-  payload: NotionPayload | null,
-  pageToDatabaseMap: Map<string, string>
-): 'tigerden' | 'janus' {
-  if (!payload?.data?.parent) return 'janus';
-  const parentType = payload.data.parent.type;
-  const parentId = payload.data.parent.id;
-
-  if (parentType === 'database') {
-    return parentId === TIGERDEN_DATABASE_ID ? 'tigerden' : 'janus';
-  }
-
-  if (parentType === 'page' && parentId) {
-    const dbId = pageToDatabaseMap.get(parentId);
-    if (dbId === TIGERDEN_DATABASE_ID) return 'tigerden';
-  }
-
-  return 'janus';
 }
 
 export function useNotionActivityStats(days: number = 14) {
@@ -176,11 +149,10 @@ export function useNotionActivityStats(days: number = 14) {
         if (!isHumanAuthored(payload)) continue;
         const dateKey = format(new Date(event.created_at), 'yyyy-MM-dd');
         const category = classifyEvent(event);
-        const project = getProjectFromPayload(payload, pageToDatabaseMap);
         const entry = map.get(dateKey);
         if (entry) {
           entry[category]++;
-          const wsKey = `${project}_${category}` as keyof DailyActivity;
+          const wsKey = `janus_${category}` as keyof DailyActivity;
           (entry[wsKey] as number)++;
         }
       }
@@ -295,16 +267,7 @@ export function useNotionDayEvents(date: string | null) {
 
       const events = (data ?? []).filter((e) => {
         const payload = e.payload;
-        if (!isHumanAuthored(payload)) return false;
-        if (e.notion_database_id === TIGERDEN_DATABASE_ID) return false;
-        if (payload?.data?.parent?.type === 'database' && payload?.data?.parent?.id === TIGERDEN_DATABASE_ID) {
-          return false;
-        }
-        if (payload?.data?.parent?.type === 'page') {
-          const dbId = pageToDatabaseMap.get(payload.data?.parent?.id ?? '');
-          if (dbId === TIGERDEN_DATABASE_ID) return false;
-        }
-        return true;
+        return isHumanAuthored(payload);
       });
 
       const pageIds = [...new Set(
@@ -486,7 +449,7 @@ export function useNotionRecurringTasks() {
 
       const allTasks: RecurringTask[] = [];
       const seenPageIds = new Set<string>();
-      const configsToFetch = configs.filter((c) => c.notion_database_id !== TIGERDEN_DATABASE_ID);
+      const configsToFetch = configs;
       const dbResults = await Promise.allSettled(
         configsToFetch.map((config) => queryNotionDatabase(config.notion_database_id).then((result) => ({ config, result })))
       );

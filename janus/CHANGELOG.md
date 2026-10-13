@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.23
+
+- **Dynamic Circuit & Panel Discovery**: `EmporiaEnergyCard.tsx` now dynamically discovers all available power sensors from Home Assistant (`_power_minute_average`, `device_class: power`, unit `W`/`kW`) and builds dynamic panel groups, eliminating static circuit lists and supporting any home energy setup.
+- **Zero Hardcoded Personal Devices & IDs**: Purged all remaining private device names and room identifiers (`TigerDen`, private Notion database UUIDs) from Notion integration routes, frontend prefetchers, skills documentation (`notion-tasks`, `home-automation`), and test scripts.
+- **Generic Database Migration Seeds**: Sanitized initial time-tracking category seeds in migration `0051` to generic defaults (`Home Maintenance`, `Property Projects`, `Errands & Services`).
+- **Dynamic Estate Timezone for Energy Statistics**: `haStatistics.ts` now dynamically resolves the local estate timezone from Home Assistant Core `/api/config` or environment rather than hardcoding `America/Los_Angeles`.
+- **Add-on Configuration Masking**: Masked `database_url` as a `password?` field in `janus/config.yaml` to ensure database credentials are never rendered in plaintext in the Home Assistant UI.
+
 ## 1.0.22
 
 - **Fix Printers Card Import**: Added missing `useMemo` import from React in `PrintersCard.tsx`, resolving runtime `ReferenceError` on the Systems dashboard.

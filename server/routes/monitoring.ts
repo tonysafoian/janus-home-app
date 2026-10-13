@@ -224,7 +224,7 @@ const PRINTERS = [
     ],
   },
   {
-    name: 'TigerDen',
+    name: 'Office Color Printer 1',
     statusEntity: 'sensor.hp_color_laserjet_pro_mfp_3301',
     cartridges: [
       { color: 'Black', entity: 'sensor.hp_color_laserjet_pro_mfp_3301_black_cartridge' },

@@ -424,8 +424,8 @@ router.post("/proxy", async (req: Request, res: Response) => {
 
     if (action === "search-pages" || action === "search-projects") {
       const searchQuery = query || "";
-      const JANUS_DB = "2b8e96d8-93fa-80bb-9428-cd132f827553";
-      const TIGERDEN_DB = "2b8e96d8-93fa-80cc-b1fa-fa4eef48c6fe";
+      const defaultDb = process.env.NOTION_DATABASE_ID || "2b8e96d8-93fa-80bb-9428-cd132f827553";
+      const secondaryDb = process.env.NOTION_SECONDARY_DATABASE_ID;
 
       const fetchDb = async (
         dbId: string,
@@ -485,14 +485,15 @@ router.post("/proxy", async (req: Request, res: Response) => {
         });
       };
 
-      const [janus, tigerDen] = await Promise.all([
-        fetchDb(JANUS_DB, "Janus"),
-        fetchDb(TIGERDEN_DB, "TigerDen"),
-      ]);
+      const fetchPromises = [fetchDb(defaultDb, "Janus")];
+      if (secondaryDb) {
+        fetchPromises.push(fetchDb(secondaryDb, "Secondary"));
+      }
+      const resultsArrays = await Promise.all(fetchPromises);
 
       return res.json({
         success: true,
-        results: [...janus, ...tigerDen],
+        results: resultsArrays.flat(),
       });
     }
 

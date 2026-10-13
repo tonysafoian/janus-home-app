@@ -6,7 +6,7 @@
  *
  * Run:  npx tsx scripts/test-garage-light-trigger.ts                     # diagnostic only
  *       npx tsx scripts/test-garage-light-trigger.ts --toggle            # flip the Recessed (forward direction)
- *       npx tsx scripts/test-garage-light-trigger.ts --toggle-reverse    # flip TigerDen (reverse direction)
+ *       npx tsx scripts/test-garage-light-trigger.ts --toggle-reverse    # flip Accent LED (reverse direction)
  *       npx tsx scripts/test-garage-light-trigger.ts --deploy            # push both automations to HA
  *
  * Use --deploy after reloading the Crestron + Govee integrations in HA — this
@@ -47,16 +47,15 @@ function findForwardTrigger(entities: HAEntity[]): HAEntity | null {
 }
 
 function findReverseTrigger(entities: HAEntity[]): HAEntity | null {
-  // Find TigerDen light or switch (prefer light.* when available)
+  // Find Garage Accent light or switch (prefer light.* when available)
   const candidates = entities.filter((e) => {
     const id = e.entity_id.toLowerCase();
     const name = String(e.attributes?.friendly_name ?? '').toLowerCase().trim();
-    const isTigerDen =
-      id.includes('tiger_den') || id.includes('tigerden') ||
-      name.includes('tigerden') || name.includes('tiger den') ||
-      name.includes('tiger_den');
+    const isAccent =
+      id.includes('garage_accent') || id.includes('garage_led') ||
+      name.includes('garage accent') || name.includes('garage led');
     const notSegment = !id.includes('segment') && !name.includes('segment');
-    return isTigerDen && notSegment;
+    return isAccent && notSegment;
   });
   // Prefer light.* entity; fall back to switch.*
   return (
@@ -71,10 +70,10 @@ function resolveForwardTargets(trigger: HAEntity, entities: HAEntity[]): HAEntit
   const match = triggerId.match(/^(.+_)recessed$/i);
   const prefix = match ? match[1].toLowerCase() : '';
   const out: HAEntity[] = [];
-  // TigerDen may exist only as switch.* (current Govee Cloud integration).
+  // Garage Accent may exist only as switch.* (e.g. Govee Cloud integration).
   // Track separately and prefer light.* when available.
-  let tigerDenLight: HAEntity | null = null;
-  let tigerDenSwitch: HAEntity | null = null;
+  let accentLight: HAEntity | null = null;
+  let accentSwitch: HAEntity | null = null;
   for (const e of entities) {
     if (e.entity_id === triggerId) continue;
     const isLight = e.entity_id.startsWith('light.');
@@ -88,26 +87,23 @@ function resolveForwardTargets(trigger: HAEntity, entities: HAEntity[]): HAEntit
         out.push(e); continue;
       }
     }
-    if (!prefix || !id.startsWith(prefix)) {
-      const isGovee = id.includes('govee') || name.includes('govee');
-      const isTigerDen =
-        id.includes('tiger_den') || id.includes('tigerden') ||
-        name.includes('tigerden') || name.includes('tiger den') ||
-        name.includes('tiger_den');
-      if (
-        (isTigerDen || (isGovee && (name.includes('garage') || name.includes('tiger')))) &&
-        !id.includes('segment') && !name.includes('segment')
-      ) {
-        if (isLight && !tigerDenLight) tigerDenLight = e;
-        else if (isSwitch && !tigerDenSwitch) tigerDenSwitch = e;
-      }
+    const isGovee = id.includes('govee') || name.includes('govee');
+    const isAccent =
+      id.includes('garage_accent') || id.includes('garage_led') ||
+      name.includes('garage accent') || name.includes('garage led');
+    if (
+      (isAccent || (isGovee && (name.includes('garage') || name.includes('accent')))) &&
+      !id.includes('segment') && !name.includes('segment')
+    ) {
+      if (isLight && !accentLight) accentLight = e;
+      else if (isSwitch && !accentSwitch) accentSwitch = e;
     }
   }
-  if (tigerDenLight) {
-    const lightUsable = tigerDenLight.state !== 'unavailable' && tigerDenLight.state !== 'unknown';
-    out.push(lightUsable || !tigerDenSwitch ? tigerDenLight : tigerDenSwitch);
-  } else if (tigerDenSwitch) {
-    out.push(tigerDenSwitch);
+  if (accentLight) {
+    const lightUsable = accentLight.state !== 'unavailable' && accentLight.state !== 'unknown';
+    out.push(lightUsable || !accentSwitch ? accentLight : accentSwitch);
+  } else if (accentSwitch) {
+    out.push(accentSwitch);
   }
   const seen = new Set<string>();
   return out.filter((e) => (seen.has(e.entity_id) ? false : (seen.add(e.entity_id), true)));
@@ -128,7 +124,7 @@ function row(label: string, value: string) {
 function buildForwardAutomationConfig(triggerId: string, targetIds: string[]) {
   return {
     alias: 'Janus — Garage Light Group',
-    description: '[Managed by Janus] Bidirectional group: Garages Recessed ↔ TigerDen (Govee). Forward: Recessed drives North Cabinets, Tool Cabinets, TigerDen.',
+    description: '[Managed by Janus] Bidirectional group: Garages Recessed ↔ Garage Accent LED (Govee). Forward: Recessed drives North Cabinets, Tool Cabinets, Garage Accent LED.',
     trigger: [
       { platform: 'state', entity_id: triggerId, to: 'on' },
       { platform: 'state', entity_id: triggerId, to: 'off' },
@@ -155,7 +151,7 @@ function buildForwardAutomationConfig(triggerId: string, targetIds: string[]) {
 function buildReverseAutomationConfig(reverseTrigId: string, primaryId: string) {
   return {
     alias: 'Janus — Garage Light Group (reverse)',
-    description: '[Managed by Janus] Reverse direction: TigerDen (Govee) drives Garages Recessed. State-equality condition prevents toggle loops.',
+    description: '[Managed by Janus] Reverse direction: Garage Accent LED (Govee) drives Garages Recessed. State-equality condition prevents toggle loops.',
     trigger: [
       { platform: 'state', entity_id: reverseTrigId, to: 'on' },
       { platform: 'state', entity_id: reverseTrigId, to: 'off' },
@@ -261,16 +257,16 @@ async function main() {
   row('current state', forwardTrigger.state);
   console.log();
 
-  // ── 2. Reverse trigger (TigerDen) ──────────────────────────────────────
-  console.log('── 2. Reverse trigger (TigerDen / Govee) ──────────');
+  // ── 2. Reverse trigger (Accent LED) ──────────────────────────────────────
+  console.log('── 2. Reverse trigger (Accent LED / Govee) ──────────');
   const reverseTrigger = findReverseTrigger(entities);
   if (!reverseTrigger) {
-    console.log('✗ NO reverse trigger matched (looking for light.*/switch.* with "tiger_den"/"tigerden")');
+    console.log('✗ NO reverse trigger matched (looking for light.*/switch.* with "garage_accent"/"garage_led")');
     const candidates = entities.filter((e) => {
       const id = e.entity_id.toLowerCase();
-      return id.includes('tiger') || id.includes('govee');
+      return id.includes('accent') || id.includes('govee');
     });
-    console.log(`  Candidate tiger/govee entities (${candidates.length}):`);
+    console.log(`  Candidate accent/govee entities (${candidates.length}):`);
     for (const c of candidates.slice(0, 12)) row(c.entity_id, `${String(c.attributes?.friendly_name ?? '')} [${c.state}]`);
   } else {
     row('entity_id', reverseTrigger.entity_id);
@@ -318,7 +314,7 @@ async function main() {
   const rvAuto = await getState(rvAutoId);
   if (!rvAuto) {
     console.log(`✗ ${rvAutoId} NOT FOUND — reverse automation not yet deployed.`);
-    console.log('  This is why the TigerDen → Recessed direction is broken.');
+    console.log('  This is why the Accent LED → Recessed direction is broken.');
     console.log('  Fix: run with --deploy.');
   } else {
     row('reverse entity_id', rvAuto.entity_id);
@@ -391,7 +387,7 @@ async function main() {
           console.log(`✗ Reverse deploy failed: ${e instanceof Error ? e.message : String(e)}`);
         }
       } else {
-        console.log('⚠ Skipping reverse deploy — TigerDen entity not found in HA.');
+        console.log('⚠ Skipping reverse deploy — Accent LED entity not found in HA.');
       }
 
       // Reload only if at least one config write succeeded; otherwise there's
@@ -421,7 +417,7 @@ async function main() {
   // ── 6. Live toggle tests ───────────────────────────────────────────────
   if (!doToggleForward && !doToggleReverse) {
     console.log('ℹ Re-run with --toggle         to flip Recessed and verify targets follow (forward direction).');
-    console.log('ℹ Re-run with --toggle-reverse to flip TigerDen and verify Recessed follows (reverse direction).');
+    console.log('ℹ Re-run with --toggle-reverse to flip Accent LED and verify Recessed follows (reverse direction).');
     console.log('ℹ Re-run with --deploy         to push both automations to HA.');
   }
 
@@ -445,7 +441,7 @@ async function main() {
   }
 
   if (doToggleReverse && reverseTrigger) {
-    console.log('── 6b. Live toggle test (reverse: TigerDen → Recessed) ──');
+    console.log('── 6b. Live toggle test (reverse: Accent LED → Recessed) ──');
     // Mirror the deploy-time fallback: use switch.* if light.* is unavailable/unknown
     let toggleReverseId = reverseTrigger.entity_id;
     if (
@@ -467,14 +463,14 @@ async function main() {
     await callHAService(domain, `turn_${revNext}`, { entity_id: toggleReverseId });
     await sleep(3000); // slightly longer — reverse → forward cascade may take a moment
     const afterReverse = await getState(toggleReverseId);
-    row('  TigerDen after', afterReverse?.state ?? '(unknown)');
+    row('  Accent LED after', afterReverse?.state ?? '(unknown)');
     const recessedAfter = await getState(forwardTrigger.entity_id);
     const recessedOk = recessedAfter?.state === revNext;
     console.log(`  ${recessedOk ? '✓' : '✗'} ${forwardTrigger.entity_id.padEnd(42)} → ${recessedAfter?.state ?? '?'}${recessedOk ? '' : ` (expected ${revNext})`}`);
     // Also check cabinet cascade (they should follow Recessed via forward automation)
     await sleep(1500);
     for (const t of forwardTargets) {
-      if (t.entity_id === toggleReverseId) continue; // TigerDen was the trigger
+      if (t.entity_id === toggleReverseId) continue; // Accent LED was the trigger
       const fresh = await getState(t.entity_id);
       const ok = fresh?.state === revNext;
       console.log(`  ${ok ? '✓' : '✗'} ${t.entity_id.padEnd(42)} → ${fresh?.state ?? '?'}${ok ? '' : ` (expected ${revNext})`}`);
@@ -483,7 +479,7 @@ async function main() {
     await callHAService(domain, `turn_${revBefore}`, { entity_id: toggleReverseId });
     console.log();
   } else if (doToggleReverse && !reverseTrigger) {
-    console.log('⚠ --toggle-reverse: TigerDen entity not found in HA — cannot test.');
+    console.log('⚠ --toggle-reverse: Accent LED entity not found in HA — cannot test.');
   }
 
   stopHAWebSocket();
