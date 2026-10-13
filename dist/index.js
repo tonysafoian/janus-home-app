@@ -9553,10 +9553,10 @@ var init_workflowRules = __esm({
       {
         id: "garage-recessed-group",
         name: "Garage Light Group",
-        description: "Bidirectional group: Garages Recessed \u2194 TigerDen (Govee). Toggling either side also controls North Cabinets and Tool Cabinets.",
+        description: "Bidirectional group: Garages Recessed \u2194 Garage Accent LED (Govee). Toggling either side also controls North Cabinets and Tool Cabinets.",
         enabled: true,
         triggerLabel: "Garages \u2014 Recessed",
-        targetLabels: ["North Cabinets", "Tool Cabinets", "TigerDen (Govee)"],
+        targetLabels: ["North Cabinets", "Tool Cabinets", "Garage Accent (Govee)"],
         isTrigger: (entity) => {
           if (!entity.entity_id.startsWith("light.")) return false;
           const id = entity.entity_id.toLowerCase();
@@ -9570,8 +9570,8 @@ var init_workflowRules = __esm({
           const triggerId = triggerEntity.entity_id;
           const match = triggerId.match(/^(.+_)recessed$/i);
           const prefix = match ? match[1].toLowerCase() : "";
-          let tigerDenLight = null;
-          let tigerDenSwitch = null;
+          let accentLight = null;
+          let accentSwitch = null;
           for (const e of allEntities) {
             if (e.entity_id === triggerId) continue;
             const isLight = e.entity_id.startsWith("light.");
@@ -9586,21 +9586,19 @@ var init_workflowRules = __esm({
                 continue;
               }
             }
-            if (!prefix || !id.startsWith(prefix)) {
-              const isGovee = id.includes("govee") || name.includes("govee");
-              const isTigerDen = id.includes("tiger_den") || id.includes("tigerden") || name.includes("tigerden") || name.includes("tiger den") || name.includes("tiger_den");
-              if ((isTigerDen || isGovee && (name.includes("garage") || name.includes("tiger"))) && !id.includes("segment") && !name.includes("segment")) {
-                if (isLight && !tigerDenLight) tigerDenLight = e.entity_id;
-                else if (isSwitch && !tigerDenSwitch) tigerDenSwitch = e.entity_id;
-              }
+            const isGovee = id.includes("govee") || name.includes("govee");
+            const isAccentMatch = id.includes("garage_accent") || id.includes("garage_led") || name.includes("garage accent") || name.includes("garage led");
+            if ((isAccentMatch || isGovee && (name.includes("garage") || name.includes("accent"))) && !id.includes("segment") && !name.includes("segment")) {
+              if (isLight && !accentLight) accentLight = e.entity_id;
+              else if (isSwitch && !accentSwitch) accentSwitch = e.entity_id;
             }
           }
-          if (tigerDenLight) {
-            const lightEntity = allEntities.find((x) => x.entity_id === tigerDenLight);
+          if (accentLight) {
+            const lightEntity = allEntities.find((x) => x.entity_id === accentLight);
             const lightUsable = lightEntity && lightEntity.state !== "unavailable" && lightEntity.state !== "unknown";
-            targets.push(lightUsable || !tigerDenSwitch ? tigerDenLight : tigerDenSwitch);
-          } else if (tigerDenSwitch) {
-            targets.push(tigerDenSwitch);
+            targets.push(lightUsable || !accentSwitch ? accentLight : accentSwitch);
+          } else if (accentSwitch) {
+            targets.push(accentSwitch);
           }
           const resolved = [...new Set(targets)];
           return resolved.map((entityId) => {
@@ -9617,16 +9615,16 @@ var init_workflowRules = __esm({
             return entityId;
           });
         },
-        // ── Reverse direction: TigerDen → Garages Recessed ──────────────────
+        // ── Reverse direction: Garage Accent LED → Garages Recessed ─────────
         bidirectional: true,
-        reverseTriggerLabel: "TigerDen (Govee)",
+        reverseTriggerLabel: "Garage Accent (Govee)",
         reverseIsTrigger: (entity) => {
           const id = entity.entity_id.toLowerCase();
           const name = (entity.attributes?.friendly_name || "").toLowerCase().trim();
-          const isTigerDen = id.includes("tiger_den") || id.includes("tigerden") || name.includes("tigerden") || name.includes("tiger den") || name.includes("tiger_den");
+          const isAccentMatch = id.includes("garage_accent") || id.includes("garage_led") || name.includes("garage accent") || name.includes("garage led");
           const isGoveeOrLight = id.startsWith("light.") || id.startsWith("switch.");
           const notSegment = !id.includes("segment") && !name.includes("segment");
-          return isTigerDen && isGoveeOrLight && notSegment;
+          return isAccentMatch && isGoveeOrLight && notSegment;
         },
         resolveReverseTarget: (_reverseEntity, allEntities) => {
           const recessed = allEntities.find((e) => {
@@ -26391,8 +26389,8 @@ router14.post("/proxy", async (req, res) => {
     }
     if (action === "search-pages" || action === "search-projects") {
       const searchQuery = query2 || "";
-      const JANUS_DB = "2b8e96d8-93fa-80bb-9428-cd132f827553";
-      const TIGERDEN_DB = "2b8e96d8-93fa-80cc-b1fa-fa4eef48c6fe";
+      const defaultDb = process.env.NOTION_DATABASE_ID || "2b8e96d8-93fa-80bb-9428-cd132f827553";
+      const secondaryDb = process.env.NOTION_SECONDARY_DATABASE_ID;
       const fetchDb = async (dbId, source) => {
         let titlePropName = "Name";
         try {
@@ -26442,13 +26440,14 @@ router14.post("/proxy", async (req, res) => {
           return { id: page.id, title, source, url: page.url };
         });
       };
-      const [janus, tigerDen] = await Promise.all([
-        fetchDb(JANUS_DB, "Janus"),
-        fetchDb(TIGERDEN_DB, "TigerDen")
-      ]);
+      const fetchPromises = [fetchDb(defaultDb, "Janus")];
+      if (secondaryDb) {
+        fetchPromises.push(fetchDb(secondaryDb, "Secondary"));
+      }
+      const resultsArrays = await Promise.all(fetchPromises);
       return res.json({
         success: true,
-        results: [...janus, ...tigerDen]
+        results: resultsArrays.flat()
       });
     }
     return res.status(400).json({ success: false, error: "Invalid action" });
@@ -31954,7 +31953,7 @@ var PRINTERS = [
     ]
   },
   {
-    name: "TigerDen",
+    name: "Office Color Printer 1",
     statusEntity: "sensor.hp_color_laserjet_pro_mfp_3301",
     cartridges: [
       { color: "Black", entity: "sensor.hp_color_laserjet_pro_mfp_3301_black_cartridge" },
@@ -42436,6 +42435,7 @@ function measurementScopeForFinding(finding2, canonicalLeafIds, circuitMetadata)
 // server/lib/haStatistics.ts
 init_haWebSocket();
 init_db2();
+init_estateConfig();
 var ENERGY_CIRCUITS = [
   { entityId: "sensor.av_room_panel_energy_today", powerEntityId: "sensor.av_room_panel_power_minute_average", label: "AV Room Panel", category: "Panels", panel: "av_room" },
   { entityId: "sensor.balance_energy_today", powerEntityId: "sensor.balance_power_minute_average", label: "Balance (GP1)", category: "Panels", panel: "garage1" },

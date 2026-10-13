@@ -126,17 +126,6 @@ function DeviceRow({
   );
 }
 
-/** Returns true if this entity is the Tiger Den LED strip (Govee) */
-function isTigerDenLedEntity(entity: HAEntity): boolean {
-  const id = entity.entity_id.toLowerCase();
-  const name = (entity.attributes?.friendly_name as string || '').toLowerCase();
-  const isTigerDen =
-    id.includes('tiger_den') || id.includes('tigerden') ||
-    name.includes('tiger den') || name.includes('tigerden') || name.includes('tiger_den');
-  const notSegment = !id.includes('segment') && !name.includes('segment');
-  return isTigerDen && notSegment && id.startsWith('light.');
-}
-
 export function HAGoveeLightsCard() {
   const [search, setSearch] = useState('');
   const { entities: allLights, loading, unavailable, refetch } = useSharedHAEntities('light');
@@ -155,18 +144,16 @@ export function HAGoveeLightsCard() {
     return goveeLights.filter(e => !isSegmentEntity(e));
   }, [allLights, goveeEntityIds]);
 
-  // Detect Tiger Den LED strip unavailability (light.* entity is unavailable)
-  // so the UI can surface a clear "using switch fallback" indicator.
-  const tigerDenLedStatus = useMemo(() => {
-    const lightEntity = allLights.find(isTigerDenLedEntity);
-    if (!lightEntity) return null;
-    if (lightEntity.state !== 'unavailable' && lightEntity.state !== 'unknown') return null;
-    // Check if a switch.* fallback is available and healthy
-    const switchId = lightEntity.entity_id.replace(/^light\./, 'switch.');
+  // Detect if any Govee light entity is unavailable while a corresponding switch.* fallback exists
+  const fallbackStatus = useMemo(() => {
+    const unavail = goveeDevices.find(e => e.state === 'unavailable' || e.state === 'unknown');
+    if (!unavail) return null;
+    const switchId = unavail.entity_id.replace(/^light\./, 'switch.');
     const switchEntity = allSwitches.find(e => e.entity_id === switchId);
     const hasFallback = !!switchEntity && switchEntity.state !== 'unavailable' && switchEntity.state !== 'unknown';
-    return { lightId: lightEntity.entity_id, switchId, hasFallback };
-  }, [allLights, allSwitches]);
+    const friendly = (unavail.attributes?.friendly_name as string) || unavail.entity_id;
+    return { lightName: friendly, lightId: unavail.entity_id, switchId, hasFallback };
+  }, [goveeDevices, allSwitches]);
 
   const { onCount } = useMemo(() => {
     let on = 0;
@@ -211,15 +198,15 @@ export function HAGoveeLightsCard() {
         { label: 'Devices', value: unavailable ? '—' : loading ? '...' : String(goveeDevices.length) },
       ]}
     >
-      {/* Tiger Den LED strip unavailability banner */}
-      {!unavailable && !loading && tigerDenLedStatus && (
+      {/* Generic light fallback banner */}
+      {!unavailable && !loading && fallbackStatus && (
         <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 mb-3 text-xs text-amber-700 dark:text-amber-400">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
           <span>
-            <span className="font-medium">Govee strip unavailable</span>
-            {tigerDenLedStatus.hasFallback
-              ? ' — using switch fallback. Garage sync still works.'
-              : ' — no switch fallback found. Garage sync may not work for Tiger Den.'}
+            <span className="font-medium">{fallbackStatus.lightName} unavailable</span>
+            {fallbackStatus.hasFallback
+              ? ` — using switch fallback (${fallbackStatus.switchId}).`
+              : ' — no switch fallback found.'}
           </span>
         </div>
       )}

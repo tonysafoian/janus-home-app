@@ -155,31 +155,31 @@ define(['./workbox-20b4bb42'], (function (workbox) { 'use strict';
     "url": "assets/useVoiceInput-BQ051sS_.js",
     "revision": null
   }, {
-    "url": "assets/useVerkada-C0QGR4gG.js",
+    "url": "assets/useVerkada-pdmyqeHC.js",
     "revision": null
   }, {
-    "url": "assets/useUserRole-CjS1Q5QE.js",
+    "url": "assets/useUserRole-B03tghix.js",
     "revision": null
   }, {
-    "url": "assets/useRealtimeSocket-CRcZvoMr.js",
+    "url": "assets/useRealtimeSocket-Dyy8pVhA.js",
     "revision": null
   }, {
-    "url": "assets/useProjects-DAQj-Bqo.js",
+    "url": "assets/useProjects-DAIMxujC.js",
     "revision": null
   }, {
     "url": "assets/usePWAInstall-BcELdFEq.js",
     "revision": null
   }, {
-    "url": "assets/useNotionActivity-CLAqZrOt.js",
+    "url": "assets/useNotionActivity-DJ439_-s.js",
     "revision": null
   }, {
-    "url": "assets/useHouseholdMembers-mWGeLBRy.js",
+    "url": "assets/useHouseholdMembers-DJ1duqEJ.js",
     "revision": null
   }, {
-    "url": "assets/useHomeAssistant-CnJZm8MT.js",
+    "url": "assets/useHomeAssistant-BiHLH70o.js",
     "revision": null
   }, {
-    "url": "assets/useAvClosetReading-CUipg4Vl.js",
+    "url": "assets/useAvClosetReading-yb-kQYg4.js",
     "revision": null
   }, {
     "url": "assets/use-mobile-1jch6yUL.js",
@@ -212,10 +212,10 @@ define(['./workbox-20b4bb42'], (function (workbox) { 'use strict';
     "url": "assets/tag-DfDIo714.js",
     "revision": null
   }, {
-    "url": "assets/tabs-CO6ExbTQ.js",
+    "url": "assets/tabs-7FEQN-y5.js",
     "revision": null
   }, {
-    "url": "assets/switch-BGXWRGVf.js",
+    "url": "assets/switch-BdOt7Ka6.js",
     "revision": null
   }, {
     "url": "assets/sun-CcYlRRSV.js",
@@ -227,7 +227,7 @@ define(['./workbox-20b4bb42'], (function (workbox) { 'use strict';
     "url": "assets/sparkles-CklIkdpQ.js",
     "revision": null
   }, {
-    "url": "assets/slider-B5pATc3C.js",
+    "url": "assets/slider-DsKlPJlP.js",
     "revision": null
   }, {
     "url": "assets/shopping-cart-hOUcLqNb.js",
@@ -239,7 +239,7 @@ define(['./workbox-20b4bb42'], (function (workbox) { 'use strict';
     "url": "assets/shield-DdMfY46x.js",
     "revision": null
   }, {
-    "url": "assets/sheet-CHH3HPHx.js",
+    "url": "assets/sheet-tXGEt5yn.js",
     "revision": null
   }, {
     "url": "assets/shared-DMYkWzsE.js",
@@ -254,13 +254,13 @@ define(['./workbox-20b4bb42'], (function (workbox) { 'use strict';
     "url": "assets/send-CsrzNwaV.js",
     "revision": null
   }, {
-    "url": "assets/select-BgcSqFQb.js",
+    "url": "assets/select-EWZ2llNX.js",
     "revision": null
   }, {
     "url": "assets/search-B7j6i6_x.js",
     "revision": null
   }, {
-    "url": "assets/scroll-area-DbPtG3ZY.js",
+    "url": "assets/scroll-area-D9GGpYss.js",
     "revision": null
   }, {
     "url": "assets/save-DeElSKB1.js",
@@ -314,7 +314,7 @@ define(['./workbox-20b4bb42'], (function (workbox) { 'use strict';
     "url": "assets/lightbulb-EsbUe3qa.js",
     "revision": null
   }, {
-    "url": "assets/lib-CNACXT7S.js",
+    "url": "assets/lib-CAzkB1he.js",
     "revision": null
   }, {
     "url": "assets/lib-C5mA5Ran.js",
@@ -335,10 +335,10 @@ define(['./workbox-20b4bb42'], (function (workbox) { 'use strict';
     "url": "assets/input-Z97pQC3P.js",
     "revision": null
   }, {
-    "url": "assets/index-CHA0MFxR.css",
+    "url": "assets/index-DwD7ifvf.js",
     "revision": null
   }, {
-    "url": "assets/index-BjBQ8Tk3.js",
+    "url": "assets/index-CHA0MFxR.css",
     "revision": null
   }, {
     "url": "assets/folder-open-D25nz9ZA.js",
@@ -374,13 +374,13 @@ define(['./workbox-20b4bb42'], (function (workbox) { 'use strict';
     "url": "assets/dollar-sign-BCiYLDhu.js",
     "revision": null
   }, {
-    "url": "assets/dist-W69Tn8Px.js",
-    "revision": null
-  }, {
     "url": "assets/dist-Ds2wKeYF.js",
     "revision": null
   }, {
     "url": "assets/dist-D10lTgPm.js",
+    "revision": null
+  }, {
+    "url": "assets/dist-CViKFJ-R.js",
     "revision": null
   }, {
     "url": "assets/dist-CGMXWT2j.js",
@@ -395,7 +395,7 @@ define(['./workbox-20b4bb42'], (function (workbox) { 'use strict';
     "url": "assets/createLucideIcon-ZNmHFeta.js",
     "revision": null
   }, {
-    "url": "assets/collapsible-DtdRwZmE.js",
+    "url": "assets/collapsible-3xBxbezU.js",
     "revision": null
   }, {
     "url": "assets/code-B5OeWOuJ.js",
@@ -467,7 +467,7 @@ define(['./workbox-20b4bb42'], (function (workbox) { 'use strict';
     "url": "assets/badge-ZOc4Dmwx.js",
     "revision": null
   }, {
-    "url": "assets/avatar-B6KgAy1S.js",
+    "url": "assets/avatar-3-2Pfy11.js",
     "revision": null
   }, {
     "url": "assets/arrow-right-CIQqIkKo.js",
@@ -479,121 +479,121 @@ define(['./workbox-20b4bb42'], (function (workbox) { 'use strict';
     "url": "assets/apiClient-CJ7hyapx.js",
     "revision": null
   }, {
-    "url": "assets/alert-dialog-B40ZN410.js",
+    "url": "assets/alert-dialog-DWWs5K2t.js",
     "revision": null
   }, {
     "url": "assets/activity-BEaGezgI.js",
     "revision": null
   }, {
-    "url": "assets/accordion-Cbr6kG2z.js",
+    "url": "assets/accordion-DP3_uHpT.js",
     "revision": null
   }, {
-    "url": "assets/Weather-BZgEPw25.js",
+    "url": "assets/Weather-Ca3KCi6P.js",
     "revision": null
   }, {
-    "url": "assets/Updates-DmkqN7Ir.js",
+    "url": "assets/Updates-DV0IKrEb.js",
     "revision": null
   }, {
-    "url": "assets/TimeAdmin-BkspmQG-.js",
+    "url": "assets/TimeAdmin-BaF7USez.js",
     "revision": null
   }, {
-    "url": "assets/Time-Buer5MOL.js",
+    "url": "assets/Time-BZRXnOBx.js",
     "revision": null
   }, {
-    "url": "assets/TeslaCallback-DEPVrDmq.js",
+    "url": "assets/TeslaCallback-CjQ-zblv.js",
     "revision": null
   }, {
-    "url": "assets/SystemCard-DrErZkVB.js",
+    "url": "assets/SystemCard-CE3JI2Ag.js",
     "revision": null
   }, {
-    "url": "assets/Settings-B3CfP53F.js",
+    "url": "assets/Settings-ES-n4NYI.js",
     "revision": null
   }, {
-    "url": "assets/SecurityCameras-CMS_H07L.js",
+    "url": "assets/SecurityCameras-DaANAJ9f.js",
     "revision": null
   }, {
-    "url": "assets/Search-CMxM-8cM.js",
+    "url": "assets/Search-C07f6IhY.js",
     "revision": null
   }, {
-    "url": "assets/SaunaLogicCard-C6umXWA7.js",
+    "url": "assets/SaunaLogicCard-DHeBlmY2.js",
     "revision": null
   }, {
-    "url": "assets/ResetPassword-CHyTx6vo.js",
+    "url": "assets/ResetPassword-ChaWBreF.js",
     "revision": null
   }, {
-    "url": "assets/Projects-lbIgxMyT.js",
+    "url": "assets/Projects-DIuOyub9.js",
     "revision": null
   }, {
-    "url": "assets/ProjectWorkspace-ardJw0Qi.js",
+    "url": "assets/ProjectWorkspace-DM6leMRp.js",
     "revision": null
   }, {
-    "url": "assets/ProductivityDay-BtNlXUeZ.js",
+    "url": "assets/ProductivityDay-4iV1SCGO.js",
     "revision": null
   }, {
-    "url": "assets/PoolTempChart-C4RgzK5Q.js",
+    "url": "assets/PoolTempChart-uXy2TyeK.js",
     "revision": null
   }, {
-    "url": "assets/NotionActivityChart-DvkwvLbC.js",
+    "url": "assets/NotionActivityChart-CcYDyvBC.js",
     "revision": null
   }, {
     "url": "assets/NotFound-T6ZA4tw4.js",
     "revision": null
   }, {
-    "url": "assets/MobileBottomNav-D_W20_tU.js",
+    "url": "assets/MobileBottomNav-LiCDhH5e.js",
     "revision": null
   }, {
-    "url": "assets/JanusFullscreen-B0h7SAhf.js",
+    "url": "assets/JanusFullscreen-9pdr8O3i.js",
     "revision": null
   }, {
-    "url": "assets/JanusDrawer-BJ_yTN-t.js",
+    "url": "assets/JanusDrawer-C8oXWnAL.js",
     "revision": null
   }, {
-    "url": "assets/Install-BGLj3Xfp.js",
+    "url": "assets/Install-BGEsGrb2.js",
     "revision": null
   }, {
-    "url": "assets/Index-jnGge2Ay.js",
+    "url": "assets/Index-D2uuO7Ij.js",
     "revision": null
   }, {
-    "url": "assets/Iaqualink-Be2Opoxv.js",
+    "url": "assets/Iaqualink-Cue0111j.js",
     "revision": null
   }, {
-    "url": "assets/HomeSystems-CYRKGsbK.js",
+    "url": "assets/HomeSystems-DF8_P6Zs.js",
     "revision": null
   }, {
-    "url": "assets/HomePage-Q-gEsdxN.js",
+    "url": "assets/HomePage-Cbqy7sdH.js",
     "revision": null
   }, {
-    "url": "assets/GoogleCallback-KIN_lu9x.js",
+    "url": "assets/GoogleCallback-BdtfU8co.js",
     "revision": null
   }, {
-    "url": "assets/Family-C0Ekzhrb.js",
+    "url": "assets/Family-CXumnz6F.js",
     "revision": null
   }, {
-    "url": "assets/DashboardProductivity-KRG6d7Q8.js",
+    "url": "assets/DashboardProductivity-MVgiz_1V.js",
     "revision": null
   }, {
-    "url": "assets/DashboardNav-C6fp-pQS.js",
+    "url": "assets/DashboardNav-BhLUREPa.js",
     "revision": null
   }, {
-    "url": "assets/DashboardHeader-C_cuaEYv.js",
+    "url": "assets/DashboardHeader-DC9GFMWX.js",
     "revision": null
   }, {
-    "url": "assets/DashboardGreeting-Cw6wB7EH.js",
+    "url": "assets/DashboardGreeting-gE1rIjML.js",
     "revision": null
   }, {
-    "url": "assets/Dashboard-Bh5EYot7.js",
+    "url": "assets/Dashboard-oa-w0xkK.js",
     "revision": null
   }, {
-    "url": "assets/Automations-BxFq_VIk.js",
+    "url": "assets/Automations-DxlnAyXy.js",
     "revision": null
   }, {
-    "url": "assets/AmazonOrder-PJbY6YuP.js",
+    "url": "assets/AmazonOrder-BN-CYdOa.js",
     "revision": null
   }, {
-    "url": "assets/Admin-BEfiXKQF.js",
+    "url": "assets/Admin-Bt8IbtjU.js",
     "revision": null
   }, {
-    "url": "assets/Activity-b0V5Ul2e.js",
+    "url": "assets/Activity-Zx3qlJcG.js",
     "revision": null
   }, {
     "url": "icon.svg",

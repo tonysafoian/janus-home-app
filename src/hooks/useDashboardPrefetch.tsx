@@ -6,8 +6,6 @@ import { queryNotionDatabase } from '@/lib/api/notion';
 import { getGoogleConnectionStatus, listGoogleEvents } from '@/lib/api/google';
 import { startOfDay, endOfDay, subDays, addDays } from 'date-fns';
 
-const TIGERDEN_DATABASE_ID = '2b8e96d8-93fa-80cc-b1fa-fa4eef48c6fe';
-
 interface NotionSyncConfigRow {
   notion_database_id: string;
 }
@@ -89,7 +87,7 @@ export function useDashboardPrefetch() {
           syncConfigs = (data as NotionSyncConfigRow[]) || [];
         }
         if (!syncConfigs.length) return [];
-        const configsToFetch = syncConfigs.filter((c) => c.notion_database_id !== TIGERDEN_DATABASE_ID);
+        const configsToFetch = syncConfigs;
         await Promise.allSettled(
           configsToFetch.map((config) => queryNotionDatabase(config.notion_database_id))
         );

@@ -71,11 +71,11 @@ export const WORKFLOW_RULES: WorkflowRule[] = [
     id: 'garage-recessed-group',
     name: 'Garage Light Group',
     description:
-      'Bidirectional group: Garages Recessed ↔ TigerDen (Govee). ' +
+      'Bidirectional group: Garages Recessed ↔ Garage Accent LED (Govee). ' +
       'Toggling either side also controls North Cabinets and Tool Cabinets.',
     enabled: true,
     triggerLabel: 'Garages — Recessed',
-    targetLabels: ['North Cabinets', 'Tool Cabinets', 'TigerDen (Govee)'],
+    targetLabels: ['North Cabinets', 'Tool Cabinets', 'Garage Accent (Govee)'],
 
     isTrigger: (entity) => {
       if (!entity.entity_id.startsWith('light.')) return false;
@@ -93,12 +93,12 @@ export const WORKFLOW_RULES: WorkflowRule[] = [
       const match = triggerId.match(/^(.+_)recessed$/i);
       const prefix = match ? match[1].toLowerCase() : '';
 
-      // TigerDen may be exposed as light.*, switch.*, or both depending on the
+      // Accent LED may be exposed as light.*, switch.*, or both depending on the
       // Govee integration in use. Track candidates separately so we can prefer
       // light.* when available (loop-protection in the reverse automation
       // assumes a single canonical entity per device).
-      let tigerDenLight: string | null = null;
-      let tigerDenSwitch: string | null = null;
+      let accentLight: string | null = null;
+      let accentSwitch: string | null = null;
 
       for (const e of allEntities) {
         if (e.entity_id === triggerId) continue;
@@ -118,35 +118,29 @@ export const WORKFLOW_RULES: WorkflowRule[] = [
           }
         }
 
-        // ── Govee TigerDen — accept light.* OR switch.*. The Govee Cloud
-        //    integration currently exposes the TigerDen LED strip ONLY as
-        //    switch.tiger_den_led_lights (no light entity), so filtering to
-        //    light.* drops it from the forward direction entirely.
-        if (!prefix || !id.startsWith(prefix)) {
-          const isGovee = id.includes('govee') || name.includes('govee');
-          const isTigerDen =
-            id.includes('tiger_den') || id.includes('tigerden') ||
-            name.includes('tigerden') || name.includes('tiger den') ||
-            name.includes('tiger_den');
-          if (
-            (isTigerDen || (isGovee && (name.includes('garage') || name.includes('tiger')))) &&
-            !id.includes('segment') && !name.includes('segment')
-          ) {
-            if (isLight && !tigerDenLight) tigerDenLight = e.entity_id;
-            else if (isSwitch && !tigerDenSwitch) tigerDenSwitch = e.entity_id;
-          }
+        // ── Accent LED — accept light.* OR switch.* ──
+        const isGovee = id.includes('govee') || name.includes('govee');
+        const isAccentMatch =
+          id.includes('garage_accent') || id.includes('garage_led') ||
+          name.includes('garage accent') || name.includes('garage led');
+        if (
+          (isAccentMatch || (isGovee && (name.includes('garage') || name.includes('accent')))) &&
+          !id.includes('segment') && !name.includes('segment')
+        ) {
+          if (isLight && !accentLight) accentLight = e.entity_id;
+          else if (isSwitch && !accentSwitch) accentSwitch = e.entity_id;
         }
       }
 
       // Prefer the light entity when it exists and is reachable; fall back to
       // switch.* only when light is missing or unavailable.
-      if (tigerDenLight) {
-        const lightEntity = allEntities.find(x => x.entity_id === tigerDenLight);
+      if (accentLight) {
+        const lightEntity = allEntities.find(x => x.entity_id === accentLight);
         const lightUsable =
           lightEntity && lightEntity.state !== 'unavailable' && lightEntity.state !== 'unknown';
-        targets.push(lightUsable || !tigerDenSwitch ? tigerDenLight : tigerDenSwitch);
-      } else if (tigerDenSwitch) {
-        targets.push(tigerDenSwitch);
+        targets.push(lightUsable || !accentSwitch ? accentLight : accentSwitch);
+      } else if (accentSwitch) {
+        targets.push(accentSwitch);
       }
 
       const resolved = [...new Set(targets)];
@@ -167,21 +161,20 @@ export const WORKFLOW_RULES: WorkflowRule[] = [
       });
     },
 
-    // ── Reverse direction: TigerDen → Garages Recessed ──────────────────
+    // ── Reverse direction: Garage Accent LED → Garages Recessed ─────────
 
     bidirectional: true,
-    reverseTriggerLabel: 'TigerDen (Govee)',
+    reverseTriggerLabel: 'Garage Accent (Govee)',
 
     reverseIsTrigger: (entity) => {
       const id = entity.entity_id.toLowerCase();
       const name = (entity.attributes?.friendly_name as string || '').toLowerCase().trim();
-      const isTigerDen =
-        id.includes('tiger_den') || id.includes('tigerden') ||
-        name.includes('tigerden') || name.includes('tiger den') ||
-        name.includes('tiger_den');
+      const isAccentMatch =
+        id.includes('garage_accent') || id.includes('garage_led') ||
+        name.includes('garage accent') || name.includes('garage led');
       const isGoveeOrLight = id.startsWith('light.') || id.startsWith('switch.');
       const notSegment = !id.includes('segment') && !name.includes('segment');
-      return isTigerDen && isGoveeOrLight && notSegment;
+      return isAccentMatch && isGoveeOrLight && notSegment;
     },
 
     resolveReverseTarget: (_reverseEntity, allEntities) => {

@@ -9,7 +9,7 @@ import {
 // ── Test fixtures ─────────────────────────────────────────────────────────
 // The garage-recessed-group rule is the most fallback-sensitive rule: it
 // resolves same-room Crestron cabinets (always light.*) plus the Govee
-// TigerDen, which may be exposed as light.*, switch.*, or both. The
+// garage accent LED, which may be exposed as light.*, switch.*, or both. The
 // light→switch fallback and the offline computation are the subtle parts.
 
 const RULE = WORKFLOW_RULES.find((r) => r.id === 'garage-recessed-group')!;
@@ -27,7 +27,7 @@ function entity(
 }
 
 // The garage recessed trigger + the two same-room cabinets, always healthy
-// across every scenario so we can isolate the TigerDen fallback behavior.
+// across every scenario so we can isolate the accent fallback behavior.
 function baseEntities(): HAEntityLike[] {
   return [
     entity('light.garage_recessed', 'on', 'Garages — Recessed'),
@@ -55,7 +55,7 @@ describe('resolveWorkflow — garage-recessed-group fallback & offline detection
   it('all healthy: resolves light targets with no fallback and nothing offline', () => {
     const entities = [
       ...baseEntities(),
-      entity('light.tiger_den', 'on', 'TigerDen (Govee)'),
+      entity('light.garage_accent', 'on', 'Garage Accent LED (Govee)'),
     ];
 
     const resolved = resolveWorkflow(RULE, entities);
@@ -64,7 +64,7 @@ describe('resolveWorkflow — garage-recessed-group fallback & offline detection
     expect(resolved!.targetEntityIds).toEqual([
       'light.garage_north_cabinets',
       'light.garage_tool_cabinets',
-      'light.tiger_den',
+      'light.garage_accent',
     ]);
     expect(resolved!.fallbackEntityIds).toEqual([]);
     expect(computeOfflineEntities(resolved!, entities)).toEqual([]);
@@ -73,8 +73,8 @@ describe('resolveWorkflow — garage-recessed-group fallback & offline detection
   it('genuine working fallback: light unavailable, switch twin reachable → switch target counts as fallback, nothing offline', () => {
     const entities = [
       ...baseEntities(),
-      entity('light.tiger_den', 'unavailable', 'TigerDen (Govee)'),
-      entity('switch.tiger_den', 'on', 'TigerDen (Govee)'),
+      entity('light.garage_accent', 'unavailable', 'Garage Accent LED (Govee)'),
+      entity('switch.garage_accent', 'on', 'Garage Accent LED (Govee)'),
     ];
 
     const resolved = resolveWorkflow(RULE, entities);
@@ -84,10 +84,10 @@ describe('resolveWorkflow — garage-recessed-group fallback & offline detection
     expect(resolved!.targetEntityIds).toEqual([
       'light.garage_north_cabinets',
       'light.garage_tool_cabinets',
-      'switch.tiger_den',
+      'switch.garage_accent',
     ]);
     // The switch is a genuine working fallback (reachable, with a dead light twin).
-    expect(resolved!.fallbackEntityIds).toEqual(['switch.tiger_den']);
+    expect(resolved!.fallbackEntityIds).toEqual(['switch.garage_accent']);
     // Fallback is reachable, so the UI shows it as fallback — NOT offline.
     expect(computeOfflineEntities(resolved!, entities)).toEqual([]);
   });
@@ -95,8 +95,8 @@ describe('resolveWorkflow — garage-recessed-group fallback & offline detection
   it('dead light + dead switch twin: surfaces as offline, NOT a false-positive fallback', () => {
     const entities = [
       ...baseEntities(),
-      entity('light.tiger_den', 'unavailable', 'TigerDen (Govee)'),
-      entity('switch.tiger_den', 'unavailable', 'TigerDen (Govee)'),
+      entity('light.garage_accent', 'unavailable', 'Garage Accent LED (Govee)'),
+      entity('switch.garage_accent', 'unavailable', 'Garage Accent LED (Govee)'),
     ];
 
     const resolved = resolveWorkflow(RULE, entities);
@@ -105,20 +105,20 @@ describe('resolveWorkflow — garage-recessed-group fallback & offline detection
     expect(resolved!.targetEntityIds).toEqual([
       'light.garage_north_cabinets',
       'light.garage_tool_cabinets',
-      'switch.tiger_den',
+      'switch.garage_accent',
     ]);
     // The chosen switch is itself dead, so it is NOT a working fallback.
     expect(resolved!.fallbackEntityIds).toEqual([]);
     // The degradation must surface as offline instead of masquerading as fallback.
     expect(computeOfflineEntities(resolved!, entities)).toEqual([
-      'switch.tiger_den',
+      'switch.garage_accent',
     ]);
   });
 
   it('light unavailable with no switch twin: keeps the dead light target and reports it offline', () => {
     const entities = [
       ...baseEntities(),
-      entity('light.tiger_den', 'unavailable', 'TigerDen (Govee)'),
+      entity('light.garage_accent', 'unavailable', 'Garage Accent LED (Govee)'),
     ];
 
     const resolved = resolveWorkflow(RULE, entities);
@@ -128,11 +128,11 @@ describe('resolveWorkflow — garage-recessed-group fallback & offline detection
     expect(resolved!.targetEntityIds).toEqual([
       'light.garage_north_cabinets',
       'light.garage_tool_cabinets',
-      'light.tiger_den',
+      'light.garage_accent',
     ]);
     expect(resolved!.fallbackEntityIds).toEqual([]);
     expect(computeOfflineEntities(resolved!, entities)).toEqual([
-      'light.tiger_den',
+      'light.garage_accent',
     ]);
   });
 });

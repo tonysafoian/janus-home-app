@@ -88,7 +88,7 @@ function WorkflowRuleCard({ rule, serverStatus }: { rule: WorkflowRule; serverSt
   const syncToHA = useCallback(async (force = false) => {
     if (allEntities.length === 0 || !resolved) return;
 
-    // Include reverse trigger in the fingerprint so changes to the TigerDen
+    // Include reverse trigger in the fingerprint so changes to the accent LED
     // entity (e.g. fallback activates) also trigger a redeploy.
     const fingerprintParts = [...resolved.targetEntityIds];
     if (resolved.reverseTriggerEntityId) fingerprintParts.push(resolved.reverseTriggerEntityId);

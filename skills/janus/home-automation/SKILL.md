@@ -32,67 +32,19 @@ Confirm before destructive or high-cost actions (turning on heaters/pumps that
 cost money to run, or anything affecting the whole house). Read state to verify
 the result when the user asked for a specific outcome.
 
-## Pool & Spa
+## Device Discovery & Control
 
-| Device | Entity ID | Notes |
-|--------|-----------|-------|
-| Pool Light | light.pool_light | Effects: Alpine White, Sky Blue, Cobalt Blue, Caribbean Blue, Spring Green, Emerald Green, Emerald Rose, Magenta, Violet, Slow Splash, Fast Splash, USA!, Fat Tuesday, Disco Tech |
-| Spa Light | light.spa_light | Same effects as Pool Light |
-| Laminar LED Light | light.laminar_led_lt | |
-| Pool Pump | switch.pool_pump | |
-| Spa Pump | switch.spa_pump | |
-| Pool Heater | switch.pool_heater | |
-| Spa Heater | switch.spa_heater | |
-| Solar Heater | switch.solar_heater | |
-| Booster Pump | switch.booster_pump | |
-| Laminar Jets | switch.laminar_jets | |
-| Bubbler | switch.bubbler | |
-| Pool Thermostat | climate.pool | Heat/off, 34–104°F |
-| Spa Thermostat | climate.spa | Heat/off, 34–104°F |
-| Pool Temp | sensor.pool_temp | °F |
-| Spa Temp | sensor.spa_temp | °F |
-| Air Temp (poolside) | sensor.air_temp | °F |
-| Pool Salinity | sensor.pool_salinity | |
-| Spa Salinity | sensor.spa_salinity | |
-| Pool pH | sensor.ph | |
-| Pool ORP | sensor.orp | |
-| Pool Cover | sensor.cover_pool | |
-| Freeze Protection | binary_sensor.freeze_protection | |
+Janus connects to your smart home via Home Assistant. Rather than assuming static
+device names, discover and interact with entities dynamically:
 
-## Printers
+1. **Entity Mappings:** Check configured device mappings via `getEntityMappings()` or Settings → Device & Entity Mappings for authoritative entity IDs (e.g. pool heater, spa pump, climate zones).
+2. **Dynamic Search:** Use `ha_get_states()` or filter by domain (`light.*`, `switch.*`, `climate.*`, `media_player.*`, `sensor.*`) matching the room or device friendly name requested by the user.
+3. **Common Domains & Services:**
+   - **Lights:** `ha_call_service("light", "turn_on", entity_id, { brightness_pct, rgb_color, effect })` / `turn_off`.
+   - **Switches & Relays:** `ha_call_service("switch", "turn_on", entity_id)` / `turn_off`.
+   - **Climate & Thermostats:** `ha_call_service("climate", "set_temperature", entity_id, { temperature, hvac_mode })`.
+   - **Media Players & Speakers:** `ha_call_service("media_player", "play_media", entity_id, { media_content_type, media_content_id })`, `media_pause`, `volume_set`.
+   - **Printers (IPP / SNMP):** Check toner sensors (`sensor.*_toner`, `sensor.*_cartridge`) and printer status (`sensor.*_status`).
+   - **Pool & Spa:** Check temperature sensors (`sensor.*_pool_temp`, `sensor.*_spa_temp`) and toggle pumps/heaters via their mapped switch entities.
 
-| Office Printer | sensor.office_printer | Status: idle/printing/stopped |
-| — Black Toner | sensor.office_printer_black_cartridge | |
-| — Cyan Toner | sensor.office_printer_cyan_cartridge | |
-| — Magenta Toner | sensor.office_printer_magenta_cartridge | |
-| — Yellow Toner | sensor.office_printer_yellow_cartridge | |
-| Den Printer | sensor.den_printer | Status: idle/printing/stopped |
-| — Black Toner | sensor.den_printer_black_cartridge | |
-| — Cyan Toner | sensor.den_printer_cyan_cartridge | |
-| — Magenta Toner | sensor.den_printer_magenta_cartridge | |
-| — Yellow Toner | sensor.den_printer_yellow_cartridge | |
-
-## Media Players
-
-| Device | Entity ID |
-|--------|-----------|
-| Main TV | media_player.main_tv |
-| Kitchen TV | media_player.kitchen_tv |
-| Gym TV | media_player.gym_tv |
-| Family Room TV | media_player.family_room_tv |
-| Office TV | media_player.office_tv |
-| Theater TV | media_player.theater_tv |
-| Theater Receiver | media_player.theater_receiver (inputs: PS5, Apple TV, Switch, GoogleTV, etc.) |
-| Lounge Speaker | media_player.lounge_speaker |
-| Office Speaker | media_player.office_speaker |
-| Kitchen Display | media_player.kitchen_display_1 |
-| Primary Closet Display | media_player.primary_closet_display |
-| Bedroom 1 Speaker | media_player.bedroom_1_speaker |
-| Master Bedroom Speaker | media_player.master_bedroom_speaker |
-| Playroom Speaker | media_player.playroom_speaker |
-| Bathroom Speaker | media_player.bathroom_speaker |
-| Den Speaker | media_player.den_speaker |
-| Family Room Display | media_player.family_room_display |
-| Gym Speaker | media_player.gym_speaker |
-| Dressing Room Speaker | media_player.dressing_room_speaker |
-| Main Rack Speaker | media_player.main_rack_speaker |
+Confirm with the user before destructive or high-cost actions (turning on pool/spa heaters that consume significant energy or changes affecting whole-house systems). Always verify the resulting state after triggering an action.
