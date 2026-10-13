@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.22
+
+- **Fix Printers Card Import**: Added missing `useMemo` import from React in `PrintersCard.tsx`, resolving runtime `ReferenceError` on the Systems dashboard.
+
 ## 1.0.21
 
 - **Configurable Electricity Rates & Open-Source Utility Engine**: Added `electricity_rate_per_kwh` option in `janus/config.yaml` and dynamic resolution in `server/routes/electricity.ts`. Users outside Los Angeles or with flat-rate power tariffs can now set their rate directly in add-on options or Settings, bypassing hardcoded LADWP tiered rates.
