@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { Printer, AlertTriangle, RefreshCw, Box, Thermometer, Clock, AlertCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
