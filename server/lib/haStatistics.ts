@@ -12,10 +12,10 @@ import { getEstateTimezone } from './estateConfig.js';
 
 // ── Emporia circuit entity map ─────────────────────────────────────────
 // These are the _energy_today_ entities (kWh, total_increasing) — not the power (W) entities.
-// HA's Emporia integration exposes sensor.<name>_energy_today and _energy_this_month
-// (there is no bare sensor.<name>_energy). HA auto-records long-term statistics for these,
+// HA's Emporia integration exposes `<name>_energy_today` and `_energy_this_month`
+// (there is no bare `<name>_energy`). HA auto-records long-term statistics for these,
 // so they are valid statistic_ids for recorder/statistics_during_period.
-// Numeric duplicate suffix goes at the END, e.g. sensor.balance_energy_today_2.
+// Numeric duplicate suffix goes at the END, e.g. `<name>_energy_today_2`.
 
 export interface CircuitMeta {
   entityId: string;       // energy entity (kWh)
@@ -25,131 +25,118 @@ export interface CircuitMeta {
   panel?: string;         // parent panel id (matches PANEL_CATALOG ids in the frontend)
 }
 
-export const ENERGY_CIRCUITS: CircuitMeta[] = [
-  { entityId: 'sensor.av_room_panel_energy_today', powerEntityId: 'sensor.av_room_panel_power_minute_average', label: 'AV Room Panel', category: 'Panels', panel: 'av_room' },
-  { entityId: 'sensor.balance_energy_today', powerEntityId: 'sensor.balance_power_minute_average', label: 'Balance (GP1)', category: 'Panels', panel: 'garage1' },
-  { entityId: 'sensor.balance_energy_today_2', powerEntityId: 'sensor.balance_power_minute_average_2', label: 'Balance (GP2)', category: 'Panels', panel: 'garage2' },
-  { entityId: 'sensor.balance_energy_today_3', powerEntityId: 'sensor.balance_power_minute_average_3', label: 'Balance (AV)', category: 'Panels', panel: 'av_room' },
-  { entityId: 'sensor.balance_energy_today_4', powerEntityId: 'sensor.balance_power_minute_average_4', label: 'Balance (GH)', category: 'Panels', panel: 'guest_house' },
-  { entityId: 'sensor.balance_energy_today_5', powerEntityId: 'sensor.balance_power_minute_average_5', label: 'Balance (ERC)', category: 'Panels', panel: 'equipment_room' },
-  { entityId: 'sensor.garage_panel_1_energy_today', powerEntityId: 'sensor.garage_panel_1_power_minute_average', label: 'Garage Panel #1', category: 'Panels', panel: 'garage1' },
-  { entityId: 'sensor.garage_panel_2_energy_today', powerEntityId: 'sensor.garage_panel_2_power_minute_average', label: 'Garage Panel #2', category: 'Panels', panel: 'garage2' },
-  // GP2 Slot 2-8: raw Emporia Vue 2 internal bus-channel readings for Garage Panel #2.
-  // These are NOT separate circuit loads — each slot corresponds to one of the named
-  // GP2 circuits already listed in the panel catalog (ac_primary_bedroom, etc.).
-  // Kept here for backend historical-query compatibility only; they are intentionally
-  // excluded from the frontend circuit list and panel-breakdown panel catalog to
-  // avoid double-counting.  The PANEL_CATALOG uses the named circuit entities.
-  { entityId: 'sensor.garage_panel_2_energy_today_2', powerEntityId: 'sensor.garage_panel_2_power_minute_average_2', label: 'GP2 Slot 2', category: 'Panels', panel: 'garage2' },
-  { entityId: 'sensor.garage_panel_2_energy_today_3', powerEntityId: 'sensor.garage_panel_2_power_minute_average_3', label: 'GP2 Slot 3', category: 'Panels', panel: 'garage2' },
-  { entityId: 'sensor.garage_panel_2_energy_today_4', powerEntityId: 'sensor.garage_panel_2_power_minute_average_4', label: 'GP2 Slot 4', category: 'Panels', panel: 'garage2' },
-  { entityId: 'sensor.garage_panel_2_energy_today_5', powerEntityId: 'sensor.garage_panel_2_power_minute_average_5', label: 'GP2 Slot 5', category: 'Panels', panel: 'garage2' },
-  { entityId: 'sensor.garage_panel_2_energy_today_6', powerEntityId: 'sensor.garage_panel_2_power_minute_average_6', label: 'GP2 Slot 6', category: 'Panels', panel: 'garage2' },
-  { entityId: 'sensor.garage_panel_2_energy_today_7', powerEntityId: 'sensor.garage_panel_2_power_minute_average_7', label: 'GP2 Slot 7', category: 'Panels', panel: 'garage2' },
-  { entityId: 'sensor.garage_panel_2_energy_today_8', powerEntityId: 'sensor.garage_panel_2_power_minute_average_8', label: 'GP2 Slot 8', category: 'Panels', panel: 'garage2' },
-  { entityId: 'sensor.guest_house_sub_panel_energy_today', powerEntityId: 'sensor.guest_house_sub_panel_power_minute_average', label: 'Guest House Panel', category: 'Panels', panel: 'guest_house' },
-  { entityId: 'sensor.ac_package_unit_energy_today', powerEntityId: 'sensor.ac_package_unit_power_minute_average', label: 'AC Package Unit', category: 'HVAC', panel: 'garage2' },
-  { entityId: 'sensor.ac_package_unit_join_cir_1_energy_today', powerEntityId: 'sensor.ac_package_unit_join_cir_1_power_minute_average', label: 'AC Package Unit (Cir1)', category: 'HVAC', panel: 'garage2' },
-  { entityId: 'sensor.ac_primary_bedroom_energy_today', powerEntityId: 'sensor.ac_primary_bedroom_power_minute_average', label: 'AC Primary Bedroom', category: 'HVAC', panel: 'garage2' },
-  { entityId: 'sensor.ac_compressor_rooftop_30amp_energy_today', powerEntityId: 'sensor.ac_compressor_rooftop_30amp_power_minute_average', label: 'AC Compressor Rooftop 30amp', category: 'HVAC', panel: 'garage2' },
-  { entityId: 'sensor.ac_compressor_rooftop_50amp_energy_today', powerEntityId: 'sensor.ac_compressor_rooftop_50amp_power_minute_average', label: 'AC Compressor Rooftop 50amp', category: 'HVAC', panel: 'garage2' },
-  { entityId: 'sensor.ac_unit_40amp_energy_today', powerEntityId: 'sensor.ac_unit_40amp_power_minute_average', label: 'AC Unit (40amp)', category: 'HVAC', panel: 'garage2' },
-  { entityId: 'sensor.ac_wine_cellar_energy_today', powerEntityId: 'sensor.ac_wine_cellar_power_minute_average', label: 'AC Wine Cellar', category: 'HVAC', panel: 'av_room' },
-  { entityId: 'sensor.gh_ac_energy_today', powerEntityId: 'sensor.gh_ac_power_minute_average', label: 'GH AC', category: 'HVAC', panel: 'guest_house' },
-  { entityId: 'sensor.gh_furnace_energy_today', powerEntityId: 'sensor.gh_furnace_power_minute_average', label: 'GH Furnace', category: 'HVAC', panel: 'guest_house' },
-  { entityId: 'sensor.gym_ac_energy_today', powerEntityId: 'sensor.gym_ac_power_minute_average', label: 'Gym AC', category: 'HVAC', panel: 'guest_house' },
-  { entityId: 'sensor.gym_furnace_energy_today', powerEntityId: 'sensor.gym_furnace_power_minute_average', label: 'Gym Furnace', category: 'HVAC', panel: 'guest_house' },
-  { entityId: 'sensor.ev_charger_1_energy_today', powerEntityId: 'sensor.ev_charger_1_power_minute_average', label: 'EV Charger 1', category: 'Vehicles', panel: 'guest_house' },
-  { entityId: 'sensor.ev_charger_2_energy_today', powerEntityId: 'sensor.ev_charger_2_power_minute_average', label: 'EV Charger 2', category: 'Vehicles', panel: 'guest_house' },
-  { entityId: 'sensor.equipment_room_cabana_energy_today', powerEntityId: 'sensor.equipment_room_cabana_power_minute_average', label: 'ERC Panel (Main)', category: 'Outdoor', panel: 'equipment_room' },
-  { entityId: 'sensor.equipment_room_cabana_energy_today_2',  powerEntityId: 'sensor.equipment_room_cabana_power_minute_average_2',  label: 'ERC Breaker 2',  category: 'Outdoor', panel: 'equipment_room' },
-  { entityId: 'sensor.equipment_room_cabana_energy_today_3',  powerEntityId: 'sensor.equipment_room_cabana_power_minute_average_3',  label: 'ERC Breaker 3',  category: 'Outdoor', panel: 'equipment_room' },
-  { entityId: 'sensor.equipment_room_cabana_energy_today_4',  powerEntityId: 'sensor.equipment_room_cabana_power_minute_average_4',  label: 'ERC Breaker 4',  category: 'Outdoor', panel: 'equipment_room' },
-  { entityId: 'sensor.equipment_room_cabana_energy_today_5',  powerEntityId: 'sensor.equipment_room_cabana_power_minute_average_5',  label: 'ERC Breaker 5',  category: 'Outdoor', panel: 'equipment_room' },
-  { entityId: 'sensor.equipment_room_cabana_energy_today_6',  powerEntityId: 'sensor.equipment_room_cabana_power_minute_average_6',  label: 'ERC Breaker 6',  category: 'Outdoor', panel: 'equipment_room' },
-  { entityId: 'sensor.equipment_room_cabana_energy_today_7',  powerEntityId: 'sensor.equipment_room_cabana_power_minute_average_7',  label: 'ERC Breaker 7',  category: 'Outdoor', panel: 'equipment_room' },
-  { entityId: 'sensor.equipment_room_cabana_energy_today_8',  powerEntityId: 'sensor.equipment_room_cabana_power_minute_average_8',  label: 'ERC Breaker 8',  category: 'Outdoor', panel: 'equipment_room' },
-  { entityId: 'sensor.equipment_room_cabana_energy_today_9',  powerEntityId: 'sensor.equipment_room_cabana_power_minute_average_9',  label: 'ERC Breaker 9',  category: 'Outdoor', panel: 'equipment_room' },
-  { entityId: 'sensor.equipment_room_cabana_energy_today_10', powerEntityId: 'sensor.equipment_room_cabana_power_minute_average_10', label: 'ERC Breaker 10', category: 'Outdoor', panel: 'equipment_room' },
-  { entityId: 'sensor.equipment_room_cabana_energy_today_11', powerEntityId: 'sensor.equipment_room_cabana_power_minute_average_11', label: 'ERC Breaker 11', category: 'Outdoor', panel: 'equipment_room' },
-  { entityId: 'sensor.equipment_room_cabana_energy_today_12', powerEntityId: 'sensor.equipment_room_cabana_power_minute_average_12', label: 'ERC Breaker 12', category: 'Outdoor', panel: 'equipment_room' },
-  { entityId: 'sensor.equipment_room_cabana_energy_today_13', powerEntityId: 'sensor.equipment_room_cabana_power_minute_average_13', label: 'ERC Breaker 13', category: 'Outdoor', panel: 'equipment_room' },
-  { entityId: 'sensor.equipment_room_cabana_energy_today_14', powerEntityId: 'sensor.equipment_room_cabana_power_minute_average_14', label: 'ERC Breaker 14', category: 'Outdoor', panel: 'equipment_room' },
-  { entityId: 'sensor.equipment_room_cabana_energy_today_15', powerEntityId: 'sensor.equipment_room_cabana_power_minute_average_15', label: 'ERC Breaker 15', category: 'Outdoor', panel: 'equipment_room' },
-  { entityId: 'sensor.equipment_room_cabana_energy_today_16', powerEntityId: 'sensor.equipment_room_cabana_power_minute_average_16', label: 'ERC Breaker 16', category: 'Outdoor', panel: 'equipment_room' },
-  { entityId: 'sensor.equipment_room_cabana_energy_today_17', powerEntityId: 'sensor.equipment_room_cabana_power_minute_average_17', label: 'ERC Breaker 17', category: 'Outdoor', panel: 'equipment_room' },
-  { entityId: 'sensor.ext_gate_motors_energy_today', powerEntityId: 'sensor.ext_gate_motors_power_minute_average', label: 'Ext Gate Motors', category: 'Outdoor', panel: 'av_room' },
-  { entityId: 'sensor.roof_top_receptacle_energy_today', powerEntityId: 'sensor.roof_top_receptacle_power_minute_average', label: 'Roof Top Receptacle', category: 'Outdoor', panel: 'garage2' },
-  { entityId: 'sensor.sauna_energy_today', powerEntityId: 'sensor.sauna_power_minute_average', label: 'Sauna', category: 'Outdoor', panel: 'guest_house' },
-  { entityId: 'sensor.sauna_energy_today_2', powerEntityId: 'sensor.sauna_power_minute_average_2', label: 'Sauna', category: 'Outdoor', panel: 'guest_house' },
-  { entityId: 'sensor.sump_pump_energy_today', powerEntityId: 'sensor.sump_pump_power_minute_average', label: 'Sump Pump', category: 'Outdoor', panel: 'av_room' },
-  { entityId: 'sensor.sump_pump_energy_today_2', powerEntityId: 'sensor.sump_pump_power_minute_average_2', label: 'Sump Pump', category: 'Outdoor', panel: 'av_room' },
-  { entityId: 'sensor.bar_refrigerator_energy_today', powerEntityId: 'sensor.bar_refrigerator_power_minute_average', label: 'Bar Refrigerator', category: 'Kitchen', panel: 'garage1' },
-  { entityId: 'sensor.dishwashers_energy_today', powerEntityId: 'sensor.dishwashers_power_minute_average', label: 'Dishwashers', category: 'Kitchen', panel: 'garage1' },
-  { entityId: 'sensor.gh_counter_outlets_energy_today', powerEntityId: 'sensor.gh_counter_outlets_power_minute_average', label: 'GH Counter Outlets', category: 'Kitchen', panel: 'guest_house' },
-  { entityId: 'sensor.gh_kitchen_outlets_energy_today', powerEntityId: 'sensor.gh_kitchen_outlets_power_minute_average', label: 'GH Kitchen Outlets', category: 'Kitchen', panel: 'guest_house' },
-  { entityId: 'sensor.gh_refrigerator_energy_today', powerEntityId: 'sensor.gh_refrigerator_power_minute_average', label: 'GH Refrigerator', category: 'Kitchen', panel: 'guest_house' },
-  { entityId: 'sensor.garbage_disposal_energy_today', powerEntityId: 'sensor.garbage_disposal_power_minute_average', label: 'Garbage Disposal', category: 'Kitchen', panel: 'garage1' },
-  { entityId: 'sensor.kitchen_counter_gfcis_energy_today', powerEntityId: 'sensor.kitchen_counter_gfcis_power_minute_average', label: 'Kitchen Counter GFCIs', category: 'Kitchen', panel: 'garage1' },
-  { entityId: 'sensor.kitchen_double_oven_energy_today', powerEntityId: 'sensor.kitchen_double_oven_power_minute_average', label: 'Kitchen Double Oven', category: 'Kitchen', panel: 'garage1' },
-  { entityId: 'sensor.kitchen_island_sub_zeros_energy_today', powerEntityId: 'sensor.kitchen_island_sub_zeros_power_minute_average', label: 'Kitchen Island Sub Zeros', category: 'Kitchen', panel: 'garage1' },
-  { entityId: 'sensor.kitchen_sub_zero_energy_today', powerEntityId: 'sensor.kitchen_sub_zero_power_minute_average', label: 'Kitchen Sub Zero', category: 'Kitchen', panel: 'garage1' },
-  { entityId: 'sensor.kitchen_sub_zero_freezer_energy_today', powerEntityId: 'sensor.kitchen_sub_zero_freezer_power_minute_average', label: 'Kitchen Sub Zero Freezer', category: 'Kitchen', panel: 'garage1' },
-  { entityId: 'sensor.stove_hood_energy_today', powerEntityId: 'sensor.stove_hood_power_minute_average', label: 'Stove Hood', category: 'Kitchen', panel: 'garage1' },
-  { entityId: 'sensor.crestron_lighting_energy_today', powerEntityId: 'sensor.crestron_lighting_power_minute_average', label: 'Crestron Lighting', category: 'Lighting', panel: 'av_room' },
-  { entityId: 'sensor.crestron_lighting_energy_today_2', powerEntityId: 'sensor.crestron_lighting_power_minute_average_2', label: 'Crestron Lighting 2', category: 'Lighting', panel: 'av_room' },
-  { entityId: 'sensor.crestron_lighting_energy_today_3', powerEntityId: 'sensor.crestron_lighting_power_minute_average_3', label: 'Crestron Lighting 3', category: 'Lighting', panel: 'av_room' },
-  { entityId: 'sensor.crestron_lighting_energy_today_4', powerEntityId: 'sensor.crestron_lighting_power_minute_average_4', label: 'Crestron Lighting 4', category: 'Lighting', panel: 'av_room' },
-  { entityId: 'sensor.crestron_lighting_energy_today_5', powerEntityId: 'sensor.crestron_lighting_power_minute_average_5', label: 'Crestron Lighting 5', category: 'Lighting', panel: 'av_room' },
-  { entityId: 'sensor.crestron_lighting_panel_energy_today', powerEntityId: 'sensor.crestron_lighting_panel_power_minute_average', label: 'Crestron Lighting Panel', category: 'Lighting', panel: 'av_room' },
-  { entityId: 'sensor.first_floor_lighting_energy_today', powerEntityId: 'sensor.first_floor_lighting_power_minute_average', label: 'First Floor Lighting', category: 'Lighting', panel: 'av_room' },
-  { entityId: 'sensor.second_floor_lighting_energy_today', powerEntityId: 'sensor.second_floor_lighting_power_minute_average', label: 'Second Floor Lighting', category: 'Lighting', panel: 'av_room' },
-  { entityId: 'sensor.av_rack_energy_today', powerEntityId: 'sensor.av_rack_power_minute_average', label: 'AV Rack', category: 'Other', panel: 'av_room' },
-  { entityId: 'sensor.av_rack_energy_today_2', powerEntityId: 'sensor.av_rack_power_minute_average_2', label: 'AV Rack 2', category: 'Other', panel: 'av_room' },
-  { entityId: 'sensor.av_rack_energy_today_3', powerEntityId: 'sensor.av_rack_power_minute_average_3', label: 'AV Rack 3', category: 'Other', panel: 'av_room' },
-  { entityId: 'sensor.elevator_energy_today', powerEntityId: 'sensor.elevator_power_minute_average', label: 'Elevator', category: 'Other', panel: 'av_room' },
-  { entityId: 'sensor.gh_garage_opener_energy_today', powerEntityId: 'sensor.gh_garage_opener_power_minute_average', label: 'GH Garage Opener', category: 'Other', panel: 'guest_house' },
-  { entityId: 'sensor.gh_garage_outlets_energy_today', powerEntityId: 'sensor.gh_garage_outlets_power_minute_average', label: 'GH Garage Outlets', category: 'Other', panel: 'guest_house' },
-  { entityId: 'sensor.gh_washer_dryer_energy_today', powerEntityId: 'sensor.gh_washer_dryer_power_minute_average', label: 'GH Washer Dryer', category: 'Other', panel: 'guest_house' },
-  { entityId: 'sensor.garage_ceiling_cord_plugs_energy_today', powerEntityId: 'sensor.garage_ceiling_cord_plugs_power_minute_average', label: 'Garage Ceiling Cord Plugs', category: 'Other', panel: 'garage1' },
-  { entityId: 'sensor.garage_doors_energy_today', powerEntityId: 'sensor.garage_doors_power_minute_average', label: 'Garage Doors', category: 'Other', panel: 'garage1' },
-  { entityId: 'sensor.garage_gfcis_energy_today', powerEntityId: 'sensor.garage_gfcis_power_minute_average', label: 'Garage GFCIs', category: 'Other', panel: 'garage1' },
-  { entityId: 'sensor.table_saw_energy_today', powerEntityId: 'sensor.table_saw_power_minute_average', label: 'Table Saw', category: 'Other', panel: 'garage1' },
-  { entityId: 'sensor.garage_wall_plugs_energy_today', powerEntityId: 'sensor.garage_wall_plugs_power_minute_average', label: 'Garage Wall Plugs', category: 'Other', panel: 'garage2' },
-  { entityId: 'sensor.garage_wall_plugs_energy_today_2', powerEntityId: 'sensor.garage_wall_plugs_power_minute_average_2', label: 'Garage Wall Plugs', category: 'Other', panel: 'garage2' },
-  { entityId: 'sensor.gym_outlets_energy_today', powerEntityId: 'sensor.gym_outlets_power_minute_average', label: 'Gym Outlets', category: 'Other', panel: 'guest_house' },
-  { entityId: 'sensor.gym_outlets_energy_today_2', powerEntityId: 'sensor.gym_outlets_power_minute_average_2', label: 'Gym Outlets', category: 'Other', panel: 'guest_house' },
-  { entityId: 'sensor.washer_dryer_1_energy_today', powerEntityId: 'sensor.washer_dryer_1_power_minute_average', label: 'Washer & Dryer (1)', category: 'Other', panel: 'garage1' },
-  { entityId: 'sensor.washer_dryer_2_energy_today', powerEntityId: 'sensor.washer_dryer_2_power_minute_average', label: 'Washer & Dryer (2)', category: 'Other', panel: 'garage1' },
-  { entityId: 'sensor.wen_air_purifier_energy_today', powerEntityId: 'sensor.wen_air_purifier_power_minute_average', label: 'Wen Air Purifier', category: 'Other', panel: 'garage1' },
-];
+export function discoverEnergyCircuitsFromEntities(
+  entities: Array<{ entity_id: string; attributes?: Record<string, unknown> }>,
+): CircuitMeta[] {
+  const discovered: CircuitMeta[] = [];
+  const seen = new Set<string>();
 
-export const PANEL_MAIN_ENERGY_ENTITY_IDS = [
-  'sensor.garage_panel_1_energy_today',
-  'sensor.garage_panel_2_energy_today',
-  'sensor.av_room_panel_energy_today',
-  'sensor.guest_house_sub_panel_energy_today',
-  'sensor.equipment_room_cabana_energy_today',
-] as const;
+  for (const e of entities) {
+    if (!e.entity_id || !e.entity_id.startsWith('sensor.')) continue;
+    if (seen.has(e.entity_id)) continue;
 
-// Raw duplicate channels and intermediate parents are retained in ENERGY_CIRCUITS
-// for compatibility, but are not independent members of the canonical hierarchy.
-const CANONICAL_NON_LEAF_ENERGY_IDS = new Set([
-  ...PANEL_MAIN_ENERGY_ENTITY_IDS,
-  'sensor.crestron_lighting_panel_energy_today',
-  ...Array.from({ length: 7 }, (_, i) => `sensor.garage_panel_2_energy_today_${i + 2}`),
-]);
+    const isEnergy =
+      e.entity_id.includes('_energy_today') ||
+      e.entity_id.endsWith('_energy') ||
+      e.attributes?.device_class === 'energy' ||
+      e.attributes?.unit_of_measurement === 'kWh';
 
-export const CANONICAL_LEAF_ENERGY_ENTITY_IDS = ENERGY_CIRCUITS
-  .map(circuit => circuit.entityId)
-  .filter(entityId => !CANONICAL_NON_LEAF_ENERGY_IDS.has(entityId));
+    if (!isEnergy) continue;
 
-// A trustworthy historical day needs both the non-overlapping insight leaves
-// and the five panel mains used to determine whole-house tariff context.
-export const CANONICAL_ENERGY_HIERARCHY_IDS = [
-  ...PANEL_MAIN_ENERGY_ENTITY_IDS,
-  ...CANONICAL_LEAF_ENERGY_ENTITY_IDS,
-];
+    const powerEntityId = e.entity_id
+      .replace('_energy_today', '_power_minute_average')
+      .replace('_energy', '_power');
+    const friendlyName =
+      (e.attributes?.friendly_name as string) ||
+      e.entity_id.replace(/^sensor\./, '').replace(/_/g, ' ');
+    const lower = (e.entity_id + ' ' + friendlyName).toLowerCase();
+
+    const category =
+      lower.includes('panel') ? 'Panels' :
+      lower.includes('ac') || lower.includes('hvac') || lower.includes('furnace') || lower.includes('climate') ? 'HVAC' :
+      lower.includes('charger') || lower.includes('tesla') || lower.includes('ev') || lower.includes('car') ? 'Vehicles' :
+      lower.includes('kitchen') || lower.includes('fridge') || lower.includes('oven') || lower.includes('dishwasher') ? 'Kitchen' :
+      lower.includes('light') ? 'Lighting' :
+      lower.includes('outdoor') || lower.includes('pool') || lower.includes('pump') || lower.includes('gate') || lower.includes('sauna') ? 'Outdoor' :
+      'Other';
+
+    discovered.push({
+      entityId: e.entity_id,
+      powerEntityId,
+      label: friendlyName,
+      category,
+    });
+    seen.add(e.entity_id);
+  }
+
+  return discovered;
+}
+
+export let ENERGY_CIRCUITS: CircuitMeta[] = [];
+
+export function getEnergyCircuits(): CircuitMeta[] {
+  if (ENERGY_CIRCUITS.length > 0) return ENERGY_CIRCUITS;
+  try {
+    const cache = getEntityCache();
+    if (cache && cache.length > 0) {
+      const discovered = discoverEnergyCircuitsFromEntities(cache);
+      if (discovered.length > 0) {
+        ENERGY_CIRCUITS = discovered;
+        return discovered;
+      }
+    }
+  } catch {}
+  return ENERGY_CIRCUITS;
+}
+
+export function setEnergyCircuits(circuits: CircuitMeta[]): void {
+  ENERGY_CIRCUITS = circuits;
+}
+
+export function getPanelMainEnergyEntityIds(): string[] {
+  const circuits = getEnergyCircuits();
+  return circuits
+    .filter(c => c.category === 'Panels' && !c.entityId.includes('balance') && !c.entityId.match(/slot_\d+/))
+    .map(c => c.entityId);
+}
+
+export function getCanonicalLeafEnergyEntityIds(): string[] {
+  const circuits = getEnergyCircuits();
+  const mains = new Set(getPanelMainEnergyEntityIds());
+  return circuits
+    .map(c => c.entityId)
+    .filter(id => !mains.has(id));
+}
+
+export const PANEL_MAIN_ENERGY_ENTITY_IDS = new Proxy([] as string[], {
+  get(target, prop) {
+    const ids = getPanelMainEnergyEntityIds();
+    if (prop === 'length') return ids.length;
+    if (prop === Symbol.iterator) return ids[Symbol.iterator].bind(ids);
+    if (typeof prop === 'string' && !isNaN(Number(prop))) return ids[Number(prop)];
+    return (ids as any)[prop];
+  },
+});
+
+export const CANONICAL_LEAF_ENERGY_ENTITY_IDS = new Proxy([] as string[], {
+  get(target, prop) {
+    const ids = getCanonicalLeafEnergyEntityIds();
+    if (prop === 'length') return ids.length;
+    if (prop === Symbol.iterator) return ids[Symbol.iterator].bind(ids);
+    if (typeof prop === 'string' && !isNaN(Number(prop))) return ids[Number(prop)];
+    return (ids as any)[prop];
+  },
+});
+
+export const CANONICAL_ENERGY_HIERARCHY_IDS = new Proxy([] as string[], {
+  get(target, prop) {
+    const ids = [...getPanelMainEnergyEntityIds(), ...getCanonicalLeafEnergyEntityIds()];
+    if (prop === 'length') return ids.length;
+    if (prop === Symbol.iterator) return ids[Symbol.iterator].bind(ids);
+    if (typeof prop === 'string' && !isNaN(Number(prop))) return ids[Number(prop)];
+    return (ids as any)[prop];
+  },
+});
 
 // ── Types ──────────────────────────────────────────────────────────────
 export interface StatisticsPoint {
@@ -273,13 +260,14 @@ export async function getGridConsumption(
   endTime?: Date,
   period: 'hour' | 'day' | 'week' | 'month' = 'day',
 ): Promise<{ totalKwh: number; circuits: CircuitEnergyData[] }> {
-  const entityIds = ENERGY_CIRCUITS.map(c => c.entityId);
+  const circuitsList = getEnergyCircuits();
+  const entityIds = circuitsList.map(c => c.entityId);
   const stats = await getEnergyStatistics(entityIds, startTime, endTime, period);
 
   const circuits: CircuitEnergyData[] = [];
   let totalKwh = 0;
 
-  for (const circuit of ENERGY_CIRCUITS) {
+  for (const circuit of circuitsList) {
     const points = stats[circuit.entityId] ?? [];
     const circuitKwh = points.reduce((sum, p) => sum + (p.change || 0), 0);
     totalKwh += circuitKwh;
@@ -400,8 +388,9 @@ export function getTodayConsumptionFromStates(): {
 
   const circuits: CircuitTodayKwh[] = [];
   let totalKwh = 0;
+  const circuitsList = getEnergyCircuits();
 
-  for (const circuit of ENERGY_CIRCUITS) {
+  for (const circuit of circuitsList) {
     const entity = byId.get(circuit.entityId);
     const raw = entity ? parseFloat(entity.state) : NaN;
     const kwh = Number.isFinite(raw) && raw >= 0 ? raw : 0;
@@ -428,14 +417,15 @@ export async function getCycleConsumptionFromDb(cycleStart: Date): Promise<{
   daysWithData: number;
   coveredDates: string[];
 }> {
-  // LA-local date strings for the cycle window [cycleStart, today).
+  // Local date strings for the cycle window [cycleStart, today).
   const fmt = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit',
+    timeZone: getEstateTimezone(), year: 'numeric', month: '2-digit', day: '2-digit',
   });
   const cycleStartDate = fmt.format(cycleStart);     // YYYY-MM-DD
   const todayDate = fmt.format(new Date());
 
-  const labelById = new Map(ENERGY_CIRCUITS.map(c => [c.entityId, c]));
+  const circuitsList = getEnergyCircuits();
+  const labelById = new Map(circuitsList.map(c => [c.entityId, c]));
   const circuits: CircuitTodayKwh[] = [];
   let totalKwh = 0;
   let daysWithData = 0;
@@ -492,7 +482,7 @@ export async function getCycleConsumptionFromDb(cycleStart: Date): Promise<{
  */
 function laDateString(iso: string): string {
   const fmt = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit',
+    timeZone: getEstateTimezone(), year: 'numeric', month: '2-digit', day: '2-digit',
   });
   return fmt.format(new Date(iso));
 }
@@ -504,10 +494,10 @@ function laDateString(iso: string): string {
  * long after the recorder's short-term purge, so the elapsed days are
  * recoverable even when the Janus snapshot table is empty.
  *
- * Returns per-circuit summed kWh over the filled days plus the set of LA-local
+ * Returns per-circuit summed kWh over the filled days plus the set of local
  * dates that were actually filled (so the daily-average denominator can count
  * real elapsed days, not a stale row count). `excludeDates` are days already in
- * the DB; `excludeToday` is the current LA date (read live elsewhere). Both are
+ * the DB; `excludeToday` is the current local date (read live elsewhere). Both are
  * skipped to avoid double-counting.
  */
 export async function getCycleConsumptionFromStats(
@@ -515,17 +505,18 @@ export async function getCycleConsumptionFromStats(
   excludeDates: Set<string>,
   excludeToday: string,
 ): Promise<{ circuits: CircuitTodayKwh[]; filledDates: string[] }> {
-  const labelById = new Map(ENERGY_CIRCUITS.map(c => [c.entityId, c]));
+  const circuitsList = getEnergyCircuits();
+  const labelById = new Map(circuitsList.map(c => [c.entityId, c]));
   const perCircuit = new Map<string, number>();
   const filled = new Set<string>();
 
   try {
-    const entityIds = ENERGY_CIRCUITS.map(c => c.entityId);
+    const entityIds = circuitsList.map(c => c.entityId);
     // Query [cycleStart, now); HA buckets by local day. We then drop any day the
     // DB already owns and today (live), summing only the genuinely-missing days.
     const stats = await getEnergyStatistics(entityIds, cycleStart, new Date(), 'day');
 
-    for (const circuit of ENERGY_CIRCUITS) {
+    for (const circuit of circuitsList) {
       const points = stats[circuit.entityId] ?? [];
       let kwh = 0;
       for (const p of points) {
@@ -581,7 +572,7 @@ export async function getCycleConsumptionRobust(cycleStart: Date): Promise<{
   const today = getTodayConsumptionFromStates();
 
   const todayDate = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit',
+    timeZone: getEstateTimezone(), year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(new Date());
 
   const dbDates = new Set(db.coveredDates);
@@ -600,7 +591,8 @@ export async function getCycleConsumptionRobust(cycleStart: Date): Promise<{
   for (const t of today.circuits) add(t);
 
   // Ensure every known circuit is represented (even at 0) for a stable UI.
-  for (const circuit of ENERGY_CIRCUITS) {
+  const allCircuits = getEnergyCircuits();
+  for (const circuit of allCircuits) {
     if (!merged.has(circuit.entityId)) {
       merged.set(circuit.entityId, {
         entityId: circuit.entityId, label: circuit.label,

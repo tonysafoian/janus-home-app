@@ -20,8 +20,8 @@ import { useQuery } from '@tanstack/react-query';
 type WindowWithGoogle = Window & { google?: typeof google };
 type WindowWithCallbacks = Window & Record<string, unknown>;
 
-const DEFAULT_LAT = 34.0522;
-const DEFAULT_LNG = -118.2437;
+const DEFAULT_LAT = Number(import.meta.env.VITE_HOME_LAT) || 0;
+const DEFAULT_LNG = Number(import.meta.env.VITE_HOME_LNG) || 0;
 
 interface RainViewerFrame {
   time: number;

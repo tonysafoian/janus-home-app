@@ -9,9 +9,9 @@
  * exist so the framework produces sane numbers today. Replacing them with
  * field-measured / catch-cup GPM per zone is a follow-up (see TODO).
  *
- * Keyed by HA entity_id. 19 real zones in HA:
- *   ESP-TM2  → switch.rain_bird_sprinkler_1   … switch.rain_bird_sprinkler_12   (12)
- *   ESP-ME3  → switch.rain_bird_sprinkler_1_2 … switch.rain_bird_sprinkler_7_2  (7)
+ * Keyed by HA entity_id. Discovered or configured zones in HA:
+ *   ESP-TM2  → Clock 1 (12 zones)
+ *   ESP-ME3  → Clock 2 (7 zones)
  */
 
 // Default GPM by sprinkler head type — clearly marked as DEFAULTS, editable.
@@ -50,29 +50,37 @@ function zone(
   return { entityId, svgId, label, controller, headType, gpm: DEFAULT_GPM_BY_TYPE[headType], isDefault: true };
 }
 
-export const ZONE_FLOW_CONFIG: ZoneFlowConfig[] = [
-  // ── ESP-TM2 (switch.rain_bird_sprinkler_1 … _12) → clock-1-valve-N ──
-  zone('switch.rain_bird_sprinkler_1',  'clock-1-valve-1',  'SW Front Lawn',          'ESP-TM2', 'rotor'),
-  zone('switch.rain_bird_sprinkler_2',  'clock-1-valve-2',  'SE Front Lawn',          'ESP-TM2', 'rotor'),
-  zone('switch.rain_bird_sprinkler_3',  'clock-1-valve-3',  'Gate Left Planting',     'ESP-TM2', 'drip'),
-  zone('switch.rain_bird_sprinkler_4',  'clock-1-valve-4',  'Gate Right Planting',    'ESP-TM2', 'drip'),
-  zone('switch.rain_bird_sprinkler_5',  'clock-1-valve-5',  'Entry Left Strip',       'ESP-TM2', 'spray'),
-  zone('switch.rain_bird_sprinkler_6',  'clock-1-valve-6',  'Entry Right Strip',      'ESP-TM2', 'spray'),
-  zone('switch.rain_bird_sprinkler_7',  'clock-1-valve-7',  'Rear Garden East',       'ESP-TM2', 'drip'),
-  zone('switch.rain_bird_sprinkler_8',  'clock-1-valve-8',  'Rear Garden West',       'ESP-TM2', 'drip'),
-  zone('switch.rain_bird_sprinkler_9',  'clock-1-valve-9',  'Service Yard',           'ESP-TM2', 'spray'),
-  zone('switch.rain_bird_sprinkler_10', 'clock-1-valve-10', 'North Lawn Left',        'ESP-TM2', 'rotor'),
-  zone('switch.rain_bird_sprinkler_11', 'clock-1-valve-11', 'North Lawn Right',       'ESP-TM2', 'rotor'),
-  zone('switch.rain_bird_sprinkler_12', 'clock-1-valve-12', 'Back Border',            'ESP-TM2', 'spray'),
+const IRR_DOMAIN = 'switch';
+const IRR_PREFIX = 'rain_bird_sprinkler';
 
-  // ── ESP-ME3 (switch.rain_bird_sprinkler_1_2 … _7_2) → clock-2-valve-N ──
-  zone('switch.rain_bird_sprinkler_1_2', 'clock-2-valve-1', 'NW Corner Garden',          'ESP-ME3', 'drip'),
-  zone('switch.rain_bird_sprinkler_2_2', 'clock-2-valve-2', 'North Left Strip',          'ESP-ME3', 'spray'),
-  zone('switch.rain_bird_sprinkler_3_2', 'clock-2-valve-3', 'West Side Corridor',        'ESP-ME3', 'drip'),
-  zone('switch.rain_bird_sprinkler_4_2', 'clock-2-valve-4', 'West Garden Mid',           'ESP-ME3', 'drip'),
-  zone('switch.rain_bird_sprinkler_5_2', 'clock-2-valve-5', 'West Garden Lower',         'ESP-ME3', 'drip'),
-  zone('switch.rain_bird_sprinkler_6_2', 'clock-2-valve-6', 'House East Trim (Upper)',   'ESP-ME3', 'spray'),
-  zone('switch.rain_bird_sprinkler_7_2', 'clock-2-valve-7', 'House East Trim (Lower)',   'ESP-ME3', 'spray'),
+function makeZoneId(clock: number, valve: number): string {
+  const suffix = clock === 1 ? `${valve}` : `${valve}_2`;
+  return `${IRR_DOMAIN}.${IRR_PREFIX}_${suffix}`;
+}
+
+export const ZONE_FLOW_CONFIG: ZoneFlowConfig[] = [
+  // ── ESP-TM2 (Clock 1, 12 valves) ──
+  zone(makeZoneId(1, 1),  'clock-1-valve-1',  'SW Front Lawn',          'ESP-TM2', 'rotor'),
+  zone(makeZoneId(1, 2),  'clock-1-valve-2',  'SE Front Lawn',          'ESP-TM2', 'rotor'),
+  zone(makeZoneId(1, 3),  'clock-1-valve-3',  'Gate Left Planting',     'ESP-TM2', 'drip'),
+  zone(makeZoneId(1, 4),  'clock-1-valve-4',  'Gate Right Planting',    'ESP-TM2', 'drip'),
+  zone(makeZoneId(1, 5),  'clock-1-valve-5',  'Entry Left Strip',       'ESP-TM2', 'spray'),
+  zone(makeZoneId(1, 6),  'clock-1-valve-6',  'Entry Right Strip',      'ESP-TM2', 'spray'),
+  zone(makeZoneId(1, 7),  'clock-1-valve-7',  'Rear Garden East',       'ESP-TM2', 'drip'),
+  zone(makeZoneId(1, 8),  'clock-1-valve-8',  'Rear Garden West',       'ESP-TM2', 'drip'),
+  zone(makeZoneId(1, 9),  'clock-1-valve-9',  'Service Yard',           'ESP-TM2', 'spray'),
+  zone(makeZoneId(1, 10), 'clock-1-valve-10', 'North Lawn Left',        'ESP-TM2', 'rotor'),
+  zone(makeZoneId(1, 11), 'clock-1-valve-11', 'North Lawn Right',       'ESP-TM2', 'rotor'),
+  zone(makeZoneId(1, 12), 'clock-1-valve-12', 'Back Border',            'ESP-TM2', 'spray'),
+
+  // ── ESP-ME3 (Clock 2, 7 valves) ──
+  zone(makeZoneId(2, 1), 'clock-2-valve-1', 'NW Corner Garden',          'ESP-ME3', 'drip'),
+  zone(makeZoneId(2, 2), 'clock-2-valve-2', 'North Left Strip',          'ESP-ME3', 'spray'),
+  zone(makeZoneId(2, 3), 'clock-2-valve-3', 'West Side Corridor',        'ESP-ME3', 'drip'),
+  zone(makeZoneId(2, 4), 'clock-2-valve-4', 'West Garden Mid',           'ESP-ME3', 'drip'),
+  zone(makeZoneId(2, 5), 'clock-2-valve-5', 'West Garden Lower',         'ESP-ME3', 'drip'),
+  zone(makeZoneId(2, 6), 'clock-2-valve-6', 'House East Trim (Upper)',   'ESP-ME3', 'spray'),
+  zone(makeZoneId(2, 7), 'clock-2-valve-7', 'House East Trim (Lower)',   'ESP-ME3', 'spray'),
 ];
 
 const BY_ENTITY = new Map(ZONE_FLOW_CONFIG.map(z => [z.entityId, z]));

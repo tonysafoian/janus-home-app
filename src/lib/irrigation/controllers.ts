@@ -25,10 +25,8 @@ export interface ClockDef {
 //
 // HA REALITY (verified): Home Assistant exposes 2 Rain Bird controllers /
 // 19 zones total:
-//   • ESP-TM2 (Clock 1, "Main Garden") — 12 zones
-//       switch.rain_bird_sprinkler_1 … switch.rain_bird_sprinkler_12
-//   • ESP-ME3 (Clock 2, "Pool Equipment 2") — 7 zones
-//       switch.rain_bird_sprinkler_1_2 … switch.rain_bird_sprinkler_7_2
+//   • ESP-TM2 (Clock 1, "Main Garden") — 12 zones (sprinkler_1 … sprinkler_12)
+//   • ESP-ME3 (Clock 2, "Pool Equipment 2") — 7 zones (sprinkler_1_2 … sprinkler_7_2)
 //
 // TODO(3rd-controller): Janus historically assumed a 3rd clock ("Garage Timer",
 // pool deck & NE plantings, ~12 zones) for ~29 zones total, but
@@ -115,7 +113,7 @@ export const CLOCK_DEFS: ClockDef[] = [
     name: 'Main Garden',
     shortName: 'MG',
     model: 'ESP-TM2',
-    inHomeAssistant: true, // 12 zones: switch.rain_bird_sprinkler_1 … _12
+    inHomeAssistant: true, // 12 zones: sprinkler_1 … _12
     valves: Array.from({ length: 12 }, (_, i) => makeValve(1, 'Main Garden', i + 1, '')),
   },
   {
@@ -123,7 +121,7 @@ export const CLOCK_DEFS: ClockDef[] = [
     name: 'Pool Equipment 2',
     shortName: 'PE2',
     model: 'ESP-ME3',
-    inHomeAssistant: true, // 7 zones: switch.rain_bird_sprinkler_1_2 … _7_2
+    inHomeAssistant: true, // 7 zones: sprinkler_1_2 … _7_2
     valves: Array.from({ length: 7 }, (_, i) => makeValve(2, 'Pool Equipment 2', i + 1, '_2')),
   },
   {

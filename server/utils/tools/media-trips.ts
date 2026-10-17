@@ -1,5 +1,6 @@
 import { getServiceClient } from "../janus-tools.js";
 import type { SupabaseClient } from "../supabase.js";
+import { getEstateTimezone } from "../../lib/estateConfig.js";
 
 export type RequestContext = {
   svc: SupabaseClient;
@@ -202,7 +203,7 @@ export async function executeQueryEntertainment(args: any, svc?: SupabaseClient)
     let query = sb.from("entertainment_events").select("*").order("event_date", { ascending: true });
     if (args.category) query = query.eq("category", args.category);
     if (args.upcoming_only !== false) {
-      const todayLA = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+      const todayLA = new Date().toLocaleDateString("en-CA", { timeZone: getEstateTimezone() });
       query = query.gte("event_date", todayLA);
     }
     const { data, error } = await query.limit(20);

@@ -9,7 +9,7 @@ import { encryptToken, decryptToken } from '../lib/encryption.js';
 import { guardedFetch } from '../lib/ssrfGuard.js';
 import { breakers, CircuitOpenError } from '../lib/breakers.js';
 import { safeErrorJson } from '../lib/errorSanitizer.js';
-import { getEntityCache, getGoveeEntityIdsFromCache, isCacheReady, callHAService } from '../lib/haWebSocket.js';
+import { getEntityCache, getGoveeEntityIdsFromCache, isCacheReady, callHAService, getAreasWithEntities, refreshHAAreas } from '../lib/haWebSocket.js';
 import { getBroadcastFallbackPhone, getAlertPhoneNumber, sendWhatsAppTo } from '../lib/helpers.js';
 import { generateAndUploadTTS, verifyPlaybackState, detectSilentDropRisk } from '../lib/castBroadcast.js';
 import { getZoneFlow } from '../lib/irrigationFlow.js';
@@ -344,6 +344,20 @@ router.get('/states', requireAuth, (_req: AuthenticatedRequest, res: Response) =
     return;
   }
   res.json(getEntityCache());
+});
+
+router.get('/areas', requireAuth, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    let areas = getAreasWithEntities();
+    if (areas.length === 0) {
+      await refreshHAAreas();
+      areas = getAreasWithEntities();
+    }
+    res.json({ success: true, areas });
+  } catch (err) {
+    console.error('[HA-Areas] Error fetching areas:', err);
+    res.status(500).json(safeErrorJson(err));
+  }
 });
 
 router.get('/cameras', requireAuth, async (req: AuthenticatedRequest, res: Response) => {

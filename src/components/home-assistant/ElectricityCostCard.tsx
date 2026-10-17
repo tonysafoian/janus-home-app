@@ -373,7 +373,7 @@ function BillHistory() {
             <tr className="border-b border-border/50">
               <th className="text-left py-1.5 text-muted-foreground font-medium">Period</th>
               <th className="text-right py-1.5 text-muted-foreground font-medium">kWh</th>
-              <th className="text-right py-1.5 text-muted-foreground font-medium">LADWP</th>
+              <th className="text-right py-1.5 text-muted-foreground font-medium">Billed</th>
               <th className="text-right py-1.5 text-muted-foreground font-medium">Ours</th>
               <th className="text-right py-1.5 text-muted-foreground font-medium">Δ</th>
             </tr>
@@ -466,7 +466,7 @@ export function ElectricityCostCard() {
           {/* Live cost hero */}
           <LiveCostHero data={liveCost} />
 
-          {/* Actual LADWP bill trend — intentionally prominent when a material
+          {/* Actual utility bill trend — intentionally prominent when a material
               whole-house change appears, even before circuit history matures. */}
           {savings?.billTrend && savings.billTrend.dailyDeltaPct >= 10 && (
             <div className="rounded-xl border border-red-500/35 bg-red-500/10 p-4">
@@ -594,7 +594,7 @@ export function ElectricityCostCard() {
 
           {/* Footer */}
           <p className="text-[10px] text-muted-foreground/50 text-center pt-1">
-            LADWP R-1A · Zone 1 · Bi-monthly · Updated every minute via Emporia Vue
+            Utility Rate Schedule · Updated every minute via Energy Monitor
           </p>
         </div>
       )}

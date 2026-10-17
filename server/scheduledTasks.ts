@@ -4,6 +4,7 @@ import { query } from './lib/db.js';
 import type { TeslaTokenRow, TeslaBatteryAlertRow } from '../shared/dbRows.js';
 import { getLastWebhookReceivedAt } from './routes/verkada.js';
 import { getAlertPhoneNumber } from './lib/helpers.js';
+import { getEstateTimezone } from './lib/estateConfig.js';
 
 const TESLA_API_BASE = "https://fleet-api.prd.na.vn.cloud.tesla.com";
 const TESLA_AUTH_BASE = "https://fleet-auth.prd.vn.cloud.tesla.com";
@@ -433,7 +434,7 @@ export async function runVerkadaWebhookHealthCheck(): Promise<void> {
   try {
     const lastAt = getLastWebhookReceivedAt();
     const nowLA = new Date();
-    const laHourStr = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hour12: false }).format(nowLA);
+    const laHourStr = new Intl.DateTimeFormat('en-US', { timeZone: getEstateTimezone(), hour: 'numeric', hour12: false }).format(nowLA);
     const laHour = parseInt(laHourStr);
     const isDaytime = laHour >= 7 && laHour < 22;
 

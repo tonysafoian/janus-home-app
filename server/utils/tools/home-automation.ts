@@ -2,6 +2,7 @@ import type { SupabaseClient } from "../supabase.js";
 import { refreshTeslaToken, TESLA_API_BASE } from "../janus-tools.js";
 import { breakers, CircuitOpenError, toolErrorForOpenCircuit } from "../../lib/breakers.js";
 import { getZoneFlow } from "../../lib/irrigationFlow.js";
+import { getEstateTimezone } from "../../lib/estateConfig.js";
 
 interface HAEntity {
   entity_id: string;
@@ -200,7 +201,7 @@ export async function executeCheckVerkadaSecurity(svc: SupabaseClient): Promise<
       if (events.length > 0) {
         lines.push(`\n**Recent Access Events (${events.length}):**`);
         for (const e of events.slice(0, 10)) {
-          const time = e.timestamp ? new Date(e.timestamp * 1000).toLocaleString("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit" }) : "?";
+          const time = e.timestamp ? new Date(e.timestamp * 1000).toLocaleString("en-US", { timeZone: getEstateTimezone(), hour: "numeric", minute: "2-digit" }) : "?";
           lines.push(`- ${time}: ${e.actor_name || "Unknown"} — ${e.event_type || "access"} at ${e.door_name || "unknown door"}`);
         }
       } else { lines.push("\nNo access events in the last 24 hours."); }
@@ -211,7 +212,7 @@ export async function executeCheckVerkadaSecurity(svc: SupabaseClient): Promise<
     if (sightings && sightings.length > 0) {
       lines.push(`\n**POI Sightings (last 24h): ${sightings.length}**`);
       for (const s of sightings.slice(0, 10)) {
-        const time = new Date(s.seen_at).toLocaleString("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit" });
+        const time = new Date(s.seen_at).toLocaleString("en-US", { timeZone: getEstateTimezone(), hour: "numeric", minute: "2-digit" });
         lines.push(`- ${time}: ${s.label || "Unknown person"} at ${s.camera_name || "unknown camera"}`);
       }
     } else { lines.push("\nNo POI sightings in the last 24 hours."); }

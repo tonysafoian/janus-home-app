@@ -7,9 +7,6 @@ import { format, parseISO } from 'date-fns';
 import { apiClient } from '@/lib/apiClient';
 
 
-const DEFAULT_LAT = 34.0522;
-const DEFAULT_LON = -118.2437;
-
 interface DayForecast {
   date: string;
   tempMax: number;
@@ -82,8 +79,8 @@ export function WeatherStrip() {
     },
     staleTime: 60 * 60_000,
   });
-  const LAT = estateConfig?.latitude ?? DEFAULT_LAT;
-  const LON = estateConfig?.longitude ?? DEFAULT_LON;
+  const LAT = estateConfig?.latitude ?? null;
+  const LON = estateConfig?.longitude ?? null;
 
   const { data: weatherData, isLoading: loading } = useQuery({
     queryKey: ['weather-strip'],
@@ -207,7 +204,9 @@ export function WeatherStrip() {
           <div className="container py-2 space-y-1.5">
             {weatherAlerts.map((alert) => {
               // NWS alerts page filtered to local coordinates
-              const alertUrl = `https://forecast.weather.gov/MapClick.php?lat=${LAT}&lon=${LON}`;
+              const alertUrl = (LAT != null && LON != null)
+                ? `https://forecast.weather.gov/MapClick.php?lat=${LAT}&lon=${LON}`
+                : 'https://weather.gov';
               
               return (
                 <a

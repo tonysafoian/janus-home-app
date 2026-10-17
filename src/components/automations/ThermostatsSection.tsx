@@ -71,9 +71,6 @@ const POOL_SPA_RE = /pool|spa/i;
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const GYM_ENTITY_ID = 'climate.gym_gym';
-const THEATER_ENTITY_ID = 'climate.theater_theater';
-
 // Per-entity automation config for thermostats that have schedule enforcement
 interface AutomationConfig {
   schedule: ScheduleWindow;
@@ -99,10 +96,15 @@ function buildAutomationConfig(
   };
 }
 
-const THERMOSTAT_AUTOMATION: Record<string, AutomationConfig> = {
-  [GYM_ENTITY_ID]: buildAutomationConfig(GYM_SCHEDULE, GYM_HEAT_TEMP, GYM_COOL_TEMP),
-  [THEATER_ENTITY_ID]: buildAutomationConfig(THEATER_SCHEDULE, THEATER_HEAT_TEMP, THEATER_COOL_TEMP),
-};
+function getThermostatAutomationConfig(entityId: string): AutomationConfig | null {
+  if (/gym/i.test(entityId)) {
+    return buildAutomationConfig(GYM_SCHEDULE, GYM_HEAT_TEMP, GYM_COOL_TEMP);
+  }
+  if (/theater/i.test(entityId)) {
+    return buildAutomationConfig(THEATER_SCHEDULE, THEATER_HEAT_TEMP, THEATER_COOL_TEMP);
+  }
+  return null;
+}
 
 // Colors per HVAC mode
 const MODE_COLORS: Record<string, { bg: string; text: string; border: string; line: string }> = {
@@ -194,7 +196,7 @@ function ThermostatCard({
 }) {
   const myLogs = logs.filter(l => l.entity_id === entityId);
   const latest = myLogs[myLogs.length - 1];
-  const automationConfig = THERMOSTAT_AUTOMATION[entityId] ?? null;
+  const automationConfig = getThermostatAutomationConfig(entityId);
 
   // Prefer live HA reading; fall back to most recent logged reading.
   const loggedTemp = latest?.current_temperature ? parseFloat(latest.current_temperature) : null;
@@ -599,10 +601,9 @@ export function ThermostatsSection() {
     /closet|h5103|wifi.?thermometer/i.test(`${l.entity_id} ${l.friendly_name ?? ''}`)
   );
 
-  const PINNED = [GYM_ENTITY_ID, THEATER_ENTITY_ID];
-  const pinned = PINNED.filter(id => entityIds.includes(id));
+  const pinned = entityIds.filter(id => /gym|theater/i.test(id));
   const rest = entityIds
-    .filter(id => !PINNED.includes(id))
+    .filter(id => !/gym|theater/i.test(id))
     .sort((a, b) => getName(a).localeCompare(getName(b)));
   const ordered = [...pinned, ...rest];
 

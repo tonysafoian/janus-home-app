@@ -3,6 +3,8 @@ name: Build & Publish Home Assistant Add-on
 on:
   push:
     branches: [main]
+    tags:
+      - 'v*'
     paths:
       - "janus/**"
       - "server/**"
@@ -58,5 +60,7 @@ jobs:
           build-args: |
             BUILD_FROM=${{ matrix.base }}
           tags: |
+            ghcr.io/${{ github.repository_owner }}/janus-${{ matrix.arch }}:latest
+            ghcr.io/${{ github.repository_owner }}/janus-${{ matrix.arch }}:1.0.24
             ghcr.io/${{ github.repository_owner }}/janus-home-app-${{ matrix.arch }}:latest
-            ghcr.io/${{ github.repository_owner }}/janus-home-app-${{ matrix.arch }}:1.0.0
+            ghcr.io/${{ github.repository_owner }}/janus-home-app-${{ matrix.arch }}:1.0.24

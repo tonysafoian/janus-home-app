@@ -274,7 +274,7 @@ function ReadyInsights({ data }: { data: InsightsReady }) {
       </div>
 
       <p className="text-center text-[10px] text-muted-foreground/60">
-        {formatDate(data.windowStart)}–{formatDate(data.windowEnd)} · LADWP Tier {data.currentTier ?? '—'} all-in marginal rate ${data.marginalRatePerKwh.toFixed(4)}/kWh · no time-of-use discount assumed
+        {formatDate(data.windowStart)}–{formatDate(data.windowEnd)} · Utility Tier {data.currentTier ?? '—'} all-in marginal rate ${data.marginalRatePerKwh.toFixed(4)}/kWh · no time-of-use discount assumed
       </p>
     </div>
   );

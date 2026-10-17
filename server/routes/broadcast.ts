@@ -20,6 +20,7 @@ import { sanitizeErrorMessage } from "../lib/error-sanitizer.js";
 import { requireAuth, type AuthenticatedRequest } from "../middleware/auth.js";
 import { composeSchoolMorningAnnouncement } from "../services/schoolMorningBriefing.js";
 import { getEntityCache } from "../lib/haWebSocket.js";
+import { getEstateConfig, getEstateTimezone } from "../lib/estateConfig.js";
 
 const router = Router();
 
@@ -171,9 +172,7 @@ async function maybeAlertSilentDropStreak(
 const SCHOOL_YEAR_START = { month: 8, day: 24 };
 const SCHOOL_YEAR_END = { month: 6, day: 3 };
 
-// Home coordinates for weather lookup (matches server/routes/weather.ts).
-const BROADCAST_HOME_LAT = Number(process.env.HOME_LAT) || 34.0522;
-const BROADCAST_HOME_LNG = Number(process.env.HOME_LNG) || -118.2437;
+// Coordinates for weather lookup are dynamically retrieved from getEstateConfig().
 
 type BriefWeather = {
   tempF: number;
@@ -258,11 +257,12 @@ async function fetchCurrentBriefWeather(): Promise<BriefWeather | null> {
     return null;
   }
   try {
+    const estateConfig = await getEstateConfig();
     const url =
       `https://weather.googleapis.com/v1/currentConditions:lookup` +
       `?key=${apiKey}` +
-      `&location.latitude=${BROADCAST_HOME_LAT}` +
-      `&location.longitude=${BROADCAST_HOME_LNG}` +
+      `&location.latitude=${estateConfig.latitude}` +
+      `&location.longitude=${estateConfig.longitude}` +
       `&unitsSystem=IMPERIAL&languageCode=en`;
     const resp = await fetch(url, { signal: AbortSignal.timeout(5000) });
     if (!resp.ok) {
@@ -298,7 +298,7 @@ function buildWeatherClause(w: BriefWeather | null): string {
 function getLADate() {
   const now = new Date();
   const laStr = now.toLocaleString("en-US", {
-    timeZone: "America/Los_Angeles",
+    timeZone: getEstateTimezone(),
   });
   const la = new Date(laStr);
   const year = la.getFullYear();

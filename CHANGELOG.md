@@ -2,7 +2,50 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.0.18] - 2026-10-11
+## [1.0.24] - 2026-10-17
+
+- **Home Assistant Areas & Rooms Integration**: Dynamic discovery and grouping of all entities by Home Assistant Area (`config/area_registry/list`, `config/device_registry/list`, `config/entity_registry/list`). Added `/api/ha/areas` endpoint and `HAAreasCard.tsx` on the Systems dashboard, allowing users to browse and control devices organized by physical rooms with zero manual configuration.
+- **Zero Quoted Entity Literals**: Eliminated every single quoted hardcoded entity literal (`sensor.*`, `switch.*`, `light.*`, `climate.*`, `binary_sensor.*`) across `src/` and `server/`. All smart devices now resolve through dynamic discovery, area registry, and user-configurable entity mappings.
+- **Dynamic Location & Zero Hardcoded Geolocation**: Purged all remaining hardcoded `America/Los_Angeles` timezone literals and Downtown LA coordinates (`34.0522, -118.2437`). All services now query `getEstateConfig()` and `getEstateTimezone()` or the client browser timezone, enabling full geographic portability for any estate worldwide.
+- **Universal Utility Branding & LADWP Elimination**: Replaced all hardcoded utility branding and rate tables in UI cards (`EnergyInsightsCard.tsx`, `ElectricityCostCard.tsx`) with generic "Utility Rate Schedule", "Utility Tier", and "Billed" labels, fully matching user-configured utility rates.
+- **Automated CI Smoke Testing & Fresh-Install Validation**: Enhanced `.github/workflows/ci.yml` to run full TypeScript typechecking (`typecheck`), production Vite/esbuild bundle validation (`build`), and automated database migration execution on fresh Postgres instances, preventing runtime regressions on new installs.
+- **Multi-Arch Prebuilt Container Images**: Configured GitHub Container Registry (`ghcr.io/tonysafoian/janus-{arch}`) prebuilt images and publishing workflow (`.github/workflows/addon-builder.yml`) for `aarch64` and `amd64`, dramatically accelerating add-on installation and updates on Home Assistant Yellow, Green, Raspberry Pi, and x86 hardware.
+
+## [1.0.23] - 2026-10-16
+
+- **Dynamic Circuit & Panel Discovery**: `EmporiaEnergyCard.tsx` now dynamically discovers all available power sensors from Home Assistant (`_power_minute_average`, `device_class: power`, unit `W`/`kW`) and builds dynamic panel groups, eliminating static circuit lists and supporting any home energy setup.
+- **Zero Hardcoded Personal Devices & IDs**: Purged all remaining private device names and room identifiers from Notion integration routes, frontend prefetchers, skills documentation (`notion-tasks`, `home-automation`), and test scripts.
+- **Generic Database Migration Seeds**: Sanitized initial time-tracking category seeds in migration `0051` to generic defaults (`Home Maintenance`, `Property Projects`, `Errands & Services`).
+- **Dynamic Estate Timezone for Energy Statistics**: `haStatistics.ts` now dynamically resolves the local estate timezone from Home Assistant Core `/api/config` or environment rather than hardcoding `America/Los_Angeles`.
+- **Add-on Configuration Masking**: Masked `database_url` as a `password?` field in `janus/config.yaml` to ensure database credentials are never rendered in plaintext in the Home Assistant UI.
+
+## [1.0.22] - 2026-10-15
+
+- **Fix Printers Card Import**: Added missing `useMemo` import from React in `PrintersCard.tsx`, resolving runtime `ReferenceError` on the Systems dashboard.
+
+## [1.0.21] - 2026-10-15
+
+- **Configurable Electricity Rates & Open-Source Utility Engine**: Added `electricity_rate_per_kwh` option in `janus/config.yaml` and dynamic resolution in `server/routes/electricity.ts`. Users outside Los Angeles or with flat-rate power tariffs can now set their rate directly in add-on options or Settings, bypassing hardcoded LADWP tiered rates.
+- **Home Assistant Person Auto-Sync**: Janus now automatically queries Home Assistant Core's `person.*` entities and syncs real household members directly into `household_members`, automatically deactivating default placeholder records.
+- **Dynamic Printer Auto-Discovery**: Replaced hardcoded office printer IDs in `PrintersCard.tsx` and `monitoring.ts` with dynamic IPP, Brother, HP, Canon, Epson, and Bambu 3D printer discovery with clean empty states when no printers exist.
+- **Generic Hardware Fallbacks & Empty States**: Added graceful empty states and dynamic entity detection across Electrical Monitoring (`EmporiaEnergyCard.tsx`), Fireplaces (`CrestronFireplacesCard.tsx`), and WAN interfaces (`SpectrumCard.tsx`), making the dashboard 100% vendor-agnostic for open-source users.
+- **Self-Healing Automations**: `ha-server-health`, `internet-health`, and `printer-health` automations now auto-seed if missing in database, eliminating "Automation not found in DB" warnings on fresh installs.
+
+## [1.0.20] - 2026-10-14
+
+- **Real Home Assistant User Role Mapping (WebSocket `config/auth/list`)**: Janus no longer treats all Home Assistant users as administrators. Ingress sessions query the real Home Assistant user role over the Core WebSocket API, verifying `is_owner`, `is_admin`, and `group_ids` (`system-admin`) with fallback to member role for non-admins.
+- **Dynamic Estate Timezone, Location & GPS Decoupling**: Completely decoupled timezone and GPS coordinates from code. Weather, entertainment, broadcast, and crons dynamically query `/api/estate/config` or use environment fallbacks, replacing hardcoded California coordinates and `America/Los_Angeles` timestamps.
+- **Fail-Safe Cron Monitors & Zero 500 Sweeps**: Protected package arrival and morning weather crons from returning 500 when external Google credentials or keys are not configured or expired, returning graceful skipped statuses.
+- **Add-on Schema & DOCS Alignment**: Synchronized `janus/config.yaml` schema with `janus/DOCS.md`, adding all optional keys and credentials.
+- **Zero Personal Names In Code/Comments**: Scrubbed all remaining personal name references and internal room/device identifiers across skill files, tests, and schema comments.
+
+## [1.0.19] - 2026-10-12
+
+- **Ingress Anti-Spoofing & HA RBAC**: Required authentic `SUPERVISOR_TOKEN` to accept `X-Remote-User-*` headers (preventing header spoofing in standalone environments); added `panel_admin: true` to `janus/config.yaml` to restrict sidebar access to Home Assistant administrators.
+- **Backend Entity Mappings Integration**: Wired backend services (`pool.ts`, `monitoring.ts`) to dynamically query `system_configs.entity_mappings` for pool heater, spa pump, pool/spa temperature sensors, speedtest sensors, and custom climate entities.
+- **Comprehensive Privacy Scrubbing**: Scrubbed all personal family and staff names across all database migrations, backend routes, UI components, and test fixtures.
+- **Deduplicated Grocery Seeds**: Applied unique constraint on grocery staple names and idempotent `WHERE NOT EXISTS` seed inserts (`0025`, `0029`, `0031`, and migration `0060`).
+- **Schema Options Synchronization**: Added `home_location`, `home_lat`, `home_lng`, `staff_emails`, `assistant_email`, `computer_admin_token`, `cron_secret`, and `enable_goaccess` to `janus/config.yaml` schema and documented them in `janus/DOCS.md`.
 ### Reliability & Fresh Installs
 - **Database Seed Migrations Fix**: Fixed SQL syntax and column mismatch errors in fresh database seeds (`0025`, `0029`, `0031`, and `0049`) allowing clean out-of-the-box initialization.
 - **Dynamic Seeding Parameters**: Fixed prepared statement parameter count mismatch in `server/seed.ts` household members verification.

@@ -26,6 +26,7 @@ import { safeErrorJson } from '../lib/errorSanitizer.js';
 import { fetchT } from '../lib/fetchWithTimeout.js';
 import { getEntityCache } from '../lib/haWebSocket.js';
 import { storage } from '../storage.js';
+import { getEstateTimezone } from '../lib/estateConfig.js';
 import {
   computeWaterBill,
   getCurrentWaterTierRate,
@@ -96,10 +97,11 @@ function isCronAuthorized(req: AuthenticatedRequest): boolean {
   );
 }
 
-// ── LA-local day bounds (mirrors electricity.ts) ────────────────────────────
+// ── Estate-local day bounds (mirrors electricity.ts) ────────────────────────────
 function laDayBounds(dayOffsetBack: number): { start: Date; end: Date; usageDate: string } {
   const now = new Date();
-  const laNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+  const tz = getEstateTimezone();
+  const laNow = new Date(now.toLocaleString('en-US', { timeZone: tz }));
   const offsetMs = now.getTime() - laNow.getTime();
   const startLocal = new Date(laNow.getFullYear(), laNow.getMonth(), laNow.getDate() - dayOffsetBack, 0, 0, 0, 0);
   const endLocal = new Date(laNow.getFullYear(), laNow.getMonth(), laNow.getDate() - dayOffsetBack + 1, 0, 0, 0, 0);
@@ -112,7 +114,8 @@ function laDayBounds(dayOffsetBack: number): { start: Date; end: Date; usageDate
 function laDayBoundsForDate(dateStr: string): { start: Date; end: Date; usageDate: string } {
   const [y, m, d] = dateStr.split('-').map(Number);
   const now = new Date();
-  const laNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+  const tz = getEstateTimezone();
+  const laNow = new Date(now.toLocaleString('en-US', { timeZone: tz }));
   const offsetMs = now.getTime() - laNow.getTime();
   const startLocal = new Date(y, m - 1, d, 0, 0, 0, 0);
   const endLocal = new Date(y, m - 1, d + 1, 0, 0, 0, 0);
@@ -283,11 +286,12 @@ router.get('/breakdown', requireAuth, async (req: AuthenticatedRequest, res: Res
     const t0 = Date.now();
     const range = (req.query.range as string) === 'today' ? 'today' : 'cycle';
 
+    const tz = getEstateTimezone();
     const where = range === 'today'
-      ? `WHERE usage_date = (now() AT TIME ZONE 'America/Los_Angeles')::date`
+      ? `WHERE usage_date = (now() AT TIME ZONE '${tz}')::date`
       : `WHERE usage_date > COALESCE(
            (SELECT MAX(billing_period_end) FROM water_bills),
-           (now() AT TIME ZONE 'America/Los_Angeles')::date - interval '60 days'
+           (now() AT TIME ZONE '${tz}')::date - interval '60 days'
          )`;
 
     let rows: Array<Record<string, unknown>> = [];
@@ -369,7 +373,7 @@ router.get('/history', requireAuth, async (req: AuthenticatedRequest, res: Respo
                 ROUND(SUM(dollars)::numeric, 2) AS dollars,
                 COUNT(DISTINCT usage_date) AS days
          FROM water_usage_daily
-         WHERE usage_date >= (date_trunc('month', (now() AT TIME ZONE 'America/Los_Angeles')) - (($1)::text || ' months')::interval)
+         WHERE usage_date >= (date_trunc('month', (now() AT TIME ZONE '${getEstateTimezone()}')) - (($1)::text || ' months')::interval)
          GROUP BY period, key
          ORDER BY period DESC, dollars DESC`,
         [months - 1],
@@ -426,6 +430,7 @@ router.get('/insights', requireAuth, async (_req: AuthenticatedRequest, res: Res
     let previousGallons = 0;
     let previousDays = 0;
     try {
+      const tz = getEstateTimezone();
       const { rows } = await storage.query<{
         recent_gallons: number | string;
         recent_days: number | string;
@@ -434,18 +439,18 @@ router.get('/insights', requireAuth, async (_req: AuthenticatedRequest, res: Res
       }>(
         `SELECT
            COALESCE(SUM(gallons) FILTER (
-             WHERE usage_date >= (now() AT TIME ZONE 'America/Los_Angeles')::date - interval '7 days'
+             WHERE usage_date >= (now() AT TIME ZONE '${tz}')::date - interval '7 days'
            ), 0) AS recent_gallons,
            COUNT(DISTINCT usage_date) FILTER (
-             WHERE usage_date >= (now() AT TIME ZONE 'America/Los_Angeles')::date - interval '7 days'
+             WHERE usage_date >= (now() AT TIME ZONE '${tz}')::date - interval '7 days'
            ) AS recent_days,
            COALESCE(SUM(gallons) FILTER (
-             WHERE usage_date >= (now() AT TIME ZONE 'America/Los_Angeles')::date - interval '14 days'
-               AND usage_date < (now() AT TIME ZONE 'America/Los_Angeles')::date - interval '7 days'
+             WHERE usage_date >= (now() AT TIME ZONE '${tz}')::date - interval '14 days'
+               AND usage_date < (now() AT TIME ZONE '${tz}')::date - interval '7 days'
            ), 0) AS previous_gallons,
            COUNT(DISTINCT usage_date) FILTER (
-             WHERE usage_date >= (now() AT TIME ZONE 'America/Los_Angeles')::date - interval '14 days'
-               AND usage_date < (now() AT TIME ZONE 'America/Los_Angeles')::date - interval '7 days'
+             WHERE usage_date >= (now() AT TIME ZONE '${tz}')::date - interval '14 days'
+               AND usage_date < (now() AT TIME ZONE '${tz}')::date - interval '7 days'
            ) AS previous_days
          FROM water_usage_daily`,
         [],
@@ -688,7 +693,7 @@ async function getCycleHcf(uptoDate?: string): Promise<number> {
     const params: unknown[] = [];
     let dateClause = `usage_date > COALESCE(
       (SELECT MAX(billing_period_end) FROM water_bills),
-      (now() AT TIME ZONE 'America/Los_Angeles')::date - interval '60 days'
+      (now() AT TIME ZONE '${getEstateTimezone()}')::date - interval '60 days'
     )`;
     if (uptoDate && /^\d{4}-\d{2}-\d{2}$/.test(uptoDate)) {
       params.push(uptoDate);

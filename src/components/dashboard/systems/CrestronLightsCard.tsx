@@ -59,12 +59,8 @@ function smartTitleCase(s: string): string {
     .replace(/'(\w)/g, (_, c) => `'${c.toLowerCase()}`);
 }
 
-// ── excluded entities ────────────────────────────────────────────────
-const EXCLUDED_ENTITIES = new Set([
-  'light.spa_light',
-  'light.pool_light',
-  'light.laminar_led_lt',
-]);
+// ── excluded entities (pool/spa lights handled in Pool card) ─────────
+const EXCLUDED_LIGHT_PATTERN = /pool_light|spa_light|laminar_led/i;
 
 // ── room controls (turn off all / dim all in a room) ─────────────────
 function RoomControls({
@@ -343,7 +339,7 @@ export function CrestronLightsCard() {
     const lightsOn: { entity: HAEntity; room: string; device: string }[] = [];
 
     for (const entity of entities) {
-      if (EXCLUDED_ENTITIES.has(entity.entity_id)) continue;
+      if (EXCLUDED_LIGHT_PATTERN.test(entity.entity_id)) continue;
       // Skip Govee entities — they have their own card
       if (goveeEntityIds.size > 0) {
         if (goveeEntityIds.has(entity.entity_id)) continue;

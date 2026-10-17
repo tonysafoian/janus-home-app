@@ -16,6 +16,7 @@ import {
 } from "../lib/helpers.js";
 import { sanitizeErrorMessage } from "../lib/error-sanitizer.js";
 import { query } from "../lib/db.js";
+import { getEstateTimezone } from "../lib/estateConfig.js";
 
 const router = Router();
 
@@ -457,10 +458,10 @@ router.post("/calendar", async (req: Request, res: Response) => {
       const event: Record<string, unknown> = {
         summary: title,
         start: start?.includes("T")
-          ? { dateTime: start, timeZone: "America/Los_Angeles" }
+          ? { dateTime: start, timeZone: getEstateTimezone() }
           : { date: start },
         end: end?.includes("T")
-          ? { dateTime: end, timeZone: "America/Los_Angeles" }
+          ? { dateTime: end, timeZone: getEstateTimezone() }
           : { date: end },
       };
       if (description) event.description = description;
@@ -504,12 +505,12 @@ router.post("/calendar", async (req: Request, res: Response) => {
       if (typeof location === "string") patch.location = location;
       if (start) {
         patch.start = start.includes("T")
-          ? { dateTime: start, timeZone: "America/Los_Angeles" }
+          ? { dateTime: start, timeZone: getEstateTimezone() }
           : { date: start };
       }
       if (end) {
         patch.end = end.includes("T")
-          ? { dateTime: end, timeZone: "America/Los_Angeles" }
+          ? { dateTime: end, timeZone: getEstateTimezone() }
           : { date: end };
       }
       if (Array.isArray(attendees) && attendees.length) {

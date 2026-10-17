@@ -85,7 +85,7 @@ describe("morning report weather data", () => {
       ),
     );
 
-    const source = await fetchOpenMeteoWeather(34.0522, -118.2437, fetchImpl);
+    const source = await fetchOpenMeteoWeather(40.7128, -74.0060, fetchImpl);
     const extracted = extractWeatherData(
       source!,
       new Date("2026-09-08T07:15:00-07:00"),

@@ -37,11 +37,13 @@ function normalizeSentence(text: string): string {
   return /[.!?]$/.test(cleaned) ? cleaned : `${cleaned}.`;
 }
 
+import { getEstateTimezone } from "../lib/estateConfig.js";
+
 function encouragementForDate(dateKey?: string): string {
   const resolvedDate = dateKey && /^\d{4}-\d{2}-\d{2}$/.test(dateKey)
     ? dateKey
     : new Intl.DateTimeFormat("en-CA", {
-        timeZone: "America/Los_Angeles",
+        timeZone: getEstateTimezone(),
         year: "numeric",
         month: "2-digit",
         day: "2-digit",

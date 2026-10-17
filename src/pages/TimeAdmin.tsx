@@ -146,7 +146,8 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function todayPT() {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date());
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
 }
 
 // ── Week Selector (shared) ────────────────────────────────────────────────

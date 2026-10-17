@@ -5,11 +5,9 @@ import {
   fetchGoogleHourlyForecast,
   googleTypeToWMO,
 } from '../utils/google-weather.js';
+import { getEstateConfig } from '../lib/estateConfig.js';
 
 const router = Router();
-
-const HOME_LAT = Number(process.env.HOME_LAT) || 34.0522;
-const HOME_LNG = Number(process.env.HOME_LNG) || -118.2437;
 
 let cachedData: { data: unknown; expiresAt: number } | null = null;
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -22,6 +20,7 @@ router.post('/api/weather-dashboard', async (req: any, res: any) => {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
 
   try {
+    const { latitude: HOME_LAT, longitude: HOME_LNG } = await getEstateConfig();
     // --- Migrate from Open-Meteo 7-day daily → Google forecast/days:lookup (5 days) ---
     const forecastDays = await fetchGoogleDailyForecast(HOME_LAT, HOME_LNG, 5);
 
@@ -165,6 +164,7 @@ router.post('/api/weather-forecast', async (_req: any, res: any) => {
   }
 
   try {
+    const { latitude: HOME_LAT, longitude: HOME_LNG } = await getEstateConfig();
     // --- Migrate from Open-Meteo 7-day combined → Google forecast/hours:lookup + forecast/days:lookup ---
     const [forecastHours, forecastDays] = await Promise.all([
       fetchGoogleHourlyForecast(HOME_LAT, HOME_LNG, 24),

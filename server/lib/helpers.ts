@@ -7,8 +7,8 @@ export const JANUS_EMAIL = process.env.ASSISTANT_EMAIL || "assistant@example.com
 export const MEMBER_EMAIL = process.env.MEMBER_EMAIL || "member@example.com";
 export const MEMBER2_EMAIL = process.env.MEMBER2_EMAIL || "member2@example.com";
 export const MEMBER3_EMAIL = process.env.MEMBER3_EMAIL || "member3@example.com";
-export const HOME_LAT = Number(process.env.HOME_LAT) || 34.0522;
-export const HOME_LNG = Number(process.env.HOME_LNG) || -118.2437;
+export const HOME_LAT = Number(process.env.HOME_LAT) || 0;
+export const HOME_LNG = Number(process.env.HOME_LNG) || 0;
 export const GOOGLE_CLIENT_ID =
   process.env.GOOGLE_CLIENT_ID ||
   process.env.GOOGLE_CLIENT_ID || "";

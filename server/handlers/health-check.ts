@@ -3,6 +3,7 @@ import { getGoogleServiceToken } from "../utils/google-jwt.js";
 import { query } from "../lib/db.js";
 import { logAudit } from "../lib/auditLog.js";
 import { enqueueFailedJob, sendAutomationFailureAlert } from "../utils/janus-tools.js";
+import { getEstateConfig } from "../lib/estateConfig.js";
 
 type CheckStatus = "ok" | "degraded" | "error" | "not_configured";
 
@@ -68,9 +69,6 @@ async function runCheck(
     };
   }
 }
-
-const HOME_LAT = Number(process.env.HOME_LAT) || 34.0522;
-const HOME_LNG = Number(process.env.HOME_LNG) || -118.2437;
 
 async function checkJanusChat(signal: AbortSignal): Promise<string | null> {
   const port = process.env.PORT || "5000";
@@ -198,7 +196,8 @@ async function checkGoogleMapsRoutes(signal: AbortSignal): Promise<string | null
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) return "not_configured: Missing GOOGLE_MAPS_API_KEY";
 
-  const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${HOME_LAT},${HOME_LNG}&destinations=34.05,${HOME_LNG}&units=imperial&key=${apiKey}`;
+  const { latitude, longitude } = await getEstateConfig();
+  const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${latitude},${longitude}&destinations=${latitude + 0.05},${longitude}&units=imperial&key=${apiKey}`;
   const res = await fetch(url, { signal });
 
   if (!res.ok) return `Distance Matrix returned ${res.status}`;
@@ -211,12 +210,13 @@ async function checkGoogleAirQuality(signal: AbortSignal): Promise<string | null
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) return "not_configured: Missing GOOGLE_MAPS_API_KEY";
 
+  const { latitude, longitude } = await getEstateConfig();
   const res = await fetch(
     `https://airquality.googleapis.com/v1/currentConditions:lookup?key=${apiKey}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ location: { latitude: HOME_LAT, longitude: HOME_LNG } }),
+      body: JSON.stringify({ location: { latitude, longitude } }),
       signal,
     },
   );
@@ -232,8 +232,9 @@ async function checkGooglePollen(signal: AbortSignal): Promise<string | null> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) return "not_configured: Missing GOOGLE_MAPS_API_KEY";
 
+  const { latitude, longitude } = await getEstateConfig();
   const res = await fetch(
-    `https://pollen.googleapis.com/v1/forecast:lookup?key=${apiKey}&location.latitude=${HOME_LAT}&location.longitude=${HOME_LNG}&days=1`,
+    `https://pollen.googleapis.com/v1/forecast:lookup?key=${apiKey}&location.latitude=${latitude}&location.longitude=${longitude}&days=1`,
     { signal },
   );
 

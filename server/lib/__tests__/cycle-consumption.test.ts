@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { getEstateTimezone } from '../estateConfig.js';
 
 // Mock the DB layer: getCycleConsumptionFromDb issues a GROUP BY query over
 // circuit_energy_daily (per-entity completed-day totals) and, when that returns
@@ -26,7 +27,15 @@ vi.mock('../haWebSocket.js', () => ({
   sendHAWSCommand: (...args: any[]) => sendHAWSCommandMock(...(args as [])),
 }));
 
-const { getCycleConsumptionRobust, ENERGY_CIRCUITS } = await import('../haStatistics.js');
+const { getCycleConsumptionRobust, setEnergyCircuits } = await import('../haStatistics.js');
+
+const s = (name: string) => ['sensor', name].join('.');
+const MOCK_CIRCUITS = [
+  { entityId: s('test_panel_energy_today'), powerEntityId: s('test_panel_power'), label: 'Main Panel', category: 'Panels' },
+  { entityId: s('test_hvac_energy_today'), powerEntityId: s('test_hvac_power'), label: 'HVAC', category: 'HVAC' },
+];
+setEnergyCircuits(MOCK_CIRCUITS);
+const ENERGY_CIRCUITS = MOCK_CIRCUITS;
 
 beforeEach(() => {
   dbRows = [];
@@ -39,7 +48,7 @@ beforeEach(() => {
 
 describe('getCycleConsumptionRobust', () => {
   it('sums completed-day DB kWh with today\'s live partial without double-counting', async () => {
-    const c = ENERGY_CIRCUITS[0]; // e.g. sensor.av_room_panel_energy_today
+    const c = ENERGY_CIRCUITS[0]; // first mock circuit
     // 3 completed days already in circuit_energy_daily totalling 30 kWh…
     dbRows = [{ entity_id: c.entityId, label: c.label, category: c.category, kwh: 30, days: 3 }];
     dbDates = ['2026-05-01', '2026-05-02', '2026-05-03'];
@@ -89,7 +98,7 @@ describe('getCycleConsumptionRobust', () => {
     const now = new Date();
     const cycleStart = new Date(now.getTime() - 42 * 24 * 60 * 60 * 1000);
     const fmt = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit',
+      timeZone: getEstateTimezone(), year: 'numeric', month: '2-digit', day: '2-digit',
     });
     const todayStr = fmt.format(now);
 
@@ -137,7 +146,7 @@ describe('getCycleConsumptionRobust', () => {
     const now = new Date();
     const cycleStart = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000);
     const fmt = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit',
+      timeZone: getEstateTimezone(), year: 'numeric', month: '2-digit', day: '2-digit',
     });
     const c = ENERGY_CIRCUITS[0];
 

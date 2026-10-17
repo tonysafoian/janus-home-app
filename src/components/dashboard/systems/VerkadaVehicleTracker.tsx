@@ -223,8 +223,9 @@ function AddVehicleForm({ onDone }: { onDone: () => void }) {
 function formatLastSeen(dateStr: string): string {
   const date = new Date(dateStr);
   const now = new Date();
-  const laTime = date.toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit', hour12: true });
-  const toDateKey = (d: Date) => d.toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles', year: 'numeric', month: 'numeric', day: 'numeric' });
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const laTime = date.toLocaleTimeString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit', hour12: true });
+  const toDateKey = (d: Date) => d.toLocaleDateString('en-US', { timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric' });
   const eventKey = toDateKey(date);
   const todayKey = toDateKey(now);
   const yesterday = new Date(now);
@@ -232,7 +233,7 @@ function formatLastSeen(dateStr: string): string {
   const yesterdayKey = toDateKey(yesterday);
   if (eventKey === todayKey) return `today at ${laTime}`;
   if (eventKey === yesterdayKey) return `yesterday at ${laTime}`;
-  const laDate = date.toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric' });
+  const laDate = date.toLocaleDateString('en-US', { timeZone: tz, month: 'short', day: 'numeric' });
   return `${laDate} at ${laTime}`;
 }
 

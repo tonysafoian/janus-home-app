@@ -165,9 +165,10 @@ export function VerkadaPeopleTracker() {
     ? new Date(sightingHealth.recent_sightings[0].seen_at)
     : null;
 
-  // Feed health: stale if no webhook in 4+ hours during daytime (8am–10pm PT)
+  // Feed health: stale if no webhook in 4+ hours during daytime (8am–10pm)
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   const nowHour = parseInt(
-    new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hour12: false }).format(new Date())
+    new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', hour12: false }).format(new Date())
   );
   const isDaytime = nowHour >= 8 && nowHour < 22;
   const feedIsStale = isDaytime && minutesSinceWebhook !== null && minutesSinceWebhook > 240;

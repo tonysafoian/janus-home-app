@@ -6,37 +6,23 @@ import { HAEntity } from '@/lib/api/homeAssistant';
 import { useSharedHAAllEntities } from '@/hooks/useHAEntitiesContext';
 import { cn } from '@/lib/utils';
 
-const ENTITY_IDS = [
-  'sensor.system_monitor_processor_use',
-  'sensor.system_monitor_processor_temperature',
-  'sensor.system_monitor_load_1_min',
-  'sensor.system_monitor_load_5_min',
-  'sensor.system_monitor_load_15_min',
-  'sensor.system_monitor_memory_usage',
-  'sensor.system_monitor_memory_use',
-  'sensor.system_monitor_memory_free',
-  'sensor.system_monitor_disk_usage',
-  'sensor.system_monitor_disk_use',
-  'sensor.system_monitor_disk_free',
-  'sensor.system_monitor_swap_usage',
-  'sensor.system_monitor_swap_use',
-  'sensor.system_monitor_swap_free',
-  'sensor.system_monitor_ipv4_address_end0',
-  'sensor.system_monitor_network_throughput_in_end0',
-  'sensor.system_monitor_network_throughput_out_end0',
-  'sensor.system_monitor_network_in_end0',
-  'sensor.system_monitor_network_out_end0',
-  'sensor.system_monitor_last_boot',
-];
-
-const ENTITY_SET = new Set(ENTITY_IDS);
-
-function val(entities: Record<string, HAEntity>, id: string): string {
-  return entities[id]?.state ?? '—';
+function findEntity(allEntities: HAEntity[], patterns: string[], exclude?: string[]): HAEntity | undefined {
+  return allEntities.find(e => {
+    if (!e.entity_id || !e.entity_id.startsWith('sensor.')) return false;
+    const lower = e.entity_id.toLowerCase();
+    const matches = patterns.every(p => lower.includes(p));
+    if (!matches) return false;
+    if (exclude && exclude.some(ex => lower.includes(ex))) return false;
+    return true;
+  });
 }
 
-function num(entities: Record<string, HAEntity>, id: string): number {
-  const v = parseFloat(entities[id]?.state ?? '');
+function stateVal(entity?: HAEntity): string {
+  return entity?.state ?? '—';
+}
+
+function stateNum(entity?: HAEntity): number {
+  const v = parseFloat(entity?.state ?? '');
   return isNaN(v) ? 0 : v;
 }
 
@@ -89,39 +75,31 @@ function ProgressRow({ label, pct, detail }: { label: string; pct: number; detai
 export function SystemHardwareCard() {
   const { allEntities, loading } = useSharedHAAllEntities();
 
-  const entities = useMemo(() => {
-    const map: Record<string, HAEntity> = {};
-    for (const e of allEntities) {
-      if (ENTITY_SET.has(e.entity_id)) map[e.entity_id] = e;
-    }
-    return map;
-  }, [allEntities]);
+  const ip = stateVal(findEntity(allEntities, ['ipv4_address']) || findEntity(allEntities, ['ip_address']));
+  const cpuPct = stateNum(findEntity(allEntities, ['processor_use']) || findEntity(allEntities, ['cpu_percent']));
+  const cpuTemp = stateVal(findEntity(allEntities, ['processor_temp']) || findEntity(allEntities, ['cpu_temp']));
+  const load1 = stateVal(findEntity(allEntities, ['load_1_min']) || findEntity(allEntities, ['load_1']));
+  const load5 = stateVal(findEntity(allEntities, ['load_5_min']) || findEntity(allEntities, ['load_5']));
+  const load15 = stateVal(findEntity(allEntities, ['load_15_min']) || findEntity(allEntities, ['load_15']));
 
-  const ip = val(entities, 'sensor.system_monitor_ipv4_address_end0');
-  const cpuPct = num(entities, 'sensor.system_monitor_processor_use');
-  const cpuTemp = val(entities, 'sensor.system_monitor_processor_temperature');
-  const load1 = val(entities, 'sensor.system_monitor_load_1_min');
-  const load5 = val(entities, 'sensor.system_monitor_load_5_min');
-  const load15 = val(entities, 'sensor.system_monitor_load_15_min');
+  const memPct = stateNum(findEntity(allEntities, ['memory_usage']) || findEntity(allEntities, ['memory_use_percent']));
+  const memUsed = stateVal(findEntity(allEntities, ['memory_use'], ['percent', 'usage']));
+  const memFree = stateVal(findEntity(allEntities, ['memory_free']));
 
-  const memPct = num(entities, 'sensor.system_monitor_memory_usage');
-  const memUsed = val(entities, 'sensor.system_monitor_memory_use');
-  const memFree = val(entities, 'sensor.system_monitor_memory_free');
+  const diskPct = stateNum(findEntity(allEntities, ['disk_usage']) || findEntity(allEntities, ['disk_use_percent']));
+  const diskUsed = stateVal(findEntity(allEntities, ['disk_use'], ['percent', 'usage']));
+  const diskFree = stateVal(findEntity(allEntities, ['disk_free']));
 
-  const diskPct = num(entities, 'sensor.system_monitor_disk_usage');
-  const diskUsed = val(entities, 'sensor.system_monitor_disk_use');
-  const diskFree = val(entities, 'sensor.system_monitor_disk_free');
+  const swapPct = stateNum(findEntity(allEntities, ['swap_usage']) || findEntity(allEntities, ['swap_use_percent']));
+  const swapUsed = stateVal(findEntity(allEntities, ['swap_use'], ['percent', 'usage']));
+  const swapFree = stateVal(findEntity(allEntities, ['swap_free']));
 
-  const swapPct = num(entities, 'sensor.system_monitor_swap_usage');
-  const swapUsed = val(entities, 'sensor.system_monitor_swap_use');
-  const swapFree = val(entities, 'sensor.system_monitor_swap_free');
+  const netIn = stateVal(findEntity(allEntities, ['throughput_in']));
+  const netOut = stateVal(findEntity(allEntities, ['throughput_out']));
+  const totalIn = stateVal(findEntity(allEntities, ['network_in'], ['throughput']));
+  const totalOut = stateVal(findEntity(allEntities, ['network_out'], ['throughput']));
 
-  const netIn = val(entities, 'sensor.system_monitor_network_throughput_in_end0');
-  const netOut = val(entities, 'sensor.system_monitor_network_throughput_out_end0');
-  const totalIn = val(entities, 'sensor.system_monitor_network_in_end0');
-  const totalOut = val(entities, 'sensor.system_monitor_network_out_end0');
-
-  const bootIso = val(entities, 'sensor.system_monitor_last_boot');
+  const bootIso = stateVal(findEntity(allEntities, ['last_boot']));
   const uptime = bootIso !== '—' ? formatUptime(bootIso) : '—';
 
   return (
@@ -141,7 +119,7 @@ export function SystemHardwareCard() {
         <div className="flex justify-center py-8">
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
         </div>
-      ) : Object.keys(entities).length === 0 ? (
+      ) : allEntities.length === 0 ? (
         <div className="flex flex-col items-center gap-3 py-8 px-4 text-center">
           <div className="rounded-full bg-violet-500/10 p-3">
             <Server className="h-6 w-6 text-violet-400" />

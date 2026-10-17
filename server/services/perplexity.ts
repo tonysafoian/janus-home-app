@@ -4,6 +4,7 @@ import {
   cleanGlobalHeadlines,
   cleanMarketUpdate,
 } from "./schoolMorningBriefing.js";
+import { getEstateTimezone } from "../lib/estateConfig.js";
 
 const PERPLEXITY_API_URL = "https://api.perplexity.ai/chat/completions";
 const MODEL_SEARCH = "sonar";
@@ -282,7 +283,7 @@ export async function fetchGlobalNewsBriefing(): Promise<string[]> {
 
     const now = new Date();
     const dateStr = now.toLocaleDateString("en-US", {
-      timeZone: "America/Los_Angeles",
+      timeZone: getEstateTimezone(),
       weekday: "long",
       month: "long",
       day: "numeric",
@@ -311,7 +312,7 @@ export async function fetchMarketBriefing(): Promise<string> {
 
     const now = new Date();
     const dateStr = now.toLocaleDateString("en-US", {
-      timeZone: "America/Los_Angeles",
+      timeZone: getEstateTimezone(),
       weekday: "long",
       month: "long",
       day: "numeric",

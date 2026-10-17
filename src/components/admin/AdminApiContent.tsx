@@ -403,7 +403,7 @@ export function AdminApiContent() {
       label: 'Call HA service',
       code: `curl -X POST -H "x-api-key: $EXTERNAL_API_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"domain":"light","service":"turn_on","service_data":{"entity_id":"light.kitchen"}}' \\
+  -d '{"domain":"light","service":"turn_on","service_data":{"entity_id":"light_example"}}' \\
   ${baseUrl}/home/call-service`,
     },
     {
