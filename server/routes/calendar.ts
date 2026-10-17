@@ -14,6 +14,7 @@ import {
   JANUS_EMAIL,
   type ServiceAccountKey,
 } from "../lib/helpers.js";
+import { getEstateTimezone } from "../lib/estateConfig.js";
 
 const router = Router();
 
@@ -438,7 +439,7 @@ router.post("/nav-tesla", async (req: Request, res: Response) => {
           {
             hour: "numeric",
             minute: "2-digit",
-            timeZone: "America/Los_Angeles",
+            timeZone: getEstateTimezone(),
           },
         );
         logAudit("calendar-nav-tesla", {

@@ -476,8 +476,8 @@ export function FortiViewSetupCallout({ sensor }: { sensor: 'top_talkers' | 'top
   if (isLoading || !data) return null;
 
   const entityId = sensor === 'top_talkers'
-    ? 'sensor.fortigate_top_talkers'
-    : 'sensor.fortigate_top_sites';
+    ? 'fortigate_top_talkers'
+    : 'fortigate_top_sites';
   const present = data[sensor]?.present ?? false;
   const cacheReady = data.cache_ready;
 

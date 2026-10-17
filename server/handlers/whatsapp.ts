@@ -101,6 +101,7 @@ import {
 import { executeBrowseWebsite } from "../utils/tools/browser.js";
 import { executeReadCodebase, executeProposeCodeFix } from "../utils/tools/github-code.js";
 import { logJanusChannelDecision } from "../lib/janusChannelAudit.js";
+import { getEstateTimezone } from "../lib/estateConfig.js";
 
 import fs from "fs";
 import path from "path";
@@ -374,7 +375,7 @@ async function executeSetReminderWA(due_at: string, message: string, channel: st
       whatsapp_number: whatsapp_number || null,
     });
     if (error) return `TOOL_ERROR: Failed to save reminder: ${error.message}`;
-    const dueDate = new Date(due_at).toLocaleString("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" });
+    const dueDate = new Date(due_at).toLocaleString("en-US", { timeZone: getEstateTimezone(), weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" });
     return `✅ Reminder set! I'll send you a ${channel} message on ${dueDate}: "${message}"`;
   } catch (e) {
     return `TOOL_ERROR: ${e instanceof Error ? e.message : "unknown"}`;
@@ -683,8 +684,9 @@ async function fetchTodayCalendar(): Promise<string> {
     events.sort((a, b) => (a.start?.dateTime || a.start?.date || "").localeCompare(b.start?.dateTime || b.start?.date || ""));
 
     if (events.length === 0) return "";
+    const tz = getEstateTimezone();
     const lines = events.map((e: any) => {
-      const time = e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Los_Angeles" }) : "All day";
+      const time = e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: tz }) : "All day";
       const loc = e.location ? ` (${e.location})` : "";
       return `- ${time} — ${e.summary || "(No title)"}${loc}`;
     });
@@ -837,8 +839,9 @@ async function askJanusWithTools(
     ? `\n\nPermanent memory — facts you know about this user (never forget these):\n${memories.map((m: any) => `- ${m.key}: ${m.value}${m.context ? ` (${m.context})` : ""}`).join("\n")}`
     : "";
 
-  const nowLA = new Date().toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: "America/Los_Angeles" });
-  const dateHeader = `Current date and time: ${nowLA}\nHousehold timezone: America/Los_Angeles (Pacific Time). ALL times you mention, calculate, or create MUST be in Pacific Time.\nWhen creating calendar events, ALWAYS use timeZone: "America/Los_Angeles".\n\n`;
+  const tz = getEstateTimezone();
+  const nowLA = new Date().toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: tz });
+  const dateHeader = `Current date and time: ${nowLA}\nHousehold timezone: ${tz}. ALL times you mention, calculate, or create MUST be in this timezone.\nWhen creating calendar events, ALWAYS use timeZone: "${tz}".\n\n`;
   const audioInstruction = "\n\nWhen the user sends an audio message, briefly acknowledge what they said before responding. Keep the acknowledgment under 10 words.";
   const briefingParts: string[] = [];
   if (todayCalendar) briefingParts.push(todayCalendar);

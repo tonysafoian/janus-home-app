@@ -336,7 +336,7 @@ export default function EntityMappingsCard() {
               <div className="space-y-1">
                 <Label className="text-xs">Pool Temp Sensor</Label>
                 <Input
-                  placeholder="sensor.pool_temp"
+                  placeholder="domain.entity_id"
                   value={mappings.pool.pool_temp}
                   onChange={(e) =>
                     setMappings((prev) => ({
@@ -350,7 +350,7 @@ export default function EntityMappingsCard() {
               <div className="space-y-1">
                 <Label className="text-xs">Spa Temp Sensor</Label>
                 <Input
-                  placeholder="sensor.spa_temp"
+                  placeholder="domain.entity_id"
                   value={mappings.pool.spa_temp}
                   onChange={(e) =>
                     setMappings((prev) => ({
@@ -364,7 +364,7 @@ export default function EntityMappingsCard() {
               <div className="space-y-1">
                 <Label className="text-xs">Pool Heater Switch</Label>
                 <Input
-                  placeholder="switch.pool_heater"
+                  placeholder="domain.entity_id"
                   value={mappings.pool.pool_heater}
                   onChange={(e) =>
                     setMappings((prev) => ({
@@ -378,7 +378,7 @@ export default function EntityMappingsCard() {
               <div className="space-y-1">
                 <Label className="text-xs">Spa Heater Switch</Label>
                 <Input
-                  placeholder="switch.spa_heater"
+                  placeholder="domain.entity_id"
                   value={mappings.pool.spa_heater}
                   onChange={(e) =>
                     setMappings((prev) => ({
@@ -392,7 +392,7 @@ export default function EntityMappingsCard() {
               <div className="space-y-1">
                 <Label className="text-xs">Pool Pump Switch</Label>
                 <Input
-                  placeholder="switch.pool_pump"
+                  placeholder="domain.entity_id"
                   value={mappings.pool.pool_pump}
                   onChange={(e) =>
                     setMappings((prev) => ({
@@ -406,7 +406,7 @@ export default function EntityMappingsCard() {
               <div className="space-y-1">
                 <Label className="text-xs">Spa Pump Switch</Label>
                 <Input
-                  placeholder="switch.spa_pump"
+                  placeholder="domain.entity_id"
                   value={mappings.pool.spa_pump}
                   onChange={(e) =>
                     setMappings((prev) => ({

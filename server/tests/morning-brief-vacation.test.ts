@@ -27,6 +27,7 @@
  * day's dedup row, so it leaves the database exactly as it found it.
  */
 import { Pool } from "pg";
+import { getEstateTimezone } from "../lib/estateConfig.js";
 
 const PORT = process.env.PORT || 5000;
 const BASE = `http://localhost:${PORT}/api/reports`;
@@ -36,9 +37,9 @@ const REPORT_TYPE = "morning-weather";
 // temporary rename and survive the restore.
 const TMP_NAME = `${AUTOMATION_NAME}__vac_test_tmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-// Same LA-local date key the handler computes for the dedup period.
+// Same local date key the handler computes for the dedup period.
 const PERIOD_KEY = new Date().toLocaleDateString("en-CA", {
-  timeZone: "America/Los_Angeles",
+  timeZone: getEstateTimezone(),
 });
 
 const CRON_SECRET = process.env.CRON_SECRET || "";

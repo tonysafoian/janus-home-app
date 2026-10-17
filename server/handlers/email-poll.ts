@@ -96,6 +96,7 @@ import {
 import { executeBrowseWebsite } from "../utils/tools/browser.js";
 import { resolveEmailIdentity, type ResolvedIdentity } from "../lib/identityResolver.js";
 import { logJanusEmailDecision, type EmailRoute } from "../lib/janusEmailAudit.js";
+import { getEstateTimezone } from "../lib/estateConfig.js";
 
 import fs from "fs";
 import path from "path";
@@ -596,8 +597,9 @@ async function askJanusWithTools(
     ? `\n\nPermanent memory:\n${memories.map((m: any) => `- ${m.key}: ${m.value}${m.context ? ` (${m.context})` : ""}`).join("\n")}`
     : "";
 
-  const nowLA = new Date().toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: "America/Los_Angeles" });
-  const dateHeader = `Current date and time: ${nowLA}\nHousehold timezone: America/Los_Angeles (Pacific Time).\n\n`;
+  const tz = getEstateTimezone();
+  const nowLA = new Date().toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: tz });
+  const dateHeader = `Current date and time: ${nowLA}\nHousehold timezone: ${tz}.\n\n`;
   const systemPrompt = dateHeader + corePrompt + skillsIndexBlock + memoryContext + (emailAddendum ? "\n\n" + emailAddendum : "") + getRoleAddendum(role);
 
   const tools = getToolsForRole(role);

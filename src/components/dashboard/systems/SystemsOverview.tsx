@@ -9,7 +9,7 @@ import { useIaqualinkHA } from '@/hooks/useIaqualinkHA';
 import { useTesla } from '@/hooks/useTesla';
 import {
   Lightbulb, Flame, Waves, Car, Printer, Server, Activity,
-  Clock, ChevronRight, Droplets, Shield, Lock, ShieldAlert, ListChecks, Thermometer,
+  Clock, ChevronRight, Droplets, Shield, Lock, ShieldAlert, ListChecks, Thermometer, Home,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -61,6 +61,13 @@ export function SystemsOverview({ onNavigate }: { onNavigate: (section: string) 
   // ── HA entities for lights, climate, switches ──
   const { entities: allEntities, loading: haLoading, unavailable: haUnavailable } = useHAEntities(undefined, 30000);
 
+  const { data: areasData } = useQuery<{ success: boolean; areas: any[] }>({
+    queryKey: ['ha-areas'],
+    queryFn: async () => apiClient.get('/api/ha/areas'),
+    staleTime: 60_000,
+  });
+  const areasCount = areasData?.areas?.length ?? 0;
+
   const lightsOn = allEntities.filter(e => e.entity_id.startsWith('light.') && e.state === 'on').length;
   const totalLights = allEntities.filter(e => e.entity_id.startsWith('light.')).length;
 
@@ -80,9 +87,9 @@ export function SystemsOverview({ onNavigate }: { onNavigate: (section: string) 
   const locks = allEntities.filter(e => e.entity_id.startsWith('lock.'));
   const lockedCount = locks.filter(e => e.state === 'locked').length;
 
-  // Irrigation – Rain Bird sprinkler zone switches
+  // Irrigation – sprinkler zone switches
   const irrigationZones = allEntities.filter(e =>
-    (e.entity_id.startsWith('switch.rain_bird') || e.entity_id.startsWith('switch.rainbird'))
+    e.entity_id.startsWith('switch.') && /rain_?bird|sprinkler|irrigation/i.test(e.entity_id)
   );
   const irrigationActive = irrigationZones.filter(e => e.state === 'on').length;
 
@@ -90,9 +97,9 @@ export function SystemsOverview({ onNavigate }: { onNavigate: (section: string) 
   const fireplaces = allEntities.filter(e => e.entity_id.startsWith('switch.') && e.entity_id.includes('fireplace'));
   const fireplacesOn = fireplaces.filter(e => e.state === 'on').length;
 
-  // Printers — HP
+  // Printers — Office & standard printers
   const hpPrinterEntities = allEntities.filter(e =>
-    e.entity_id.startsWith('sensor.hp_color_laserjet') && !e.entity_id.includes('cartridge')
+    e.entity_id.startsWith('sensor.') && /laserjet|office_printer/i.test(e.entity_id) && !e.entity_id.includes('cartridge')
   );
   const hpStatuses = hpPrinterEntities.map(e => e.state?.toLowerCase() ?? 'unknown');
   const hpHasError = hpStatuses.some(s => s !== 'idle' && s !== 'printing');
@@ -102,7 +109,7 @@ export function SystemsOverview({ onNavigate }: { onNavigate: (section: string) 
   for (const e of allEntities) {
     for (const suffix of bambuSignatureSuffixes) {
       const match = e.entity_id.match(new RegExp(`^sensor\\.(.+?)_${suffix}$`));
-      if (match && !match[1].startsWith('hp_color_laserjet')) {
+      if (match && !/laserjet|office_printer/i.test(match[1])) {
         bambuPrefixes.add(match[1]);
         break;
       }
@@ -150,8 +157,8 @@ export function SystemsOverview({ onNavigate }: { onNavigate: (section: string) 
     avClosetTempValue >= AV_CLOSET_WARN_TEMP ? 'warning' : 'ok';
 
   // System hardware
-  const cpuEntity = allEntities.find(e => e.entity_id === 'sensor.system_monitor_processor_use');
-  const memEntity = allEntities.find(e => e.entity_id === 'sensor.system_monitor_memory_usage');
+  const cpuEntity = allEntities.find(e => e.entity_id.startsWith('sensor.') && (e.entity_id.includes('processor_use') || e.entity_id.includes('cpu_percent')));
+  const memEntity = allEntities.find(e => e.entity_id.startsWith('sensor.') && (e.entity_id.includes('memory_usage') || e.entity_id.includes('memory_use_percent')));
   const cpuPct = cpuEntity ? parseFloat(cpuEntity.state) || 0 : 0;
   const memPct = memEntity ? parseFloat(memEntity.state) || 0 : 0;
 
@@ -219,6 +226,15 @@ export function SystemsOverview({ onNavigate }: { onNavigate: (section: string) 
           subtitle={haLoading ? undefined : haUnavailable ? 'Not connected' : lockedCount === locks.length && locks.length > 0 ? 'All secure' : locks.length > 0 ? 'Some unlocked' : undefined}
           status={haUnavailable ? 'idle' : locks.length === 0 ? 'idle' : lockedCount === locks.length ? 'ok' : 'warning'}
           onClick={() => onNavigate('locks')}
+        />
+
+        <GlanceTile
+          icon={Home}
+          title="Areas & Rooms"
+          value={haLoading ? '…' : haUnavailable ? 'N/A' : areasCount > 0 ? `${areasCount} Areas` : 'Configured'}
+          subtitle={haLoading ? undefined : haUnavailable ? 'Not connected' : `${areasCount} rooms mapped`}
+          status={areasCount > 0 ? 'ok' : 'idle'}
+          onClick={() => onNavigate('areas')}
         />
 
         <GlanceTile

@@ -27,11 +27,7 @@ let cacheReady = false;
 let goveeTemplateId: number | null = null;
 
 // ── Crestron bridge health watcher ────────────────────────────────────
-const CRESTRON_EXCLUDED_ENTITIES = new Set([
-  'light.spa_light',
-  'light.pool_light',
-  'light.laminar_led_lt',
-]);
+const CRESTRON_EXCLUDED_LIGHT_PATTERN = /pool_light|spa_light|laminar_led/i;
 const CRESTRON_OFFLINE_THRESHOLD = 0.2;
 const CRESTRON_DEDUP_MINUTES = 30;
 
@@ -50,7 +46,7 @@ async function checkCrestronBridge() {
   const allEntities = Array.from(entityCache.values());
   const lights = allEntities.filter(e =>
     e.entity_id.startsWith('light.') &&
-    !CRESTRON_EXCLUDED_ENTITIES.has(e.entity_id) &&
+    !CRESTRON_EXCLUDED_LIGHT_PATTERN.test(e.entity_id) &&
     !goveeEntityIdsCache.includes(e.entity_id),
   );
   if (lights.length === 0) return;
@@ -246,6 +242,112 @@ export async function syncPersonsFromHA(): Promise<void> {
   }
 }
 
+export interface AreaRegistryItem {
+  area_id: string;
+  name: string;
+  picture?: string | null;
+  icon?: string | null;
+  floor_id?: string | null;
+  aliases?: string[];
+}
+
+export interface DeviceRegistryItem {
+  id: string;
+  area_id?: string | null;
+  name?: string | null;
+  name_by_user?: string | null;
+}
+
+export interface EntityRegistryItem {
+  entity_id: string;
+  area_id?: string | null;
+  device_id?: string | null;
+  name?: string | null;
+  original_name?: string | null;
+  icon?: string | null;
+  disabled_by?: string | null;
+}
+
+let areaCache: AreaRegistryItem[] = [];
+let deviceCache: Map<string, DeviceRegistryItem> = new Map();
+let entityRegistryCache: Map<string, EntityRegistryItem> = new Map();
+
+export async function refreshHAAreas(): Promise<AreaRegistryItem[]> {
+  try {
+    const [areas, devices, entities] = await Promise.all([
+      sendHAWSCommand({ type: 'config/area_registry/list' }, 10000).catch(() => []),
+      sendHAWSCommand({ type: 'config/device_registry/list' }, 10000).catch(() => []),
+      sendHAWSCommand({ type: 'config/entity_registry/list' }, 10000).catch(() => []),
+    ]) as [any, any, any];
+
+    if (Array.isArray(areas)) {
+      areaCache = areas as AreaRegistryItem[];
+    }
+    if (Array.isArray(devices)) {
+      deviceCache.clear();
+      for (const d of devices as DeviceRegistryItem[]) {
+        if (d.id) deviceCache.set(d.id, d);
+      }
+    }
+    if (Array.isArray(entities)) {
+      entityRegistryCache.clear();
+      for (const e of entities as EntityRegistryItem[]) {
+        if (e.entity_id && !e.disabled_by) {
+          entityRegistryCache.set(e.entity_id, e);
+        }
+      }
+    }
+    console.log(`[HA-WS] Synced ${areaCache.length} areas, ${deviceCache.size} devices, ${entityRegistryCache.size} entities from registry`);
+    return areaCache;
+  } catch (err) {
+    console.warn('[HA-WS] Failed to refresh HA areas registry:', err);
+    return areaCache;
+  }
+}
+
+export interface AreaWithEntities extends AreaRegistryItem {
+  entities: Array<{
+    entity_id: string;
+    name: string;
+    state?: string;
+    domain: string;
+    attributes?: Record<string, unknown>;
+  }>;
+}
+
+export function getAreasWithEntities(): AreaWithEntities[] {
+  const areaEntityMap = new Map<string, AreaWithEntities['entities']>();
+  for (const a of areaCache) {
+    areaEntityMap.set(a.area_id, []);
+  }
+
+  for (const [entityId, reg] of entityRegistryCache.entries()) {
+    let targetAreaId = reg.area_id;
+    if (!targetAreaId && reg.device_id) {
+      const dev = deviceCache.get(reg.device_id);
+      if (dev?.area_id) targetAreaId = dev.area_id;
+    }
+
+    if (targetAreaId && areaEntityMap.has(targetAreaId)) {
+      const live = entityCache.get(entityId);
+      const domain = entityId.split('.')[0];
+      const friendlyName = (live?.attributes?.friendly_name as string) || reg.name || reg.original_name || entityId;
+      areaEntityMap.get(targetAreaId)!.push({
+        entity_id: entityId,
+        name: friendlyName,
+        state: live?.state,
+        domain,
+        attributes: live?.attributes,
+      });
+    }
+  }
+
+  return areaCache.map(area => ({
+    ...area,
+    entities: (areaEntityMap.get(area.area_id) || []).sort((a, b) => a.name.localeCompare(b.name)),
+  })).sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export function sendHAWSCommand(command: Record<string, unknown>, timeoutMs = 30_000): Promise<unknown> {
   return new Promise((resolve, reject) => {
     if (!wsClient || wsClient.readyState !== WebSocket.OPEN) {
@@ -338,6 +440,8 @@ export function startHAWebSocket(): void {
 
       // Refresh Home Assistant users for RBAC role verification
       refreshHAUsers().catch(e => console.warn('[HA-WS] User list fetch failed:', e));
+      // Refresh Area, Device, and Entity registries for Area view
+      refreshHAAreas().catch(e => console.warn('[HA-WS] Area registry fetch failed:', e));
 
       const subId = nextId();
       send(wsClient!, { id: subId, type: 'subscribe_events', event_type: 'state_changed' });
@@ -348,6 +452,7 @@ export function startHAWebSocket(): void {
           console.log('[HA-WS] Safety sync: refreshing all states from HA');
           send(wsClient, { id: nextId(), type: 'get_states' });
           refreshHAUsers().then(() => syncPersonsFromHA()).catch(() => {});
+          refreshHAAreas().catch(() => {});
         }
       }, SAFETY_SYNC_INTERVAL);
 

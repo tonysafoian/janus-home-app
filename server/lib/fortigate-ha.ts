@@ -34,6 +34,13 @@ function stateOf(entityId: string): { state: string; attributes: Record<string, 
   return { state: e.state, attributes: e.attributes ?? {} };
 }
 
+const FG_DOMAIN = 'sensor';
+const FG_PREFIX = 'fortigate';
+
+function fgEntity(suffix: string): string {
+  return `${FG_DOMAIN}.${FG_PREFIX}_${suffix}`;
+}
+
 function numOf(entityId: string): number | null {
   const s = stateOf(entityId);
   if (!s) return null;
@@ -43,7 +50,7 @@ function numOf(entityId: string): number | null {
 
 /** True if HA has at least the core FortiGate sensors populated. */
 export function haFortigateAvailable(): boolean {
-  return stateOf('sensor.fortigate_wan_status') !== null || numOf('sensor.fortigate_cpu_usage') !== null;
+  return stateOf(fgEntity('wan_status')) !== null || numOf(fgEntity('cpu_usage')) !== null;
 }
 
 /** True if the entity exists in the HA cache, regardless of its state value. */
@@ -70,8 +77,8 @@ export function haFortiViewSensorsPresent(): {
   all_present: boolean;
 } {
   const cacheReady = isCacheReady();
-  const talkersPresent = entityExists('sensor.fortigate_top_talkers');
-  const sitesPresent = entityExists('sensor.fortigate_top_sites');
+  const talkersPresent = entityExists(fgEntity('top_talkers'));
+  const sitesPresent = entityExists(fgEntity('top_sites'));
   return {
     cache_ready: cacheReady,
     top_talkers: { present: talkersPresent, has_data: haTopTalkers() !== null },
@@ -82,14 +89,14 @@ export function haFortiViewSensorsPresent(): {
 
 /** system-health equivalent: { cpu_usage, memory_usage, active_sessions } from HA. */
 export function haSystemHealth(): { cpu_usage: number | null; memory_usage: number | null; active_sessions: number | null } | null {
-  const cpu = numOf('sensor.fortigate_cpu_usage');
-  const mem = numOf('sensor.fortigate_memory_usage');
+  const cpu = numOf(fgEntity('cpu_usage'));
+  const mem = numOf(fgEntity('memory_usage'));
   if (cpu === null && mem === null) return null;
   return {
     cpu_usage: cpu,
     memory_usage: mem,
     // HA does not currently expose an active-session count sensor.
-    active_sessions: numOf('sensor.fortigate_active_sessions'),
+    active_sessions: numOf(fgEntity('active_sessions')),
   };
 }
 
@@ -103,10 +110,10 @@ export function haWanStats(): {
   wan_status: string;
   wan_speed: number | null;
 } | null {
-  const status = stateOf('sensor.fortigate_wan_status');
-  const rxGb = numOf('sensor.fortigate_wan_rx');
-  const txGb = numOf('sensor.fortigate_wan_tx');
-  const speed = numOf('sensor.fortigate_wan_speed');
+  const status = stateOf(fgEntity('wan_status'));
+  const rxGb = numOf(fgEntity('wan_rx'));
+  const txGb = numOf(fgEntity('wan_tx'));
+  const speed = numOf(fgEntity('wan_speed'));
   if (!status && rxGb === null && txGb === null) return null;
 
   const link = status ? /up|online|connected/i.test(status.state) : null;
@@ -126,23 +133,23 @@ export function haWanStats(): {
 
 /** IPS anomaly count from HA (drives the Threats badge). */
 export function haIpsAnomalyCount(): number | null {
-  return numOf('sensor.fortigate_ips_anomaly_count');
+  return numOf(fgEntity('ips_anomaly_count'));
 }
 
 /** Web-filter block count from HA (often unavailable on the FortiGate side). */
 export function haWebFilterBlocks(): number | null {
-  return numOf('sensor.fortigate_web_filter_blocks');
+  return numOf(fgEntity('web_filter_blocks'));
 }
 
 /**
- * Top bandwidth consumers from HA sensor.fortigate_top_talkers.
+ * Top bandwidth consumers from HA FortiGate top talkers.
  * The sensor's `consumers` attribute should be an array of
  * { ip, bytes, tx_bytes, rx_bytes } objects populated via a
  * rest_command.fortigate_proxy call (see docs/fortigate-ha-traffic.yaml).
  * Returns null when the sensor is absent/unavailable.
  */
 export function haTopTalkers(): { ip: string; bytes: number; tx_bytes: number; rx_bytes: number }[] | null {
-  const s = stateOf('sensor.fortigate_top_talkers');
+  const s = stateOf(fgEntity('top_talkers'));
   if (!s) return null;
   const consumers = s.attributes['consumers'];
   if (!Array.isArray(consumers) || consumers.length === 0) return null;
@@ -164,14 +171,14 @@ export function haTopTalkers(): { ip: string; bytes: number; tx_bytes: number; r
 }
 
 /**
- * Top destination sites from HA sensor.fortigate_top_sites.
+ * Top destination sites from HA FortiGate top sites.
  * The sensor's `sites` attribute should be an array of
  * { domain, category, hits, bytes } objects populated via a
  * rest_command.fortigate_proxy call (see docs/fortigate-ha-traffic.yaml).
  * Returns null when the sensor is absent/unavailable.
  */
 export function haTopSites(): { domain: string; category: string | null; hits: number; bytes: number }[] | null {
-  const s = stateOf('sensor.fortigate_top_sites');
+  const s = stateOf(fgEntity('top_sites'));
   if (!s) return null;
   const sites = s.attributes['sites'];
   if (!Array.isArray(sites) || sites.length === 0) return null;

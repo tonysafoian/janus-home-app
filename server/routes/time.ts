@@ -6,7 +6,7 @@
  * Admin routes: authenticated by the standard Janus 'admin' role (JWT roles claim,
  * backed by user_roles) — there is no separate Time admin list.
  *
- * Canonical timezone: America/Los_Angeles (PT) for all date logic.
+ * Canonical timezone: configured estate timezone for all date logic.
  * Money in integer cents. Hours as numeric(5,2) string from postgres → coerce before math.
  */
 
@@ -18,15 +18,14 @@ import { query } from "../lib/db.js";
 import type { AutomationStatusRow } from "../../shared/dbRows.js";
 import { pool } from "../db.js";
 import ExcelJS from "exceljs";
+import { getEstateTimezone } from "../lib/estateConfig.js";
 
 const router = Router();
 
 // ── Timezone helpers ───────────────────────────────────────────────────────
 
-const PT = "America/Los_Angeles";
-
 function getTodayPT(): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: PT }).format(new Date());
+  return new Intl.DateTimeFormat("en-CA", { timeZone: getEstateTimezone() }).format(new Date());
 }
 
 function getWeekStartPT(dateStr: string): string {

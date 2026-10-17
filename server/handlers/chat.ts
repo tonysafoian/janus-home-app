@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { createClient, getServiceClient, type SupabaseClient } from "../utils/supabase.js";
 import { fetchT } from "../utils/fetch-timeout.js";
+import { getEstateTimezone } from "../lib/estateConfig.js";
 import {
   logAudit as sharedLogAudit,
   loadPrompt,
@@ -262,7 +263,7 @@ async function fetchTodayCalendar(svc: SupabaseClient): Promise<string> {
 
     if (events.length === 0) return "";
     const lines = events.map((e: any) => {
-      const time = e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Los_Angeles" }) : "All day";
+      const time = e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: getEstateTimezone() }) : "All day";
       const loc = e.location ? ` (${e.location})` : "";
       return `- ${time} — ${e.summary || "(No title)"}${loc}`;
     });
@@ -760,8 +761,9 @@ export async function handleChat(req: Request, res: Response) {
     const memoryContext = memories.length > 0
       ? `\n\nPermanent memory — 25 most recent facts about this user (use recall_facts tool to search all memories):\n${memories.map((m: any) => `- ${m.key}: ${m.value}${m.context ? ` (${m.context})` : ""}`).join("\n")}`
       : "";
-    const nowLA = new Date().toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: "America/Los_Angeles" });
-    const dateHeader = `Current date and time: ${nowLA}\nHousehold timezone: America/Los_Angeles (Pacific Time). ALL times you mention, calculate, or create MUST be in Pacific Time.\nWhen creating calendar events, ALWAYS use timeZone: "America/Los_Angeles".\n\n`;
+    const tz = getEstateTimezone();
+    const nowLA = new Date().toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: tz });
+    const dateHeader = `Current date and time: ${nowLA}\nHousehold timezone: ${tz}. ALL times you mention, calculate, or create MUST be in this local timezone.\nWhen creating calendar events, ALWAYS use timeZone: "${tz}".\n\n`;
     const systemPrompt = dateHeader + resolvedCorePrompt + audioInstruction + skillsIndexBlock + briefingBlock + memoryContext + getRoleSystemPromptAddendum(role) + (chatAddendum ? "\n\n" + chatAddendum : "");
 
     const sanitizedMessages = sanitizeMessages(messages);

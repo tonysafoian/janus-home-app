@@ -3774,8 +3774,8 @@ var init_helpers = __esm({
     MEMBER_EMAIL = process.env.MEMBER_EMAIL || "member@example.com";
     MEMBER2_EMAIL = process.env.MEMBER2_EMAIL || "member2@example.com";
     MEMBER3_EMAIL = process.env.MEMBER3_EMAIL || "member3@example.com";
-    HOME_LAT = Number(process.env.HOME_LAT) || 34.0522;
-    HOME_LNG = Number(process.env.HOME_LNG) || -118.2437;
+    HOME_LAT = Number(process.env.HOME_LAT) || 0;
+    HOME_LNG = Number(process.env.HOME_LNG) || 0;
     GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || "";
     APP_DOMAIN = process.env.APP_DOMAIN || "example.com";
     GOOGLE_REDIRECT_BASE = process.env.GOOGLE_REDIRECT_BASE_URL || `https://${APP_DOMAIN}`;
@@ -3797,7 +3797,7 @@ function scheduleCrestronCheck() {
 async function checkCrestronBridge() {
   const allEntities = Array.from(entityCache.values());
   const lights = allEntities.filter(
-    (e) => e.entity_id.startsWith("light.") && !CRESTRON_EXCLUDED_ENTITIES.has(e.entity_id) && !goveeEntityIdsCache.includes(e.entity_id)
+    (e) => e.entity_id.startsWith("light.") && !CRESTRON_EXCLUDED_LIGHT_PATTERN.test(e.entity_id) && !goveeEntityIdsCache.includes(e.entity_id)
   );
   if (lights.length === 0) return;
   const unavailable = lights.filter((e) => e.state === "unavailable").length;
@@ -3948,6 +3948,66 @@ async function syncPersonsFromHA() {
     console.warn("[HA-WS] syncPersonsFromHA failed:", err instanceof Error ? err.message : err);
   }
 }
+async function refreshHAAreas() {
+  try {
+    const [areas, devices, entities] = await Promise.all([
+      sendHAWSCommand({ type: "config/area_registry/list" }, 1e4).catch(() => []),
+      sendHAWSCommand({ type: "config/device_registry/list" }, 1e4).catch(() => []),
+      sendHAWSCommand({ type: "config/entity_registry/list" }, 1e4).catch(() => [])
+    ]);
+    if (Array.isArray(areas)) {
+      areaCache = areas;
+    }
+    if (Array.isArray(devices)) {
+      deviceCache.clear();
+      for (const d of devices) {
+        if (d.id) deviceCache.set(d.id, d);
+      }
+    }
+    if (Array.isArray(entities)) {
+      entityRegistryCache.clear();
+      for (const e of entities) {
+        if (e.entity_id && !e.disabled_by) {
+          entityRegistryCache.set(e.entity_id, e);
+        }
+      }
+    }
+    console.log(`[HA-WS] Synced ${areaCache.length} areas, ${deviceCache.size} devices, ${entityRegistryCache.size} entities from registry`);
+    return areaCache;
+  } catch (err) {
+    console.warn("[HA-WS] Failed to refresh HA areas registry:", err);
+    return areaCache;
+  }
+}
+function getAreasWithEntities() {
+  const areaEntityMap = /* @__PURE__ */ new Map();
+  for (const a of areaCache) {
+    areaEntityMap.set(a.area_id, []);
+  }
+  for (const [entityId, reg] of entityRegistryCache.entries()) {
+    let targetAreaId = reg.area_id;
+    if (!targetAreaId && reg.device_id) {
+      const dev = deviceCache.get(reg.device_id);
+      if (dev?.area_id) targetAreaId = dev.area_id;
+    }
+    if (targetAreaId && areaEntityMap.has(targetAreaId)) {
+      const live = entityCache.get(entityId);
+      const domain = entityId.split(".")[0];
+      const friendlyName = live?.attributes?.friendly_name || reg.name || reg.original_name || entityId;
+      areaEntityMap.get(targetAreaId).push({
+        entity_id: entityId,
+        name: friendlyName,
+        state: live?.state,
+        domain,
+        attributes: live?.attributes
+      });
+    }
+  }
+  return areaCache.map((area) => ({
+    ...area,
+    entities: (areaEntityMap.get(area.area_id) || []).sort((a, b2) => a.name.localeCompare(b2.name))
+  })).sort((a, b2) => a.name.localeCompare(b2.name));
+}
 function sendHAWSCommand(command, timeoutMs = 3e4) {
   return new Promise((resolve2, reject) => {
     if (!wsClient || wsClient.readyState !== WebSocket.OPEN) {
@@ -4019,6 +4079,7 @@ function startHAWebSocket() {
       const statesId = nextId();
       send(wsClient, { id: statesId, type: "get_states" });
       refreshHAUsers().catch((e) => console.warn("[HA-WS] User list fetch failed:", e));
+      refreshHAAreas().catch((e) => console.warn("[HA-WS] Area registry fetch failed:", e));
       const subId = nextId();
       send(wsClient, { id: subId, type: "subscribe_events", event_type: "state_changed" });
       if (safetySyncTimer) clearInterval(safetySyncTimer);
@@ -4027,6 +4088,8 @@ function startHAWebSocket() {
           console.log("[HA-WS] Safety sync: refreshing all states from HA");
           send(wsClient, { id: nextId(), type: "get_states" });
           refreshHAUsers().then(() => syncPersonsFromHA()).catch(() => {
+          });
+          refreshHAAreas().catch(() => {
           });
         }
       }, SAFETY_SYNC_INTERVAL);
@@ -4135,7 +4198,7 @@ function scheduleReconnect() {
     startHAWebSocket();
   }, reconnectDelay);
 }
-var entityCache, goveeEntityIdsCache, wsClient, reconnectTimer, reconnectDelay, msgId, cacheReady, goveeTemplateId, CRESTRON_EXCLUDED_ENTITIES, CRESTRON_OFFLINE_THRESHOLD, CRESTRON_DEDUP_MINUTES, crestronBridgeState, crestronCheckTimer, pendingCallbacks, MAX_RECONNECT_DELAY, SAFETY_SYNC_INTERVAL, safetySyncTimer, haUsersCache, haUsersByNameCache;
+var entityCache, goveeEntityIdsCache, wsClient, reconnectTimer, reconnectDelay, msgId, cacheReady, goveeTemplateId, CRESTRON_EXCLUDED_LIGHT_PATTERN, CRESTRON_OFFLINE_THRESHOLD, CRESTRON_DEDUP_MINUTES, crestronBridgeState, crestronCheckTimer, pendingCallbacks, MAX_RECONNECT_DELAY, SAFETY_SYNC_INTERVAL, safetySyncTimer, haUsersCache, haUsersByNameCache, areaCache, deviceCache, entityRegistryCache;
 var init_haWebSocket = __esm({
   "server/lib/haWebSocket.ts"() {
     init_socket();
@@ -4149,11 +4212,7 @@ var init_haWebSocket = __esm({
     msgId = 1;
     cacheReady = false;
     goveeTemplateId = null;
-    CRESTRON_EXCLUDED_ENTITIES = /* @__PURE__ */ new Set([
-      "light.spa_light",
-      "light.pool_light",
-      "light.laminar_led_lt"
-    ]);
+    CRESTRON_EXCLUDED_LIGHT_PATTERN = /pool_light|spa_light|laminar_led/i;
     CRESTRON_OFFLINE_THRESHOLD = 0.2;
     CRESTRON_DEDUP_MINUTES = 30;
     crestronBridgeState = "unknown";
@@ -4164,6 +4223,9 @@ var init_haWebSocket = __esm({
     safetySyncTimer = null;
     haUsersCache = /* @__PURE__ */ new Map();
     haUsersByNameCache = /* @__PURE__ */ new Map();
+    areaCache = [];
+    deviceCache = /* @__PURE__ */ new Map();
+    entityRegistryCache = /* @__PURE__ */ new Map();
   }
 });
 
@@ -4360,8 +4422,2110 @@ var init_auth = __esm({
   }
 });
 
+// server/middleware/auth.ts
+import { timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+function validComputerToken(headerValue) {
+  const configured = process.env.COMPUTER_ADMIN_TOKEN?.trim();
+  if (!configured || configured.length < 24) return false;
+  if (typeof headerValue !== "string" || !headerValue.trim()) return false;
+  if (process.env.NODE_ENV === "test") return false;
+  const a = Buffer.from(configured);
+  const b2 = Buffer.from(headerValue.trim());
+  if (a.length !== b2.length) return false;
+  return timingSafeEqual2(a, b2);
+}
+function requireAuth2(req, res, next) {
+  const cronSecret = process.env.CRON_SECRET;
+  const isCronCall = !!cronSecret && req.headers["x-cron-secret"] === cronSecret;
+  if (isCronCall) {
+    req.userId = "system";
+    req.userRole = "admin";
+    next();
+    return;
+  }
+  if (validComputerToken(req.headers["x-computer-token"])) {
+    req.userId = "computer-agent";
+    req.userRole = "admin";
+    next();
+    return;
+  }
+  const isHAEnvironment = Boolean(process.env.SUPERVISOR_TOKEN);
+  const haUserId = req.headers["x-remote-user-id"] || req.headers["x-ingress-user-id"];
+  if (isHAEnvironment && haUserId) {
+    const haAdminHeader = req.headers["x-remote-user-is-admin"];
+    let isAdmin2 = false;
+    if (haAdminHeader !== void 0 && haAdminHeader !== "") {
+      isAdmin2 = String(haAdminHeader).toLowerCase() === "true" || haAdminHeader === "1";
+    } else {
+      const haUserName = req.headers["x-remote-user-name"] || req.headers["x-remote-user-display-name"];
+      isAdmin2 = isHAUserAdminSync(haUserId, haUserName);
+    }
+    req.userId = `ha:${haUserId}`;
+    req.userRole = isAdmin2 ? "admin" : "member";
+    next();
+    return;
+  }
+  const authHeader = req.headers.authorization;
+  const cookieToken = req.cookies?.auth_token;
+  if (!authHeader?.startsWith("Bearer ") && !cookieToken) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const token = cookieToken || authHeader.replace("Bearer ", "");
+  const isServiceRole = process.env.JWT_SECRET && token === process.env.JWT_SECRET || process.env.SESSION_SECRET && token === process.env.SESSION_SECRET;
+  if (isServiceRole) {
+    req.userId = "system";
+    req.userRole = "admin";
+    next();
+    return;
+  }
+  const user = verifyToken(token);
+  if (!user) {
+    res.status(401).json({ error: "Invalid token" });
+    return;
+  }
+  req.userId = user.userId;
+  if (user.roles?.includes("admin")) {
+    req.userRole = "admin";
+  } else if (user.roles?.includes("worker")) {
+    req.userRole = "worker";
+  } else {
+    req.userRole = "member";
+  }
+  next();
+}
+function rejectWorkers(req, res, next) {
+  const authHeader = req.headers.authorization;
+  const cookieToken = req.cookies?.auth_token;
+  const token = cookieToken || (authHeader?.startsWith("Bearer ") ? authHeader.replace("Bearer ", "") : null);
+  if (!token) {
+    next();
+    return;
+  }
+  const isServiceRole = process.env.JWT_SECRET && token === process.env.JWT_SECRET || process.env.SESSION_SECRET && token === process.env.SESSION_SECRET;
+  if (isServiceRole) {
+    next();
+    return;
+  }
+  const user = verifyToken(token);
+  if (!user || !user.roles?.includes("worker")) {
+    next();
+    return;
+  }
+  const allowed = req.path.startsWith("/api/time/") || req.path === "/api/auth/me" || req.path === "/api/auth/logout" || req.path === "/api/auth/google" || req.path === "/api/auth/google/callback" || req.path === "/api/health";
+  if (!allowed) {
+    res.status(403).json({ error: "Worker accounts are restricted to /api/time/* endpoints" });
+    return;
+  }
+  next();
+}
+var init_auth2 = __esm({
+  "server/middleware/auth.ts"() {
+    init_auth();
+    init_haWebSocket();
+  }
+});
+
+// server/lib/encryption.ts
+import { webcrypto } from "crypto";
+async function getEncryptionKey() {
+  const keySource = process.env.ENCRYPTION_KEY || process.env.SESSION_SECRET || "";
+  if (!keySource) {
+    throw new Error(
+      "ENCRYPTION_KEY (or SESSION_SECRET fallback) is not set; cannot encrypt/decrypt tokens"
+    );
+  }
+  const digest = await subtle.digest("SHA-256", new TextEncoder().encode(keySource));
+  return subtle.importKey("raw", new Uint8Array(digest), "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+async function encryptToken(plaintext) {
+  const key = await getEncryptionKey();
+  const iv = webcrypto.getRandomValues(new Uint8Array(12));
+  const encoded = new TextEncoder().encode(plaintext);
+  const ciphertext = new Uint8Array(await subtle.encrypt({ name: "AES-GCM", iv }, key, encoded));
+  const combined = new Uint8Array(iv.length + ciphertext.length);
+  combined.set(iv);
+  combined.set(ciphertext, iv.length);
+  return Buffer.from(combined).toString("base64");
+}
+async function decryptToken(encrypted) {
+  const key = await getEncryptionKey();
+  const combined = new Uint8Array(Buffer.from(encrypted, "base64"));
+  const iv = combined.slice(0, 12);
+  const ciphertext = combined.slice(12);
+  const decrypted = await subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
+  return new TextDecoder().decode(decrypted);
+}
+var subtle;
+var init_encryption = __esm({
+  "server/lib/encryption.ts"() {
+    subtle = webcrypto.subtle;
+  }
+});
+
+// server/lib/ssrfGuard.ts
+import { lookup as lookupCb } from "node:dns";
+import net from "node:net";
+import { Agent, fetch as undiciFetch } from "undici";
+function isBlockedIp(ip) {
+  if (net.isIPv4(ip)) {
+    const [a, b2] = ip.split(".").map(Number);
+    if (a === 0 || a === 127 || a === 10) return true;
+    if (a === 172 && b2 >= 16 && b2 <= 31) return true;
+    if (a === 192 && b2 === 168) return true;
+    if (a === 169 && b2 === 254) return true;
+    if (a === 100 && b2 >= 64 && b2 <= 127) return true;
+    if (a >= 224) return true;
+    return false;
+  }
+  if (net.isIPv6(ip)) {
+    const lower = ip.toLowerCase();
+    if (lower === "::" || lower === "::1") return true;
+    if (lower.startsWith("fe8") || lower.startsWith("fe9") || lower.startsWith("fea") || lower.startsWith("feb")) return true;
+    if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
+    if (lower.startsWith("::ffff:")) {
+      const mapped = lower.slice("::ffff:".length);
+      if (net.isIPv4(mapped)) return isBlockedIp(mapped);
+      return true;
+    }
+    return false;
+  }
+  return true;
+}
+function guardedLookup(hostname, options, callback) {
+  if (hostname.toLowerCase() === "supervisor" && (Boolean(process.env.SUPERVISOR_TOKEN) || Boolean(process.env.HASSIO_TOKEN) || process.env.HA_ALLOWED_HOSTS?.includes("supervisor"))) {
+    lookupCb(hostname, options, callback);
+    return;
+  }
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) {
+    callback(Object.assign(new Error(`Blocked host: ${hostname}`), { code: "EBLOCKED" }), "", 4);
+    return;
+  }
+  lookupCb(hostname, { ...options, all: true }, (err, addresses) => {
+    if (err) {
+      callback(err, "", 4);
+      return;
+    }
+    const list = addresses.filter(
+      (a) => !isBlockedIp(a.address)
+    );
+    if (list.length === 0) {
+      callback(
+        Object.assign(new Error(`Blocked host: ${hostname} resolves only to disallowed addresses`), {
+          code: "EBLOCKED"
+        }),
+        "",
+        4
+      );
+      return;
+    }
+    if (options.all) {
+      callback(null, list);
+    } else {
+      callback(null, list[0].address, list[0].family);
+    }
+  });
+}
+async function guardedFetch(url, init) {
+  const hostname = new URL(url).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (hostname === "supervisor" && (Boolean(process.env.SUPERVISOR_TOKEN) || Boolean(process.env.HASSIO_TOKEN) || process.env.HA_ALLOWED_HOSTS?.includes("supervisor"))) {
+    return undiciFetch(url, init);
+  }
+  if (hostname === "localhost" || hostname.endsWith(".localhost") || net.isIP(hostname) !== 0 && isBlockedIp(hostname)) {
+    throw new Error(`Blocked host: ${hostname}`);
+  }
+  return undiciFetch(url, { ...init, dispatcher: guardedAgent });
+}
+var guardedAgent;
+var init_ssrfGuard = __esm({
+  "server/lib/ssrfGuard.ts"() {
+    guardedAgent = new Agent({ connect: { lookup: guardedLookup } });
+  }
+});
+
+// server/lib/errorSanitizer.ts
+function sanitizeErrorMessage(error) {
+  let message;
+  if (error instanceof Error) {
+    message = error.message;
+  } else if (typeof error === "string") {
+    message = error;
+  } else {
+    message = "An internal error occurred";
+  }
+  for (const pattern of SENSITIVE_PATTERNS) {
+    message = message.replace(pattern, "[REDACTED]");
+  }
+  if (message.length > 200) {
+    message = message.slice(0, 200) + "...";
+  }
+  return message;
+}
+function safeErrorJson(error) {
+  return { error: sanitizeErrorMessage(error) };
+}
+var SENSITIVE_PATTERNS;
+var init_errorSanitizer = __esm({
+  "server/lib/errorSanitizer.ts"() {
+    SENSITIVE_PATTERNS = [
+      /Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi,
+      /apikey[=:]\s*["']?[A-Za-z0-9\-._~+/]+["']?/gi,
+      /password[=:]\s*["']?[^\s"',}]+["']?/gi,
+      /secret[=:]\s*["']?[^\s"',}]+["']?/gi,
+      /token[=:]\s*["']?[A-Za-z0-9\-._~+/]+["']?/gi,
+      /eyJ[A-Za-z0-9\-_]+\.eyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_.+/=]*/g
+    ];
+  }
+});
+
+// server/lib/fetchWithTimeout.ts
+function fetchT2(input, init, timeoutMs = 3e4) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(input, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+var init_fetchWithTimeout = __esm({
+  "server/lib/fetchWithTimeout.ts"() {
+  }
+});
+
+// server/lib/castBroadcast.ts
+import fs2 from "fs";
+import path2 from "path";
+async function cleanupOldBroadcasts(bucket, subdir, filePrefix, keep) {
+  const dirs = [
+    path2.join(process.cwd(), "public", bucket, subdir),
+    path2.join(process.cwd(), "dist", "public", bucket, subdir)
+  ];
+  for (const dir of dirs) {
+    try {
+      if (!fs2.existsSync(dir)) continue;
+      const entries = await fs2.promises.readdir(dir, { withFileTypes: true });
+      const matched = entries.filter(
+        (e) => e.isFile() && e.name.startsWith(filePrefix) && e.name.endsWith(".mp3")
+      );
+      const withMtime = await Promise.all(
+        matched.map(async (e) => {
+          const mtime = await fs2.promises.stat(path2.join(dir, e.name)).then((s3) => s3.mtimeMs).catch(() => 0);
+          return { name: e.name, mtime };
+        })
+      );
+      withMtime.sort((a, b2) => b2.mtime - a.mtime);
+      for (const f of withMtime.slice(keep)) {
+        await fs2.promises.unlink(path2.join(dir, f.name)).catch(() => {
+        });
+        console.log(`[castBroadcast] Cleaned up old broadcast file: ${f.name}`);
+      }
+    } catch {
+    }
+  }
+  try {
+    const objKeys = await listObjects(VOICE_REPLIES_BUCKET, `${subdir}/`);
+    const matched = objKeys.map((key) => ({ key, base: key.split("/").pop() ?? "" })).filter((o) => o.base.startsWith(filePrefix) && o.base.endsWith(".mp3")).map((o) => {
+      const m = o.base.match(/-(\d+)\.mp3$/);
+      return { key: o.key, ts: m ? Number(m[1]) : 0 };
+    }).sort((a, b2) => b2.ts - a.ts);
+    for (const o of matched.slice(keep)) {
+      await deleteObjectKey(o.key);
+      console.log(`[castBroadcast] Cleaned up old broadcast object: ${o.key}`);
+    }
+  } catch {
+  }
+}
+async function generateAndUploadTTS(message, filePrefix = "broadcast") {
+  const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
+  let supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+  if (!elevenLabsKey) {
+    console.error("[castBroadcast] ELEVENLABS_API_KEY not set \u2014 cannot generate TTS");
+    return null;
+  }
+  const isDeletedSupabase = !supabaseUrl;
+  if (isDeletedSupabase) {
+    supabaseUrl = `http://localhost:${process.env.PORT || 5e3}`;
+  }
+  console.log(`[castBroadcast] Calling ElevenLabs TTS (${message.length} chars)`);
+  let audioBuffer;
+  try {
+    const ttsRes = await fetchT2(
+      `https://api.elevenlabs.io/v1/text-to-speech/${JANUS_VOICE_ID}`,
+      {
+        method: "POST",
+        headers: {
+          "xi-api-key": elevenLabsKey,
+          "Content-Type": "application/json",
+          Accept: "audio/mpeg"
+        },
+        body: JSON.stringify({
+          text: message,
+          model_id: "eleven_turbo_v2_5",
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.75,
+            style: 0,
+            use_speaker_boost: true
+          }
+        })
+      },
+      3e4
+    );
+    if (!ttsRes.ok) {
+      const errText = await ttsRes.text().catch(() => "");
+      console.error(
+        `[castBroadcast] ElevenLabs TTS failed: HTTP ${ttsRes.status} \u2014 ${errText.slice(0, 300)}`
+      );
+      return null;
+    }
+    audioBuffer = await ttsRes.arrayBuffer();
+    console.log(`[castBroadcast] ElevenLabs TTS generated ${audioBuffer.byteLength} bytes`);
+  } catch (e) {
+    console.error(
+      `[castBroadcast] ElevenLabs TTS error: ${e instanceof Error ? e.message : "unknown"}`
+    );
+    return null;
+  }
+  const timestamp2 = Date.now();
+  const filename = `${BROADCAST_SUBDIR}/${filePrefix}-${timestamp2}.mp3`;
+  const storageUrl = `${supabaseUrl.replace(/\/$/, "")}/storage/v1/object/${VOICE_REPLIES_BUCKET}/${filename}`;
+  const internalKey = process.env.JWT_SECRET || process.env.SESSION_SECRET || "janus-dev-secret-change-in-production";
+  try {
+    const uploadRes = await fetchT2(
+      storageUrl,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${internalKey}`,
+          apikey: internalKey,
+          "Content-Type": "audio/mpeg",
+          "x-upsert": "true"
+        },
+        body: audioBuffer
+      },
+      2e4
+    );
+    if (!uploadRes.ok) {
+      const errText = await uploadRes.text().catch(() => "");
+      console.error(
+        `[castBroadcast] Storage upload failed: HTTP ${uploadRes.status} \u2014 ${errText.slice(0, 300)}`
+      );
+      return null;
+    }
+    console.log(`[castBroadcast] MP3 uploaded: ${filename} (${audioBuffer.byteLength} bytes)`);
+  } catch (e) {
+    console.error(
+      `[castBroadcast] Storage upload error: ${e instanceof Error ? e.message : "unknown"}`
+    );
+    return null;
+  }
+  cleanupOldBroadcasts(VOICE_REPLIES_BUCKET, BROADCAST_SUBDIR, filePrefix, MAX_BROADCAST_FILES).catch(
+    () => {
+    }
+  );
+  const baseUrl = process.env.MEDIA_BASE_URL || process.env.APP_URL || "http://localhost:5000";
+  return `${baseUrl.replace(/\/$/, "")}/storage/v1/object/public/${VOICE_REPLIES_BUCKET}/${filename}`;
+}
+async function verifyPlaybackState(haUrl, haToken, entityId, expectedUrl, announceMode = false) {
+  try {
+    const res = await guardedFetch(`${haUrl.replace(/\/$/, "")}/api/states/${entityId}`, {
+      headers: { Authorization: `Bearer ${haToken}` },
+      signal: AbortSignal.timeout(5e3)
+    });
+    if (!res.ok) return { verified: false, state: null, contentId: null, urlMatch: null };
+    const data = await res.json();
+    const state2 = data?.state ?? "unknown";
+    const contentId = data?.attributes?.media_content_id ?? null;
+    const isPlaying = state2 === "playing";
+    const isUnavailable = state2 === "unavailable";
+    let urlMatch = null;
+    if (expectedUrl) {
+      urlMatch = contentId !== null && contentId === expectedUrl;
+    }
+    let verified;
+    if (announceMode) {
+      verified = !isUnavailable && urlMatch === true;
+    } else {
+      verified = isPlaying && (urlMatch === null || urlMatch === true);
+    }
+    return { verified, state: state2, contentId, urlMatch };
+  } catch {
+    return { verified: false, state: null, contentId: null, urlMatch: null };
+  }
+}
+async function detectSilentDropRisk(haUrl, haToken, speakers, expectedUrl, firstPollDelayMs = 3500) {
+  const TARGET_DELAY_MS = 8e3;
+  const remaining = Math.max(0, TARGET_DELAY_MS - firstPollDelayMs);
+  if (remaining > 0) {
+    await new Promise((r) => setTimeout(r, remaining));
+  }
+  const secondPoll = {};
+  for (const speaker of speakers) {
+    const v = await verifyPlaybackState(haUrl, haToken, speaker, expectedUrl, true);
+    secondPoll[speaker] = { state: v.state, contentId: v.contentId, urlMatch: v.urlMatch };
+  }
+  const entries = Object.values(secondPoll);
+  const silentDropRisk = entries.length > 0 && entries.every((v) => v.urlMatch === true && v.state === "idle");
+  return { silentDropRisk, secondPoll };
+}
+var JANUS_VOICE_ID, VOICE_REPLIES_BUCKET, BROADCAST_SUBDIR, MAX_BROADCAST_FILES;
+var init_castBroadcast = __esm({
+  "server/lib/castBroadcast.ts"() {
+    init_fetchWithTimeout();
+    init_ssrfGuard();
+    init_objectStore();
+    JANUS_VOICE_ID = "iLVmqjzCGGvqtMCk6vVQ";
+    VOICE_REPLIES_BUCKET = "voice-replies";
+    BROADCAST_SUBDIR = "broadcasts";
+    MAX_BROADCAST_FILES = 5;
+  }
+});
+
+// server/lib/irrigationFlow.ts
+var irrigationFlow_exports = {};
+__export(irrigationFlow_exports, {
+  DEFAULT_GPM_BY_TYPE: () => DEFAULT_GPM_BY_TYPE,
+  ZONE_FLOW_CONFIG: () => ZONE_FLOW_CONFIG,
+  gallonsFromRuntime: () => gallonsFromRuntime,
+  getZoneEntityIds: () => getZoneEntityIds,
+  getZoneFlow: () => getZoneFlow,
+  getZoneGpm: () => getZoneGpm,
+  refreshZoneNames: () => refreshZoneNames
+});
+function zone(entityId, svgId, label, controller, headType) {
+  return { entityId, svgId, label, controller, headType, gpm: DEFAULT_GPM_BY_TYPE[headType], isDefault: true };
+}
+function makeZoneId(clock, valve) {
+  const suffix = clock === 1 ? `${valve}` : `${valve}_2`;
+  return `${IRR_DOMAIN}.${IRR_PREFIX}_${suffix}`;
+}
+async function refreshZoneNames(loader) {
+  const rows = await loader();
+  const next = /* @__PURE__ */ new Map();
+  for (const r of rows) {
+    if (r.svgId && typeof r.name === "string" && r.name.trim()) {
+      next.set(r.svgId, r.name.trim());
+    }
+  }
+  NAME_OVERRIDES = next;
+}
+function effectiveLabel(z) {
+  return NAME_OVERRIDES.get(z.svgId) ?? z.label;
+}
+function getZoneEntityIds() {
+  return ZONE_FLOW_CONFIG.map((z) => z.entityId);
+}
+function getZoneFlow(entityId) {
+  const z = BY_ENTITY.get(entityId);
+  if (!z) return void 0;
+  return { ...z, label: effectiveLabel(z) };
+}
+function getZoneGpm(entityId) {
+  return BY_ENTITY.get(entityId)?.gpm ?? DEFAULT_GPM_BY_TYPE.spray;
+}
+function gallonsFromRuntime(entityId, minutes) {
+  const gpm = getZoneGpm(entityId);
+  const safeMinutes = Math.max(0, minutes);
+  return +(gpm * safeMinutes).toFixed(2);
+}
+var DEFAULT_GPM_BY_TYPE, IRR_DOMAIN, IRR_PREFIX, ZONE_FLOW_CONFIG, BY_ENTITY, NAME_OVERRIDES;
+var init_irrigationFlow = __esm({
+  "server/lib/irrigationFlow.ts"() {
+    DEFAULT_GPM_BY_TYPE = {
+      rotor: 12,
+      // lawn rotors — high flow, large coverage
+      spray: 8,
+      // fixed spray heads — medium flow
+      drip: 2
+      // drip/bubbler — low flow, plantings
+    };
+    IRR_DOMAIN = "switch";
+    IRR_PREFIX = "rain_bird_sprinkler";
+    ZONE_FLOW_CONFIG = [
+      // ── ESP-TM2 (Clock 1, 12 valves) ──
+      zone(makeZoneId(1, 1), "clock-1-valve-1", "SW Front Lawn", "ESP-TM2", "rotor"),
+      zone(makeZoneId(1, 2), "clock-1-valve-2", "SE Front Lawn", "ESP-TM2", "rotor"),
+      zone(makeZoneId(1, 3), "clock-1-valve-3", "Gate Left Planting", "ESP-TM2", "drip"),
+      zone(makeZoneId(1, 4), "clock-1-valve-4", "Gate Right Planting", "ESP-TM2", "drip"),
+      zone(makeZoneId(1, 5), "clock-1-valve-5", "Entry Left Strip", "ESP-TM2", "spray"),
+      zone(makeZoneId(1, 6), "clock-1-valve-6", "Entry Right Strip", "ESP-TM2", "spray"),
+      zone(makeZoneId(1, 7), "clock-1-valve-7", "Rear Garden East", "ESP-TM2", "drip"),
+      zone(makeZoneId(1, 8), "clock-1-valve-8", "Rear Garden West", "ESP-TM2", "drip"),
+      zone(makeZoneId(1, 9), "clock-1-valve-9", "Service Yard", "ESP-TM2", "spray"),
+      zone(makeZoneId(1, 10), "clock-1-valve-10", "North Lawn Left", "ESP-TM2", "rotor"),
+      zone(makeZoneId(1, 11), "clock-1-valve-11", "North Lawn Right", "ESP-TM2", "rotor"),
+      zone(makeZoneId(1, 12), "clock-1-valve-12", "Back Border", "ESP-TM2", "spray"),
+      // ── ESP-ME3 (Clock 2, 7 valves) ──
+      zone(makeZoneId(2, 1), "clock-2-valve-1", "NW Corner Garden", "ESP-ME3", "drip"),
+      zone(makeZoneId(2, 2), "clock-2-valve-2", "North Left Strip", "ESP-ME3", "spray"),
+      zone(makeZoneId(2, 3), "clock-2-valve-3", "West Side Corridor", "ESP-ME3", "drip"),
+      zone(makeZoneId(2, 4), "clock-2-valve-4", "West Garden Mid", "ESP-ME3", "drip"),
+      zone(makeZoneId(2, 5), "clock-2-valve-5", "West Garden Lower", "ESP-ME3", "drip"),
+      zone(makeZoneId(2, 6), "clock-2-valve-6", "House East Trim (Upper)", "ESP-ME3", "spray"),
+      zone(makeZoneId(2, 7), "clock-2-valve-7", "House East Trim (Lower)", "ESP-ME3", "spray")
+    ];
+    BY_ENTITY = new Map(ZONE_FLOW_CONFIG.map((z) => [z.entityId, z]));
+    NAME_OVERRIDES = /* @__PURE__ */ new Map();
+  }
+});
+
+// server/lib/haUrlGuard.ts
+import { isIP } from "node:net";
+import { lookup } from "node:dns/promises";
+function getAllowedHaHosts(env = process.env) {
+  const hosts = /* @__PURE__ */ new Set();
+  if (env.SUPERVISOR_TOKEN || env.HASSIO_TOKEN) {
+    hosts.add("supervisor");
+  }
+  if (env.HA_URL) {
+    try {
+      hosts.add(new URL(env.HA_URL).hostname.toLowerCase());
+    } catch {
+    }
+  }
+  for (const raw of (env.HA_ALLOWED_HOSTS ?? "").split(",")) {
+    const h = raw.trim().toLowerCase();
+    if (h) hosts.add(h);
+  }
+  return hosts;
+}
+function isPrivateOrReservedIp(ip) {
+  const version = isIP(ip);
+  if (version === 4) return isPrivateV4(ip);
+  if (version === 6) return isPrivateV6(ip);
+  return true;
+}
+function isPrivateV4(ip) {
+  const parts = ip.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((p) => Number.isNaN(p) || p < 0 || p > 255)) return true;
+  const [a, b2] = parts;
+  return a === 0 || // 0.0.0.0/8 "this network"
+  a === 10 || // 10.0.0.0/8 private
+  a === 127 || // 127.0.0.0/8 loopback
+  a === 100 && b2 >= 64 && b2 <= 127 || // 100.64.0.0/10 CGNAT
+  a === 169 && b2 === 254 || // 169.254.0.0/16 link-local + cloud metadata
+  a === 172 && b2 >= 16 && b2 <= 31 || // 172.16.0.0/12 private
+  a === 192 && b2 === 168 || // 192.168.0.0/16 private
+  a === 192 && b2 === 0 || // 192.0.0.0/24 IETF protocol assignments
+  a === 198 && (b2 === 18 || b2 === 19) || // 198.18.0.0/15 benchmarking
+  a >= 224;
+}
+function isPrivateV6(ip) {
+  const lower = ip.toLowerCase();
+  const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped) return isPrivateV4(mapped[1]);
+  const hexMapped = lower.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (hexMapped) {
+    const hi = parseInt(hexMapped[1], 16);
+    const lo = parseInt(hexMapped[2], 16);
+    return isPrivateV4(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+  }
+  if (lower === "::" || lower === "::1") return true;
+  if (lower.startsWith("fe80:") || lower.startsWith("fe9") || lower.startsWith("fea") || lower.startsWith("feb")) return true;
+  if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
+  if (lower.startsWith("64:ff9b:")) return true;
+  return false;
+}
+function checkHaUrlSync(rawUrl, env = process.env) {
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return { ok: false, reason: "ha_url must be a valid http(s) URL" };
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return { ok: false, reason: "ha_url must use http or https" };
+  }
+  if (parsed.username || parsed.password) {
+    return { ok: false, reason: "ha_url must not contain embedded credentials" };
+  }
+  const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (hostname === "supervisor" && (env.SUPERVISOR_TOKEN || env.HASSIO_TOKEN || env.HA_ALLOWED_HOSTS?.includes("supervisor"))) {
+    return { ok: true, url: rawUrl };
+  }
+  if (isIP(hostname)) {
+    if (isPrivateOrReservedIp(hostname)) {
+      return { ok: false, reason: "ha_url must not point at a private, loopback, or reserved address" };
+    }
+  }
+  const allowed = getAllowedHaHosts(env);
+  if (allowed.size > 0 && !allowed.has(hostname)) {
+    return { ok: false, reason: "ha_url host is not on the allowed Home Assistant host list" };
+  }
+  return { ok: true, url: rawUrl };
+}
+async function validateHaUrl(rawUrl, env = process.env) {
+  const sync2 = checkHaUrlSync(rawUrl, env);
+  if (!sync2.ok) return sync2;
+  const hostname = new URL(rawUrl).hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (hostname === "supervisor" && (env.SUPERVISOR_TOKEN || env.HASSIO_TOKEN || env.HA_ALLOWED_HOSTS?.includes("supervisor"))) {
+    return sync2;
+  }
+  if (isIP(hostname)) return sync2;
+  let addrs;
+  try {
+    addrs = await lookup(hostname, { all: true, verbatim: true });
+  } catch {
+    return { ok: false, reason: "ha_url hostname could not be resolved" };
+  }
+  if (addrs.length === 0) {
+    return { ok: false, reason: "ha_url hostname could not be resolved" };
+  }
+  for (const { address } of addrs) {
+    if (isPrivateOrReservedIp(address)) {
+      return { ok: false, reason: "ha_url resolves to a private, loopback, or reserved address" };
+    }
+  }
+  return sync2;
+}
+var init_haUrlGuard = __esm({
+  "server/lib/haUrlGuard.ts"() {
+  }
+});
+
+// server/routes/homeAssistant.ts
+import { Router as Router3 } from "express";
+import { fetch as undiciFetch2 } from "undici";
+function requireAdmin(req, res, next) {
+  if (req.userRole !== "admin") {
+    res.status(403).json({ error: "Admin access required" });
+    return;
+  }
+  next();
+}
+function invalidateHACredsCache(userId) {
+  if (userId) haCredsCache.delete(userId);
+  else haCredsCache.clear();
+}
+async function resolveHACreds(userId) {
+  const cacheKey = userId && userId !== "UNKNOWN" ? userId : "__env__";
+  const cached = haCredsCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < HA_CREDS_CACHE_TTL_MS) return cached.creds;
+  let creds = null;
+  if (userId && userId !== "UNKNOWN") {
+    try {
+      const settings = await storage.getHomeAssistantSettings(userId);
+      if (settings?.encryptedToken) {
+        const token = await decryptToken(settings.encryptedToken);
+        let url = settings.haUrl || process.env.HA_URL || "";
+        if (url && settings.haUrl) {
+          const check = await validateHaUrl(url);
+          if (!check.ok) {
+            console.warn(`[home-assistant] Stored HA URL for user ${userId} rejected (${check.reason}) \u2014 falling back to env HA_URL`);
+            url = process.env.HA_URL || "";
+          }
+        }
+        if (url && token) creds = { haUrl: url, haToken: token, source: "settings" };
+      }
+    } catch (err) {
+      console.error(
+        `[home-assistant] Failed to load stored HA credentials for user ${userId}; falling back to env:`,
+        err instanceof Error ? err.message : err
+      );
+    }
+  }
+  if (!creds) {
+    const supervisorToken2 = process.env.SUPERVISOR_TOKEN || process.env.HASSIO_TOKEN;
+    const envUrl = process.env.HA_URL || process.env.HOME_ASSISTANT_URL || (supervisorToken2 ? "http://supervisor/core" : "");
+    const envToken = process.env.HA_TOKEN || process.env.HOME_ASSISTANT_TOKEN || supervisorToken2 || "";
+    if (envUrl && envToken) creds = { haUrl: envUrl, haToken: envToken, source: supervisorToken2 ? "supervisor" : "env" };
+  }
+  haCredsCache.set(cacheKey, { creds, fetchedAt: Date.now() });
+  return creds;
+}
+async function getCrestronEntryId(haUrl, haToken) {
+  const now = Date.now();
+  if (crestronEntryIdCache && now - crestronEntryIdFetchedAt < CRESTRON_ENTRY_CACHE_TTL_MS) {
+    return crestronEntryIdCache;
+  }
+  const { status, data } = await callHA(haUrl, haToken, "GET", "/api/config/config_entries/entry");
+  if (status !== 200 || !Array.isArray(data)) return null;
+  const entries = data;
+  const crestron = entries.find(
+    (e) => e.domain === "crestron_home" || typeof e.title === "string" && e.title.toLowerCase().includes("crestron")
+  );
+  if (!crestron) return null;
+  crestronEntryIdCache = crestron.entry_id;
+  crestronEntryIdFetchedAt = now;
+  return crestronEntryIdCache;
+}
+async function getGoveeCloudEntryId(haUrl, haToken) {
+  const now = Date.now();
+  if (goveeEntryCache && goveeEntryIdCache && now - goveeEntryIdFetchedAt < CRESTRON_ENTRY_CACHE_TTL_MS) {
+    return goveeEntryCache;
+  }
+  const { status, data } = await callHA(haUrl, haToken, "GET", "/api/config/config_entries/entry");
+  if (status !== 200 || !Array.isArray(data)) return null;
+  const entries = data;
+  const goveeAll = entries.filter(
+    (e) => e.domain.toLowerCase().includes("govee") || typeof e.title === "string" && e.title.toLowerCase().includes("govee")
+  );
+  const goveeCloud = goveeAll.find(
+    (e) => e.domain === "govee_cloud" || typeof e.title === "string" && e.title.toLowerCase().includes("govee cloud")
+  );
+  const govee = goveeCloud ?? goveeAll[0];
+  if (!govee) return null;
+  goveeEntryCache = govee;
+  goveeEntryIdCache = govee.entry_id;
+  goveeEntryIdFetchedAt = now;
+  return govee;
+}
+async function callHA(haUrl, haToken, method, path12, body, opts) {
+  const url = `${haUrl.replace(/\/$/, "")}${path12}`;
+  const MAX_RETRIES = opts?.maxRetries ?? 3;
+  const retryOn401 = opts?.retryOn401 ?? true;
+  let lastError = null;
+  let lastStatus = 0;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const init = {
+        method,
+        headers: {
+          "Authorization": `Bearer ${haToken}`,
+          "Content-Type": "application/json"
+        },
+        body: body ? JSON.stringify(body) : void 0,
+        // Never follow redirects: a redirecting host could bounce the request
+        // (and its bearer token) to an unvalidated internal destination.
+        // HA's REST API does not redirect in normal operation; a 3xx is
+        // surfaced to the caller as-is.
+        redirect: "manual"
+      };
+      const res = await breakers.ha.execute(() => opts?.dispatcher ? undiciFetch2(url, { ...init, dispatcher: opts.dispatcher }) : guardedFetch(url, init));
+      const text2 = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text2);
+      } catch {
+        data = text2;
+      }
+      lastStatus = res.status;
+      if (res.status >= 500 && attempt < MAX_RETRIES) {
+        console.warn(`callHA: HA returned ${res.status} on attempt ${attempt}/${MAX_RETRIES} for ${method} ${path12} \u2014 retrying in 2s`);
+        await new Promise((r) => setTimeout(r, 2e3));
+        continue;
+      }
+      if (retryOn401 && res.status === 401 && attempt < MAX_RETRIES) {
+        console.warn(`callHA: HA returned 401 on attempt ${attempt}/${MAX_RETRIES} for ${method} ${path12} \u2014 retrying in 2s`);
+        await new Promise((r) => setTimeout(r, 2e3));
+        continue;
+      }
+      if (retryOn401 && res.status === 401 && attempt === MAX_RETRIES) {
+        console.error(`callHA: HA returned 401 after ${MAX_RETRIES} attempts for ${method} ${path12} \u2014 HA token likely expired or revoked`);
+        logAudit("home-assistant-proxy", {
+          category: "home",
+          event_type: "ha_auth_failure",
+          severity: "critical",
+          actor_id: "system",
+          actor_name: "System",
+          channel: "system",
+          summary: `CRITICAL: Home Assistant rejected auth (401) for ${method} ${path12} after ${MAX_RETRIES} retries. Token may need rotation.`,
+          detail: { method, path: path12, attempts: MAX_RETRIES },
+          status: "error"
+        });
+      }
+      return { status: res.status, data };
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (err instanceof CircuitOpenError) {
+        console.warn(`callHA: breaker open for HA, skipping remaining ${MAX_RETRIES - attempt} retries for ${method} ${path12}`);
+        throw err;
+      }
+      console.warn(`callHA attempt ${attempt}/${MAX_RETRIES} failed for ${method} ${path12}: ${lastError.message}`);
+      if (attempt < MAX_RETRIES) {
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    }
+  }
+  throw lastError;
+}
+function prettifyEntityId(id) {
+  const zoneLabel = getZoneFlow(id)?.label;
+  if (zoneLabel) return zoneLabel;
+  const raw = id.replace(/^[^.]+\./, "");
+  const parts = raw.split("_");
+  if (parts.length >= 3) {
+    for (let len = Math.floor(parts.length / 2); len >= 1; len--) {
+      const a = parts.slice(0, len).join("_");
+      const b2 = parts.slice(len, len * 2).join("_");
+      if (a === b2) {
+        parts.splice(0, len);
+        break;
+      }
+    }
+  }
+  return parts.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+function resolveTargetSpeakers(target) {
+  const cached = getEntityCache();
+  const allMediaPlayers = cached.map((e) => e.entity_id).filter((id) => id.startsWith("media_player."));
+  if (allMediaPlayers.length === 0) {
+    if (target === "bedrooms") {
+      return { speakers: ["media_player.bedroom_speaker"], tvs: [], displays: [] };
+    }
+    return {
+      speakers: ["media_player.living_room_speaker", "media_player.bedroom_speaker"],
+      tvs: ["media_player.living_room_tv"],
+      displays: ["media_player.kitchen_display"]
+    };
+  }
+  const tvs = allMediaPlayers.filter((id) => id.includes("_tv") || id.includes("television"));
+  const displays = allMediaPlayers.filter((id) => id.includes("display") || id.includes("hub"));
+  if (target === "bedrooms") {
+    const bedroomSpeakers = allMediaPlayers.filter(
+      (id) => (id.includes("bedroom") || id.includes("room") || id.includes("closet")) && !tvs.includes(id)
+    );
+    return {
+      speakers: bedroomSpeakers.length > 0 ? bedroomSpeakers : allMediaPlayers.filter((id) => !tvs.includes(id)),
+      tvs: [],
+      displays: []
+    };
+  }
+  if (target === "google-home") {
+    const ghSpeakers = allMediaPlayers.filter(
+      (id) => !tvs.includes(id) && (id.includes("speaker") || id.includes("display") || id.includes("google"))
+    );
+    return {
+      speakers: ghSpeakers.length > 0 ? ghSpeakers : allMediaPlayers.filter((id) => !tvs.includes(id)),
+      tvs: [],
+      displays
+    };
+  }
+  return {
+    speakers: allMediaPlayers,
+    tvs,
+    displays
+  };
+}
+var router3, haCredsCache, HA_CREDS_CACHE_TTL_MS, crestronEntryIdCache, crestronEntryIdFetchedAt, CRESTRON_ENTRY_CACHE_TTL_MS, goveeEntryCache, goveeEntryIdCache, goveeEntryIdFetchedAt, HA_TOKEN_ALERT_COOLDOWN_MS, JANUS_LOGO_URL, homeAssistant_default;
+var init_homeAssistant = __esm({
+  "server/routes/homeAssistant.ts"() {
+    init_auth2();
+    init_auth();
+    init_storage();
+    init_auditLog();
+    init_encryption();
+    init_ssrfGuard();
+    init_breakers();
+    init_errorSanitizer();
+    init_haWebSocket();
+    init_helpers();
+    init_castBroadcast();
+    init_irrigationFlow();
+    init_haUrlGuard();
+    router3 = Router3();
+    haCredsCache = /* @__PURE__ */ new Map();
+    HA_CREDS_CACHE_TTL_MS = 60 * 1e3;
+    crestronEntryIdCache = null;
+    crestronEntryIdFetchedAt = 0;
+    CRESTRON_ENTRY_CACHE_TTL_MS = 60 * 60 * 1e3;
+    goveeEntryCache = null;
+    goveeEntryIdCache = null;
+    goveeEntryIdFetchedAt = 0;
+    router3.post("/crestron/reload", requireAuth2, requireAdmin, async (req, res) => {
+      const creds = await resolveHACreds(req.userId);
+      const HA_URL2 = creds?.haUrl ?? "";
+      const HA_TOKEN2 = creds?.haToken ?? "";
+      const userId = req.userId ?? "unknown";
+      const userInfo = getAuthUser(req);
+      const actorName = userInfo?.name ?? userInfo?.email ?? userId;
+      const t0 = Date.now();
+      if (!HA_URL2 || !HA_TOKEN2) {
+        res.status(503).json({ error: "Home Assistant not configured" });
+        return;
+      }
+      try {
+        const entryId = await getCrestronEntryId(HA_URL2, HA_TOKEN2);
+        if (!entryId) {
+          await logAudit("crestron-reload", {
+            category: "crestron_bridge",
+            event_type: "crestron_reload",
+            severity: "error",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary: "Crestron reload failed \u2014 config entry not found",
+            detail: {},
+            status: "error",
+            duration_ms: Date.now() - t0
+          });
+          res.status(404).json({ error: "Crestron Home config entry not found in Home Assistant" });
+          return;
+        }
+        const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/homeassistant/reload_config_entry", {
+          entry_id: entryId
+        });
+        const success = status < 400;
+        let haErrorMsg;
+        if (!success && data) {
+          if (typeof data === "string") haErrorMsg = data.slice(0, 300);
+          else if (typeof data === "object") {
+            const d = data;
+            haErrorMsg = String(d.message ?? d.error ?? JSON.stringify(data)).slice(0, 300);
+          }
+        }
+        await logAudit("crestron-reload", {
+          category: "crestron_bridge",
+          event_type: "crestron_reload",
+          severity: success ? "info" : "warn",
+          actor_id: userId,
+          actor_name: actorName,
+          channel: "web",
+          summary: success ? `Crestron integration reloaded by ${actorName}` : `Crestron reload failed (HTTP ${status})`,
+          detail: { entry_id: entryId, ha_status: status, ...haErrorMsg ? { ha_error: haErrorMsg } : {} },
+          status: success ? "success" : "error",
+          duration_ms: Date.now() - t0
+        });
+        res.status(success ? 200 : 502).json({ success, entry_id: entryId, data });
+      } catch (err) {
+        console.error("[crestron-reload] Error:", err);
+        await logAudit("crestron-reload", {
+          category: "crestron_bridge",
+          event_type: "crestron_reload",
+          severity: "error",
+          actor_id: userId,
+          actor_name: actorName,
+          channel: "web",
+          summary: `Crestron reload error: ${err instanceof Error ? err.message : String(err)}`,
+          detail: { error: err instanceof Error ? err.message : String(err) },
+          status: "error",
+          duration_ms: Date.now() - t0
+        });
+        res.status(500).json({ error: "Failed to reload Crestron integration" });
+      }
+    });
+    router3.post("/govee/reload", requireAuth2, requireAdmin, async (req, res) => {
+      const creds = await resolveHACreds(req.userId);
+      const HA_URL2 = creds?.haUrl ?? "";
+      const HA_TOKEN2 = creds?.haToken ?? "";
+      const userId = req.userId ?? "unknown";
+      const userInfo = getAuthUser(req);
+      const actorName = userInfo?.name ?? userInfo?.email ?? userId;
+      const t0 = Date.now();
+      if (!HA_URL2 || !HA_TOKEN2) {
+        res.status(503).json({ error: "Home Assistant not configured" });
+        return;
+      }
+      try {
+        const entry = await getGoveeCloudEntryId(HA_URL2, HA_TOKEN2);
+        if (!entry) {
+          await logAudit("govee-reload", {
+            category: "home",
+            event_type: "govee_reload",
+            severity: "error",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary: "Govee reload failed \u2014 config entry not found in Home Assistant",
+            detail: {},
+            status: "error",
+            duration_ms: Date.now() - t0
+          });
+          res.status(404).json({ error: "Govee config entry not found in Home Assistant" });
+          return;
+        }
+        const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/homeassistant/reload_config_entry", {
+          entry_id: entry.entry_id
+        });
+        const success = status < 400;
+        let haErrorMsg;
+        if (!success && data) {
+          if (typeof data === "string") haErrorMsg = data.slice(0, 300);
+          else if (typeof data === "object") {
+            const d = data;
+            haErrorMsg = String(d.message ?? d.error ?? JSON.stringify(data)).slice(0, 300);
+          }
+        }
+        goveeEntryCache = null;
+        goveeEntryIdCache = null;
+        goveeEntryIdFetchedAt = 0;
+        await logAudit("govee-reload", {
+          category: "home",
+          event_type: "govee_reload",
+          severity: success ? "info" : "warn",
+          actor_id: userId,
+          actor_name: actorName,
+          channel: "web",
+          summary: success ? `Govee integration (${entry.domain}) reloaded by ${actorName}` : `Govee reload failed (HTTP ${status})`,
+          detail: {
+            entry_id: entry.entry_id,
+            domain: entry.domain,
+            title: entry.title,
+            ha_status: status,
+            ...haErrorMsg ? { ha_error: haErrorMsg } : {}
+          },
+          status: success ? "success" : "error",
+          duration_ms: Date.now() - t0
+        });
+        res.status(success ? 200 : 502).json({ success, entry_id: entry.entry_id, domain: entry.domain, title: entry.title, data });
+      } catch (err) {
+        console.error("[govee-reload] Error:", err);
+        await logAudit("govee-reload", {
+          category: "home",
+          event_type: "govee_reload",
+          severity: "error",
+          actor_id: userId,
+          actor_name: actorName,
+          channel: "web",
+          summary: `Govee reload error: ${err instanceof Error ? err.message : String(err)}`,
+          detail: { error: err instanceof Error ? err.message : String(err) },
+          status: "error",
+          duration_ms: Date.now() - t0
+        });
+        res.status(500).json({ error: "Failed to reload Govee integration" });
+      }
+    });
+    router3.get("/govee/config-entries", requireAuth2, requireAdmin, async (req, res) => {
+      const creds = await resolveHACreds(req.userId);
+      const HA_URL2 = creds?.haUrl ?? "";
+      const HA_TOKEN2 = creds?.haToken ?? "";
+      if (!HA_URL2 || !HA_TOKEN2) {
+        res.status(503).json({ error: "Home Assistant not configured" });
+        return;
+      }
+      try {
+        const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", "/api/config/config_entries/entry");
+        if (status !== 200 || !Array.isArray(data)) {
+          res.status(502).json({ error: "Failed to fetch config entries from HA" });
+          return;
+        }
+        const entries = data;
+        const goveeEntries = entries.filter(
+          (e) => e.domain.toLowerCase().includes("govee") || typeof e.title === "string" && e.title.toLowerCase().includes("govee")
+        );
+        res.json({ entries: goveeEntries });
+      } catch (err) {
+        res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+    router3.get("/states", requireAuth2, (_req, res) => {
+      if (!isCacheReady()) {
+        res.status(503).json({ error: "State cache not ready yet" });
+        return;
+      }
+      res.json(getEntityCache());
+    });
+    router3.get("/areas", requireAuth2, async (_req, res) => {
+      try {
+        let areas = getAreasWithEntities();
+        if (areas.length === 0) {
+          await refreshHAAreas();
+          areas = getAreasWithEntities();
+        }
+        res.json({ success: true, areas });
+      } catch (err) {
+        console.error("[HA-Areas] Error fetching areas:", err);
+        res.status(500).json(safeErrorJson(err));
+      }
+    });
+    router3.get("/cameras", requireAuth2, async (req, res) => {
+      try {
+        const creds = await resolveHACreds(req.userId);
+        if (!creds?.haUrl || !creds?.haToken) {
+          res.json({ success: true, cameras: [] });
+          return;
+        }
+        let states = [];
+        if (isCacheReady()) {
+          const cache3 = getEntityCache();
+          states = Object.values(cache3);
+        } else {
+          const { status, data } = await callHA(creds.haUrl, creds.haToken, "GET", "/api/states", void 0, { maxRetries: 1 });
+          if (status === 200 && Array.isArray(data)) {
+            states = data;
+          }
+        }
+        const cameras = states.filter((s3) => s3.entity_id && s3.entity_id.startsWith("camera.")).map((s3) => ({
+          camera_id: s3.entity_id,
+          entity_id: s3.entity_id,
+          name: s3.attributes?.friendly_name || s3.entity_id.replace(/^camera\./, "").replace(/_/g, " "),
+          status: s3.state === "unavailable" ? "offline" : "live",
+          model: s3.attributes?.brand || s3.attributes?.model_name || s3.attributes?.model || "Home Assistant",
+          location: s3.attributes?.area_id || "",
+          thumbnail_url: `/api/ha/camera_proxy/${s3.entity_id}`,
+          stream_url: `/api/ha/camera_stream/${s3.entity_id}`,
+          is_ha: true
+        }));
+        res.json({ success: true, cameras });
+      } catch (err) {
+        console.error("[ha-cameras] Failed to list cameras:", err);
+        res.json({ success: false, cameras: [], error: String(err) });
+      }
+    });
+    router3.get("/camera_proxy/:entityId", requireAuth2, async (req, res) => {
+      const rawEntityId = req.params.entityId;
+      const entityId = Array.isArray(rawEntityId) ? rawEntityId[0] : rawEntityId;
+      if (!entityId || !entityId.startsWith("camera.")) {
+        res.status(400).json({ error: "Valid camera entityId required" });
+        return;
+      }
+      const creds = await resolveHACreds(req.userId);
+      if (!creds?.haUrl || !creds?.haToken) {
+        res.status(503).json({ error: "Home Assistant not configured" });
+        return;
+      }
+      try {
+        const haUrl = creds.haUrl.replace(/\/$/, "");
+        const proxyUrl = `${haUrl}/api/camera_proxy/${encodeURIComponent(entityId)}`;
+        const haRes = await undiciFetch2(proxyUrl, {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${creds.haToken}`
+          }
+        });
+        if (!haRes.ok) {
+          res.status(haRes.status).json({ error: `HA camera proxy returned ${haRes.status}` });
+          return;
+        }
+        const contentType = haRes.headers.get("content-type") || "image/jpeg";
+        res.setHeader("Content-Type", contentType);
+        res.setHeader("Cache-Control", "no-cache, max-age=0, must-revalidate");
+        const buffer = Buffer.from(await haRes.arrayBuffer());
+        res.send(buffer);
+      } catch (err) {
+        console.error(`[ha-camera-proxy] Error proxying ${entityId}:`, err);
+        res.status(500).json({ error: "Failed to fetch camera snapshot" });
+      }
+    });
+    router3.get("/camera_stream/:entityId", requireAuth2, async (req, res) => {
+      const rawEntityId = req.params.entityId;
+      const entityId = Array.isArray(rawEntityId) ? rawEntityId[0] : rawEntityId;
+      if (!entityId || !entityId.startsWith("camera.")) {
+        res.status(400).json({ error: "Valid camera entityId required" });
+        return;
+      }
+      const creds = await resolveHACreds(req.userId);
+      if (!creds?.haUrl || !creds?.haToken) {
+        res.status(503).json({ error: "Home Assistant not configured" });
+        return;
+      }
+      try {
+        const haUrl = creds.haUrl.replace(/\/$/, "");
+        const streamUrl = `${haUrl}/api/camera_proxy_stream/${encodeURIComponent(entityId)}`;
+        const haRes = await undiciFetch2(streamUrl, {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${creds.haToken}`
+          }
+        });
+        if (!haRes.ok) {
+          res.status(haRes.status).json({ error: `HA camera stream returned ${haRes.status}` });
+          return;
+        }
+        const contentType = haRes.headers.get("content-type") || "multipart/x-mixed-replace; boundary=--frame";
+        res.setHeader("Content-Type", contentType);
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+        res.setHeader("Connection", "close");
+        if (haRes.body) {
+          const reader = haRes.body.getReader();
+          req.on("close", () => {
+            reader.cancel().catch(() => {
+            });
+          });
+          const pump = async () => {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              res.write(value);
+            }
+            res.end();
+          };
+          pump().catch(() => res.end());
+        } else {
+          res.status(500).json({ error: "No stream body available" });
+        }
+      } catch (err) {
+        console.error(`[ha-camera-stream] Error streaming ${entityId}:`, err);
+        if (!res.headersSent) res.status(500).json({ error: "Failed to stream camera" });
+      }
+    });
+    router3.get("/govee-ids", requireAuth2, (_req, res) => {
+      res.json(getGoveeEntityIdsFromCache());
+    });
+    HA_TOKEN_ALERT_COOLDOWN_MS = 60 * 60 * 1e3;
+    JANUS_LOGO_URL = process.env.APP_LOGO_URL || "/icon.svg";
+    router3.post("/", requireAuth2, async (req, res) => {
+      const authUser = getAuthUser(req);
+      const userId = authUser?.userId || req.userId || "UNKNOWN";
+      const actorName = authUser?.displayName || authUser?.email || "UNKNOWN";
+      const isAdmin2 = authUser?.roles?.includes("admin") || req.userRole === "admin";
+      try {
+        const body = req.body;
+        const { action, path: path12, method = "GET", payload } = body;
+        if (action === "save-settings") {
+          if (userId === "UNKNOWN") {
+            res.status(401).json({ error: "Authentication required" });
+            return;
+          }
+          if (!isAdmin2) {
+            res.status(403).json({ error: "Admin privileges required to save Home Assistant configuration" });
+            return;
+          }
+          const haUrlInput = typeof body.ha_url === "string" ? body.ha_url.trim().replace(/\/$/, "") : "";
+          const tokenInput = typeof body.access_token === "string" ? body.access_token.trim() : "";
+          if (!haUrlInput) {
+            res.status(400).json({ error: "ha_url is required" });
+            return;
+          }
+          const urlCheck = await validateHaUrl(haUrlInput);
+          if (!urlCheck.ok) {
+            res.status(400).json({ error: urlCheck.reason });
+            return;
+          }
+          const existing = await storage.getHomeAssistantSettings(userId);
+          if (!tokenInput && !existing?.encryptedToken) {
+            res.status(400).json({ error: "access_token is required" });
+            return;
+          }
+          const update = { userId, haUrl: haUrlInput };
+          if (tokenInput) {
+            update.encryptedToken = await encryptToken(tokenInput);
+          }
+          await storage.upsertHomeAssistantSettings(update);
+          invalidateHACredsCache(userId);
+          logAudit("home-assistant-proxy", {
+            category: "home",
+            event_type: "ha_settings_saved",
+            severity: "info",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary: tokenInput ? `Home Assistant settings saved (URL + new token) by ${actorName}` : `Home Assistant URL updated by ${actorName}`,
+            detail: { ha_url: haUrlInput, token_updated: Boolean(tokenInput) },
+            status: "success"
+          });
+          res.json({ success: true, ha_url: haUrlInput, token_saved: Boolean(tokenInput) });
+          return;
+        }
+        if (action === "get-settings") {
+          if (userId === "UNKNOWN") {
+            res.status(401).json({ error: "Authentication required" });
+            return;
+          }
+          const settings = await storage.getHomeAssistantSettings(userId);
+          res.json({
+            settings: settings ? {
+              id: settings.id,
+              ha_url: settings.haUrl,
+              is_connected: settings.isConnected,
+              last_connected_at: settings.lastConnectedAt,
+              has_token: Boolean(settings.encryptedToken)
+            } : null
+          });
+          return;
+        }
+        if (action === "disconnect") {
+          if (userId === "UNKNOWN") {
+            res.status(401).json({ error: "Authentication required" });
+            return;
+          }
+          if (!isAdmin2) {
+            res.status(403).json({ error: "Admin privileges required to disconnect Home Assistant" });
+            return;
+          }
+          const existing = await storage.getHomeAssistantSettings(userId);
+          if (existing) {
+            await storage.upsertHomeAssistantSettings({
+              userId,
+              haUrl: existing.haUrl,
+              encryptedToken: null,
+              isConnected: false
+            });
+            invalidateHACredsCache(userId);
+            logAudit("home-assistant-proxy", {
+              category: "home",
+              event_type: "ha_disconnected",
+              severity: "info",
+              actor_id: userId,
+              actor_name: actorName,
+              channel: "web",
+              summary: `Home Assistant disconnected by ${actorName}`,
+              detail: { ha_url: existing.haUrl },
+              status: "success"
+            });
+          }
+          res.json({ success: true });
+          return;
+        }
+        const creds = await resolveHACreds(userId);
+        if (action === "test-connection") {
+          const suppliedUrl = typeof body.ha_url === "string" ? body.ha_url.trim().replace(/\/$/, "") : "";
+          const suppliedToken = typeof body.access_token === "string" ? body.access_token.trim() : "";
+          let testUrl;
+          let testToken;
+          if (suppliedToken) {
+            testUrl = suppliedUrl || creds?.haUrl || "";
+            testToken = suppliedToken;
+          } else {
+            if (suppliedUrl && creds && suppliedUrl !== creds.haUrl) {
+              res.status(400).json({ error: "To test a new URL, provide its access token too" });
+              return;
+            }
+            testUrl = creds?.haUrl || "";
+            testToken = creds?.haToken || "";
+          }
+          if (!testUrl || !testToken) {
+            res.status(503).json({ unavailable: true, reason: "not_configured", message: "ha_not_configured" });
+            return;
+          }
+          const urlCheck = await validateHaUrl(testUrl);
+          if (!urlCheck.ok) {
+            res.status(400).json({ error: urlCheck.reason });
+            return;
+          }
+          const { status } = await callHA(testUrl, testToken, "GET", "/api/");
+          const connected = status === 200;
+          if (connected && userId && userId !== "UNKNOWN") {
+            const existing = await storage.getHomeAssistantSettings(userId);
+            if (existing) {
+              await storage.upsertHomeAssistantSettings({
+                userId,
+                isConnected: true,
+                lastConnectedAt: /* @__PURE__ */ new Date()
+              });
+            }
+          }
+          logAudit("home-assistant-proxy", {
+            category: "home",
+            event_type: "ha_test_connection",
+            severity: "info",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary: connected ? "Home Assistant connection test succeeded" : `Home Assistant connection test failed (HTTP ${status})`,
+            detail: { status, connected },
+            status: connected ? "success" : "error"
+          });
+          res.json({ connected });
+          return;
+        }
+        if (!creds) {
+          res.status(503).json({ unavailable: true, reason: "not_configured", message: "ha_not_configured" });
+          return;
+        }
+        const HA_URL2 = creds.haUrl;
+        const HA_TOKEN2 = creds.haToken;
+        if (action === "proxy" && path12) {
+          if (typeof path12 !== "string" || !path12.startsWith("/") || path12.startsWith("//") || path12.includes("\\")) {
+            res.status(400).json({ error: "path must be an absolute URL path" });
+            return;
+          }
+          const t0 = Date.now();
+          const { status, data } = await callHA(HA_URL2, HA_TOKEN2, method, path12, payload);
+          if (status >= 400 && path12.startsWith("/api/calendars/")) {
+            console.warn(`Calendar endpoint returned ${status} \u2014 returning empty array`);
+            logAudit("home-assistant-proxy", {
+              category: "home",
+              event_type: "ha_proxy_error",
+              severity: "warn",
+              actor_id: userId,
+              actor_name: actorName,
+              channel: "web",
+              summary: `Home Assistant calendar proxy ${method} ${path12} returned HTTP ${status} (suppressed)`,
+              detail: { method, path: path12, status, suppressed: true },
+              status: "error",
+              duration_ms: Date.now() - t0
+            });
+            res.json([]);
+            return;
+          }
+          if (status >= 400) {
+            const payloadBytes = payload ? JSON.stringify(payload).length : 0;
+            const responseBytes = JSON.stringify(data).length;
+            const errorDetail = typeof data === "object" && data !== null ? data.message || data.error || void 0 : void 0;
+            logAudit("home-assistant-proxy", {
+              category: "home",
+              event_type: "ha_proxy_error",
+              severity: "warn",
+              actor_id: userId,
+              actor_name: actorName,
+              channel: "web",
+              summary: `Home Assistant proxy ${method} ${path12} returned HTTP ${status}`,
+              detail: {
+                method,
+                path: path12,
+                status,
+                request_bytes: payloadBytes || void 0,
+                response_bytes: responseBytes,
+                ...errorDetail ? { error: errorDetail } : {}
+              },
+              status: "error",
+              duration_ms: Date.now() - t0
+            });
+          } else if (method !== "GET") {
+            const responseBytes = JSON.stringify(data).length;
+            const payloadBytes = payload ? JSON.stringify(payload).length : 0;
+            logAudit("home-assistant-proxy", {
+              category: "home",
+              event_type: "ha_proxy_request",
+              severity: "info",
+              actor_id: userId,
+              actor_name: actorName,
+              channel: "web",
+              summary: `HA proxy ${method} ${path12}`,
+              detail: { method, path: path12, status, request_bytes: payloadBytes || void 0, response_bytes: responseBytes },
+              status: "success",
+              duration_ms: Date.now() - t0
+            });
+          }
+          res.status(status).json(data);
+          return;
+        }
+        if (action === "get-states") {
+          const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", "/api/states");
+          const entityIds = body.entity_ids;
+          if (entityIds && Array.isArray(entityIds) && entityIds.length > 0 && Array.isArray(data)) {
+            const idSet = new Set(entityIds);
+            const filtered = data.filter((s3) => idSet.has(s3.entity_id));
+            res.status(status).json(filtered);
+            return;
+          }
+          res.status(status).json(data);
+          return;
+        }
+        if (action === "get-state") {
+          const { entity_id } = body;
+          if (!entity_id) {
+            res.status(400).json({ error: "entity_id required" });
+            return;
+          }
+          const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", `/api/states/${entity_id}`);
+          res.status(status).json(data);
+          return;
+        }
+        if (action === "get-domain") {
+          const { domain } = body;
+          if (!domain) {
+            res.status(400).json({ error: "domain required" });
+            return;
+          }
+          const { status: domainStatus, data: allStates } = await callHA(HA_URL2, HA_TOKEN2, "GET", "/api/states");
+          const statesArray = Array.isArray(allStates) ? allStates : [];
+          const states = statesArray.filter((s3) => s3.entity_id?.startsWith(`${domain}.`));
+          res.status(domainStatus < 400 ? 200 : domainStatus).json(states);
+          return;
+        }
+        if (action === "call-service") {
+          if (!isAdmin2) {
+            res.status(403).json({ error: "Device control requires admin privileges" });
+            return;
+          }
+          const { domain: svcDomain, service, service_data } = body;
+          if (!svcDomain || !service) {
+            res.status(400).json({ error: "domain and service required" });
+            return;
+          }
+          const t0 = Date.now();
+          const entityId = service_data?.entity_id;
+          const svcPath = `/api/services/${svcDomain}/${service}`;
+          const svcPayload = service_data || {};
+          let callResult;
+          if (svcDomain === "climate" && creds.source === "env") {
+            try {
+              const wsResult = await callHAService(svcDomain, service, svcPayload);
+              console.log(
+                `[HA climate] WebSocket call succeeded for entity_id=${entityId ?? "unknown"} service=${service}`
+              );
+              callResult = { status: 200, data: wsResult ?? [] };
+            } catch (wsErr) {
+              const wsErrMsg = wsErr instanceof Error ? wsErr.message : String(wsErr);
+              console.warn(
+                `[HA climate] WebSocket call failed for entity_id=${entityId ?? "unknown"} service=${service} error=${wsErrMsg} \u2014 falling back to REST`
+              );
+              try {
+                const restResult = await callHA(HA_URL2, HA_TOKEN2, "POST", svcPath, svcPayload, { maxRetries: 1, retryOn401: false });
+                if (restResult.status >= 400) {
+                  console.error(
+                    `[HA climate] REST fallback returned ${restResult.status} for entity_id=${entityId ?? "unknown"} service=${service} (WS error: ${wsErrMsg})`
+                  );
+                  callResult = { status: 500, data: { error: `Climate control failed \u2014 WS: ${wsErrMsg}, REST: HTTP ${restResult.status}` } };
+                } else {
+                  callResult = restResult;
+                }
+              } catch (restErr) {
+                const restErrMsg = restErr instanceof Error ? restErr.message : String(restErr);
+                console.error(
+                  `[HA climate] REST fallback also threw for entity_id=${entityId ?? "unknown"} service=${service} ws_error=${wsErrMsg} rest_error=${restErrMsg}`
+                );
+                callResult = { status: 500, data: { error: `Climate control failed \u2014 WS: ${wsErrMsg}, REST: ${restErrMsg}` } };
+              }
+            }
+          } else {
+            callResult = await callHA(HA_URL2, HA_TOKEN2, "POST", svcPath, svcPayload);
+          }
+          const { status, data } = callResult;
+          const ids = entityId ? Array.isArray(entityId) ? entityId : [entityId] : [];
+          const count = ids.length;
+          const verbMap = {
+            turn_on: svcDomain === "scene" ? "Activated scene" : "Turned on",
+            turn_off: "Turned off",
+            toggle: "Toggled",
+            set_temperature: service_data?.temperature != null ? `Set temperature to ${service_data.temperature}\xB0F` : "Set temperature",
+            set_hvac_mode: service_data?.hvac_mode ? `Set mode to ${service_data.hvac_mode}` : "Set HVAC mode",
+            volume_set: service_data?.volume_level != null ? `Set volume to ${Math.round(service_data.volume_level * 100)}%` : "Set volume",
+            select_source: service_data?.source ? `Selected source ${service_data.source} on` : "Selected source on",
+            activate: "Activated scene"
+          };
+          const verb = verbMap[service] || service.replace(/_/g, " ");
+          let summary;
+          if (count === 0) {
+            summary = `${verb} (${svcDomain})`;
+          } else if (count === 1) {
+            summary = `${verb} ${prettifyEntityId(ids[0])}`;
+          } else if (count <= 2) {
+            summary = `${verb} ${ids.map(prettifyEntityId).join(" & ")}`;
+          } else {
+            summary = `${verb} ${ids.slice(0, 2).map(prettifyEntityId).join(", ")} +${count - 2} more`;
+          }
+          const extras = [];
+          if (service_data?.brightness != null && !verbMap[service]?.includes("brightness"))
+            extras.push(`brightness ${Math.round(service_data.brightness / 255 * 100)}%`);
+          if (extras.length) summary += ` (${extras.join(", ")})`;
+          if (status >= 400 && svcDomain === "climate") {
+            const responseBody = typeof data === "object" ? JSON.stringify(data) : String(data ?? "");
+            console.error(
+              `[HA climate] call-service failed: entity_id=${entityId ?? "unknown"} service=${service} status=${status} body=${responseBody}`
+            );
+          }
+          logAudit("home-assistant-proxy", {
+            category: "home",
+            event_type: "ha_call_service",
+            severity: "info",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary,
+            detail: { domain: svcDomain, service, entity_id: entityId, service_data, status },
+            duration_ms: Date.now() - t0,
+            status: status < 400 ? "success" : "error"
+          });
+          res.status(status).json(data);
+          return;
+        }
+        if (action === "get-climate-debug") {
+          const t0 = Date.now();
+          const { status, data: allStates } = await callHA(HA_URL2, HA_TOKEN2, "GET", "/api/states");
+          const statesArray = Array.isArray(allStates) ? allStates : [];
+          const climateEntities = statesArray.filter((s3) => s3.entity_id?.startsWith("climate."));
+          const poolSpaFilter = /pool|spa/i;
+          const debug = climateEntities.map((e) => ({
+            entity_id: e.entity_id,
+            friendly_name: e.attributes?.friendly_name || e.entity_id,
+            state: e.state,
+            hvac_modes: e.attributes?.hvac_modes || [],
+            current_temperature: e.attributes?.current_temperature ?? null,
+            target_temperature: e.attributes?.temperature ?? null,
+            hvac_action: e.attributes?.hvac_action ?? null,
+            is_pool_spa: poolSpaFilter.test(e.entity_id),
+            category: poolSpaFilter.test(e.entity_id) ? "pool_spa" : "hvac"
+          }));
+          const hvacCount = debug.filter((d) => d.category === "hvac").length;
+          const poolSpaCount = debug.filter((d) => d.category === "pool_spa").length;
+          logAudit("home-assistant-proxy", {
+            category: "home",
+            event_type: "ha_climate_debug",
+            severity: "info",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary: `Climate debug: ${climateEntities.length} entities (${hvacCount} HVAC, ${poolSpaCount} pool/spa)`,
+            duration_ms: Date.now() - t0,
+            status: status < 400 ? "success" : "error"
+          });
+          res.json({
+            total_climate_entities: climateEntities.length,
+            hvac_count: hvacCount,
+            pool_spa_count: poolSpaCount,
+            total_ha_entities: statesArray.length,
+            timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+            entities: debug
+          });
+          return;
+        }
+        if (action === "get-history") {
+          const { entity_id, hours = 24 } = body;
+          const end = (/* @__PURE__ */ new Date()).toISOString();
+          const start = new Date(Date.now() - hours * 3600 * 1e3).toISOString();
+          let histPath = `/api/history/period/${start}?end_time=${encodeURIComponent(end)}&minimal_response`;
+          if (entity_id) histPath += `&filter_entity_id=${entity_id}`;
+          const t0 = Date.now();
+          const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", histPath);
+          const entityLabel = entity_id ? prettifyEntityId(entity_id) : "all entities";
+          logAudit("home-assistant-proxy", {
+            category: "home",
+            event_type: "ha_get_history",
+            severity: "info",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary: `Retrieved ${hours}h history for ${entityLabel}`,
+            detail: { entity_id: entity_id || void 0, hours },
+            status: status < 400 ? "success" : "error",
+            duration_ms: Date.now() - t0
+          });
+          res.status(status).json(data);
+          return;
+        }
+        if (action === "get-logbook") {
+          const { hours = 24, entity_id } = body;
+          const start = new Date(Date.now() - hours * 3600 * 1e3).toISOString();
+          let logPath = `/api/logbook/${start}`;
+          if (entity_id) logPath += `?entity=${entity_id}`;
+          const t0 = Date.now();
+          const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", logPath);
+          const entityLabel = entity_id ? prettifyEntityId(entity_id) : "all entities";
+          const entryCount = Array.isArray(data) ? data.length : 0;
+          logAudit("home-assistant-proxy", {
+            category: "home",
+            event_type: "ha_get_logbook",
+            severity: "info",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary: `Retrieved ${entryCount} logbook entries (${hours}h) for ${entityLabel}`,
+            detail: { entity_id: entity_id || void 0, hours, entry_count: entryCount },
+            status: status < 400 ? "success" : "error",
+            duration_ms: Date.now() - t0
+          });
+          res.status(status).json(data);
+          return;
+        }
+        if (action === "get-services") {
+          const t0 = Date.now();
+          const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", "/api/services");
+          const domainCount = Array.isArray(data) ? data.length : 0;
+          logAudit("home-assistant-proxy", {
+            category: "home",
+            event_type: "ha_get_services",
+            severity: "info",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary: `Fetched HA service list (${domainCount} domain${domainCount !== 1 ? "s" : ""})`,
+            detail: { domain_count: domainCount },
+            status: status < 400 ? "success" : "error",
+            duration_ms: Date.now() - t0
+          });
+          res.status(status).json(data);
+          return;
+        }
+        if (action === "get-config") {
+          const t0 = Date.now();
+          const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", "/api/config");
+          logAudit("home-assistant-proxy", {
+            category: "home",
+            event_type: "ha_get_config",
+            severity: "info",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary: "Fetched Home Assistant configuration",
+            detail: {},
+            status: status < 400 ? "success" : "error",
+            duration_ms: Date.now() - t0
+          });
+          res.status(status).json(data);
+          return;
+        }
+        if (action === "broadcast-all") {
+          const { speakers, tvs, displays } = resolveTargetSpeakers("all");
+          const requestedVolumeAll = Number.isFinite(body.volume) ? body.volume : 0.75;
+          const volumeLevelAll = Math.min(1, Math.max(0, requestedVolumeAll));
+          await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/turn_on", { entity_id: speakers });
+          await new Promise((r) => setTimeout(r, 3e3));
+          await Promise.all([
+            callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/volume_set", {
+              entity_id: speakers,
+              volume_level: volumeLevelAll
+            }),
+            ...displays.length > 0 ? [
+              callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/play_media", {
+                entity_id: displays,
+                media_content_id: JANUS_LOGO_URL,
+                media_content_type: "image/png"
+              })
+            ] : []
+          ]);
+          await new Promise((r) => setTimeout(r, 1500));
+          const t0 = Date.now();
+          await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/tts/speak", {
+            entity_id: "tts.elevenlabs_text_to_speech",
+            media_player_entity_id: speakers,
+            message: body.message,
+            options: { voice: "iLVmqjzCGGvqtMCk6vVQ" }
+          });
+          if (tvs.length > 0) {
+            setTimeout(async () => {
+              try {
+                await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/turn_off", { entity_id: tvs });
+              } catch {
+              }
+            }, 6e4);
+          }
+          logAudit("home-assistant-proxy", {
+            category: "home",
+            event_type: "broadcast_all",
+            severity: "info",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary: `Broadcast to ${speakers.length} devices (vol ${Math.round(volumeLevelAll * 100)}%)`,
+            detail: { message: body.message?.slice(0, 100), volume: volumeLevelAll },
+            duration_ms: Date.now() - t0,
+            status: "success"
+          });
+          res.json({ success: true, devices: speakers.length });
+          return;
+        }
+        if (action === "broadcast-bedrooms" || action === "broadcast-girls") {
+          const { speakers } = resolveTargetSpeakers("bedrooms");
+          const requestedVolumeBedrooms = Number.isFinite(body.volume) ? body.volume : 0.85;
+          const volumeLevelBedrooms = Math.min(1, Math.max(0, requestedVolumeBedrooms));
+          await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/turn_on", { entity_id: speakers });
+          await new Promise((r) => setTimeout(r, 3e3));
+          await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/volume_set", {
+            entity_id: speakers,
+            volume_level: volumeLevelBedrooms
+          });
+          await new Promise((r) => setTimeout(r, 1500));
+          const t0 = Date.now();
+          await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/tts/speak", {
+            entity_id: "tts.elevenlabs_text_to_speech",
+            media_player_entity_id: speakers,
+            message: body.message,
+            options: { voice: "iLVmqjzCGGvqtMCk6vVQ" }
+          });
+          logAudit("home-assistant-proxy", {
+            category: "home",
+            event_type: "broadcast_bedrooms",
+            severity: "info",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary: `Broadcast to bedrooms (${speakers.length} speakers)`,
+            detail: { message: body.message?.slice(0, 100) },
+            duration_ms: Date.now() - t0,
+            status: "success"
+          });
+          res.json({ success: true, devices: speakers.length });
+          return;
+        }
+        if (action === "broadcast-google-home") {
+          const { speakers, displays } = resolveTargetSpeakers("google-home");
+          const requestedVolumeGH = Number.isFinite(body.volume) ? body.volume : 0.75;
+          const volumeLevelGH = Math.min(1, Math.max(0, requestedVolumeGH));
+          await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/turn_on", { entity_id: speakers });
+          await new Promise((r) => setTimeout(r, 3e3));
+          await Promise.all([
+            callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/volume_set", {
+              entity_id: speakers,
+              volume_level: volumeLevelGH
+            }),
+            callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/play_media", {
+              entity_id: displays,
+              media_content_id: JANUS_LOGO_URL,
+              media_content_type: "image/png"
+            })
+          ]);
+          await new Promise((r) => setTimeout(r, 1500));
+          const t0 = Date.now();
+          const messageText = typeof body.message === "string" ? body.message : "";
+          let ttsOk = true;
+          let ttsError = null;
+          let whatsappFallback = false;
+          let whatsappAlert = false;
+          const audioUrl = await generateAndUploadTTS(messageText, "google-home-broadcast");
+          if (audioUrl) {
+            const speakerErrors = [];
+            for (const speaker of speakers) {
+              const { status: playStatus } = await callHA(
+                HA_URL2,
+                HA_TOKEN2,
+                "POST",
+                "/api/services/media_player/play_media",
+                {
+                  entity_id: speaker,
+                  media_content_id: audioUrl,
+                  media_content_type: "audio/mpeg",
+                  announce: true,
+                  extra: {
+                    metadata: { metadataType: 3, title: "Home Announcement", artist: "Janus" }
+                  }
+                }
+              );
+              if (playStatus >= 400) {
+                speakerErrors.push(`${speaker}: HTTP ${playStatus}`);
+                console.warn(`[home-assistant-proxy] play_media failed on ${speaker}: HTTP ${playStatus}`);
+              } else {
+                console.log(`[home-assistant-proxy] \u2713 play_media accepted on ${speaker}`);
+              }
+              await new Promise((r) => setTimeout(r, 400));
+            }
+            if (speakerErrors.length > 0) {
+              ttsOk = false;
+              ttsError = `play_media failed on ${speakerErrors.length} speaker(s): ${speakerErrors.join("; ")}`;
+            }
+          } else {
+            ttsOk = false;
+            ttsError = "ElevenLabs TTS or storage upload failed";
+          }
+          if (!ttsOk) {
+            try {
+              const fallbackPhone = await getBroadcastFallbackPhone();
+              whatsappFallback = await sendWhatsAppTo(fallbackPhone, `\u{1F4E2} Home broadcast: ${messageText}`);
+              if (whatsappFallback) {
+                console.log("[home-assistant-proxy] WhatsApp fallback sent for broadcast-google-home");
+              } else {
+                console.warn("[home-assistant-proxy] WhatsApp fallback failed for broadcast-google-home");
+              }
+            } catch (e) {
+              console.error("[home-assistant-proxy] WhatsApp fallback error:", e);
+            }
+            try {
+              const alertPhone = await getAlertPhoneNumber();
+              const fallbackNote = whatsappFallback ? " WhatsApp fallback sent to family." : " WhatsApp fallback failed.";
+              whatsappAlert = await sendWhatsAppTo(
+                alertPhone,
+                `\u26A0\uFE0F All Google Home broadcast failed: ${ttsError ?? "unknown TTS error"}.${fallbackNote}`
+              );
+            } catch (e) {
+              console.error("[home-assistant-proxy] WhatsApp alert error:", e);
+            }
+          }
+          logAudit("home-assistant-proxy", {
+            category: "home",
+            event_type: "broadcast_google_home",
+            severity: ttsOk ? "info" : "warn",
+            actor_id: userId,
+            actor_name: actorName,
+            channel: "web",
+            summary: ttsOk ? `Broadcast to ${speakers.length} Google Home devices (vol ${Math.round(volumeLevelGH * 100)}%)` : `Broadcast to ${speakers.length} Google Home devices FAILED (vol ${Math.round(volumeLevelGH * 100)}%)`,
+            detail: {
+              message: messageText.slice(0, 100),
+              volume: volumeLevelGH,
+              ttsError,
+              whatsappFallback,
+              whatsappAlert
+            },
+            duration_ms: Date.now() - t0,
+            status: ttsOk ? "success" : "error"
+          });
+          res.json({
+            success: ttsOk,
+            devices: speakers.length,
+            ttsError,
+            whatsappFallback,
+            whatsappAlert
+          });
+          if (ttsOk && audioUrl) {
+            setTimeout(async () => {
+              const tVerify = Date.now();
+              const verifications = {};
+              let verifiedCount = 0;
+              for (const speaker of speakers) {
+                const v = await verifyPlaybackState(HA_URL2, HA_TOKEN2, speaker, audioUrl, true);
+                verifications[speaker] = v;
+                if (v.verified) {
+                  verifiedCount++;
+                  console.log(`[home-assistant-proxy] \u2713 Cast state verified: ${speaker} loaded correct content (announce-mode, state=${v.state})`);
+                } else {
+                  console.warn(
+                    `[home-assistant-proxy] \u26A0 Cast state check: ${speaker} state=${v.state ?? "null"} urlMatch=${v.urlMatch} (announce-mode: urlMatch must be true and state must not be unavailable)`
+                  );
+                }
+              }
+              const allVerified = verifiedCount === speakers.length;
+              let silentDropRisk = false;
+              if (allVerified) {
+                const { silentDropRisk: risk } = await detectSilentDropRisk(
+                  HA_URL2,
+                  HA_TOKEN2,
+                  speakers,
+                  audioUrl,
+                  3500
+                );
+                silentDropRisk = risk;
+                if (risk) {
+                  console.warn(
+                    `[home-assistant-proxy] \u26A0 silent_drop_risk: all speakers urlMatch=true but still idle at ~8s \u2014 audio may have been silently dropped (no failure alert raised)`
+                  );
+                }
+              }
+              logAudit("home-assistant-proxy", {
+                category: "home",
+                event_type: "broadcast_cast_verification",
+                severity: allVerified && !silentDropRisk ? "info" : "warn",
+                actor_id: userId,
+                actor_name: actorName,
+                channel: "web",
+                summary: silentDropRisk ? `Cast state verified ${verifiedCount}/${speakers.length} Google Home speakers (silent-drop risk: still idle at 8s)` : `Cast state verified ${verifiedCount}/${speakers.length} Google Home speakers`,
+                detail: {
+                  broadcast: "all-google-home",
+                  expectedUrl: audioUrl,
+                  verifiedCount,
+                  totalSpeakers: speakers.length,
+                  verifications,
+                  silent_drop_risk: silentDropRisk
+                },
+                duration_ms: Date.now() - tVerify,
+                status: allVerified ? "success" : "warning"
+              });
+            }, 3500).unref?.();
+          }
+          return;
+        }
+        res.status(400).json({ error: `Unknown action: ${action}` });
+      } catch (err) {
+        console.error("Home Assistant proxy error:", err);
+        res.status(500).json(safeErrorJson(err));
+      }
+    });
+    homeAssistant_default = router3;
+  }
+});
+
+// server/lib/estateConfig.ts
+var estateConfig_exports = {};
+__export(estateConfig_exports, {
+  getEntityMappings: () => getEntityMappings,
+  getEstateConfig: () => getEstateConfig,
+  getEstateTimezone: () => getEstateTimezone,
+  invalidateEntityMappingsCache: () => invalidateEntityMappingsCache,
+  invalidateEstateConfigCache: () => invalidateEstateConfigCache
+});
+async function getEstateConfig() {
+  const now = Date.now();
+  if (cachedConfig && now - lastFetchTime < CACHE_TTL_MS) {
+    return cachedConfig;
+  }
+  const fallback = {
+    latitude: Number(process.env.HOME_LAT) || 37.7749,
+    longitude: Number(process.env.HOME_LNG) || -122.4194,
+    elevation: 0,
+    timeZone: process.env.TZ || process.env.TIME_ZONE || "UTC",
+    unitSystem: {
+      length: "mi",
+      mass: "lb",
+      pressure: "psi",
+      temperature: "\xB0F",
+      volume: "gal"
+    },
+    locationName: process.env.HOME_LOCATION || "Home"
+  };
+  const haUrl = process.env.HA_URL || "http://supervisor/core";
+  const haToken = process.env.HA_TOKEN || process.env.SUPERVISOR_TOKEN;
+  if (!haToken) {
+    cachedConfig = fallback;
+    lastFetchTime = now;
+    return cachedConfig;
+  }
+  try {
+    const { status, data } = await callHA(haUrl, haToken, "GET", "/api/config", void 0, { maxRetries: 1 });
+    if (status === 200 && data && typeof data === "object") {
+      const d = data;
+      cachedConfig = {
+        latitude: typeof d.latitude === "number" ? d.latitude : fallback.latitude,
+        longitude: typeof d.longitude === "number" ? d.longitude : fallback.longitude,
+        elevation: typeof d.elevation === "number" ? d.elevation : fallback.elevation,
+        timeZone: d.time_zone || fallback.timeZone,
+        unitSystem: d.unit_system || fallback.unitSystem,
+        locationName: d.location_name || fallback.locationName
+      };
+      lastFetchTime = now;
+      return cachedConfig;
+    }
+  } catch (err) {
+    console.warn("[estateConfig] Failed to fetch HA /api/config, using fallback:", err instanceof Error ? err.message : err);
+  }
+  cachedConfig = fallback;
+  lastFetchTime = now;
+  return cachedConfig;
+}
+function invalidateEstateConfigCache() {
+  cachedConfig = null;
+  lastFetchTime = 0;
+}
+function getEstateTimezone() {
+  if (cachedConfig?.timeZone) return cachedConfig.timeZone;
+  return process.env.TZ || process.env.TIME_ZONE || "UTC";
+}
+async function getEntityMappings() {
+  const now = Date.now();
+  if (cachedEntityMappings && now - lastEntityMappingsFetchTime < CACHE_TTL_MS) {
+    return cachedEntityMappings;
+  }
+  const fallback = {
+    energy: [],
+    irrigation: [],
+    pool: {
+      pool_heater: "",
+      spa_heater: "",
+      pool_temp: "",
+      spa_temp: "",
+      pool_pump: "",
+      spa_pump: ""
+    },
+    climate: [],
+    cameras: [],
+    vehicles: [],
+    speedtest: {
+      download: "",
+      upload: "",
+      ping: ""
+    },
+    utility_rates: {
+      electricity_kwh_cost: 0.28,
+      water_hcf_cost: 12.5
+    }
+  };
+  try {
+    const { query: query2 } = await Promise.resolve().then(() => (init_db2(), db_exports));
+    const res = await query2(
+      `SELECT value FROM system_configs WHERE key = 'entity_mappings' LIMIT 1`
+    );
+    if (res?.rows?.[0]?.value) {
+      const parsed = typeof res.rows[0].value === "string" ? JSON.parse(res.rows[0].value) : res.rows[0].value;
+      cachedEntityMappings = {
+        ...fallback,
+        ...parsed,
+        pool: {
+          ...fallback.pool,
+          ...parsed.pool || {}
+        },
+        speedtest: {
+          ...fallback.speedtest,
+          ...parsed.speedtest || {}
+        },
+        utility_rates: {
+          ...fallback.utility_rates,
+          ...parsed.utility_rates || {}
+        }
+      };
+      lastEntityMappingsFetchTime = now;
+      return cachedEntityMappings;
+    }
+  } catch (err) {
+    console.warn("[estateConfig] Failed to fetch entity_mappings from system_configs:", err instanceof Error ? err.message : err);
+  }
+  cachedEntityMappings = fallback;
+  lastEntityMappingsFetchTime = now;
+  return cachedEntityMappings;
+}
+function invalidateEntityMappingsCache() {
+  cachedEntityMappings = null;
+  lastEntityMappingsFetchTime = 0;
+}
+var cachedConfig, lastFetchTime, CACHE_TTL_MS, cachedEntityMappings, lastEntityMappingsFetchTime;
+var init_estateConfig = __esm({
+  "server/lib/estateConfig.ts"() {
+    init_homeAssistant();
+    cachedConfig = null;
+    lastFetchTime = 0;
+    CACHE_TTL_MS = 10 * 60 * 1e3;
+    cachedEntityMappings = null;
+    lastEntityMappingsFetchTime = 0;
+  }
+});
+
 // server/utils/google-jwt.ts
-import { webcrypto } from "node:crypto";
+import { webcrypto as webcrypto2 } from "node:crypto";
 function base64url2(data) {
   return Buffer.from(data).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
@@ -4415,20 +6579,9 @@ async function getGoogleServiceToken(scopes, sub = "assistant@example.com") {
 var crypto4, _tokenCache, TOKEN_CACHE_TTL;
 var init_google_jwt = __esm({
   "server/utils/google-jwt.ts"() {
-    crypto4 = webcrypto;
+    crypto4 = webcrypto2;
     _tokenCache = /* @__PURE__ */ new Map();
     TOKEN_CACHE_TTL = 50 * 6e4;
-  }
-});
-
-// server/lib/fetchWithTimeout.ts
-function fetchT2(input, init, timeoutMs = 3e4) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  return fetch(input, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
-}
-var init_fetchWithTimeout = __esm({
-  "server/lib/fetchWithTimeout.ts"() {
   }
 });
 
@@ -4448,7 +6601,7 @@ function normalizeSentence(text2) {
 }
 function encouragementForDate(dateKey) {
   const resolvedDate = dateKey && /^\d{4}-\d{2}-\d{2}$/.test(dateKey) ? dateKey : new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Los_Angeles",
+    timeZone: getEstateTimezone(),
     year: "numeric",
     month: "2-digit",
     day: "2-digit"
@@ -4481,6 +6634,7 @@ function composeSchoolMorningAnnouncement(input) {
 var WAKE_UP, DEPARTURE, MAX_HEADLINE_WORDS, MAX_MARKET_WORDS, ENCOURAGEMENTS;
 var init_schoolMorningBriefing = __esm({
   "server/services/schoolMorningBriefing.ts"() {
+    init_estateConfig();
     WAKE_UP = "Good morning! It is time to get up and get ready for the day.";
     DEPARTURE = "Good morning, everyone. It is time to head downstairs. We're leaving in five minutes or less. Please bring everything you need.";
     MAX_HEADLINE_WORDS = 11;
@@ -4513,7 +6667,7 @@ function getCacheKey(query2, model) {
 function getCached(key) {
   const entry = responseCache.get(key);
   if (!entry) return null;
-  if (Date.now() - entry.cachedAt > CACHE_TTL_MS) {
+  if (Date.now() - entry.cachedAt > CACHE_TTL_MS2) {
     responseCache.delete(key);
     return null;
   }
@@ -4703,7 +6857,7 @@ async function fetchGlobalNewsBriefing() {
     if (!apiKey) return [];
     const now = /* @__PURE__ */ new Date();
     const dateStr = now.toLocaleDateString("en-US", {
-      timeZone: "America/Los_Angeles",
+      timeZone: getEstateTimezone(),
       weekday: "long",
       month: "long",
       day: "numeric"
@@ -4724,7 +6878,7 @@ async function fetchMarketBriefing() {
     if (!apiKey) return "";
     const now = /* @__PURE__ */ new Date();
     const dateStr = now.toLocaleDateString("en-US", {
-      timeZone: "America/Los_Angeles",
+      timeZone: getEstateTimezone(),
       weekday: "long",
       month: "long",
       day: "numeric"
@@ -4737,17 +6891,18 @@ async function fetchMarketBriefing() {
     return "";
   }
 }
-var PERPLEXITY_API_URL, MODEL_SEARCH, MODEL_DEEP, responseCache, CACHE_TTL_MS, MAX_CACHE_SIZE, rateLimitState;
+var PERPLEXITY_API_URL, MODEL_SEARCH, MODEL_DEEP, responseCache, CACHE_TTL_MS2, MAX_CACHE_SIZE, rateLimitState;
 var init_perplexity = __esm({
   "server/services/perplexity.ts"() {
     init_fetchWithTimeout();
     init_auditLog();
     init_schoolMorningBriefing();
+    init_estateConfig();
     PERPLEXITY_API_URL = "https://api.perplexity.ai/chat/completions";
     MODEL_SEARCH = "sonar";
     MODEL_DEEP = "sonar-pro";
     responseCache = /* @__PURE__ */ new Map();
-    CACHE_TTL_MS = 10 * 6e4;
+    CACHE_TTL_MS2 = 10 * 6e4;
     MAX_CACHE_SIZE = 100;
     rateLimitState = {
       lastRequestAt: 0,
@@ -6227,90 +8382,8 @@ var init_janus_tools = __esm({
   }
 });
 
-// server/lib/irrigationFlow.ts
-var irrigationFlow_exports = {};
-__export(irrigationFlow_exports, {
-  DEFAULT_GPM_BY_TYPE: () => DEFAULT_GPM_BY_TYPE,
-  ZONE_FLOW_CONFIG: () => ZONE_FLOW_CONFIG,
-  gallonsFromRuntime: () => gallonsFromRuntime,
-  getZoneEntityIds: () => getZoneEntityIds,
-  getZoneFlow: () => getZoneFlow,
-  getZoneGpm: () => getZoneGpm,
-  refreshZoneNames: () => refreshZoneNames
-});
-function zone(entityId, svgId, label, controller, headType) {
-  return { entityId, svgId, label, controller, headType, gpm: DEFAULT_GPM_BY_TYPE[headType], isDefault: true };
-}
-async function refreshZoneNames(loader) {
-  const rows = await loader();
-  const next = /* @__PURE__ */ new Map();
-  for (const r of rows) {
-    if (r.svgId && typeof r.name === "string" && r.name.trim()) {
-      next.set(r.svgId, r.name.trim());
-    }
-  }
-  NAME_OVERRIDES = next;
-}
-function effectiveLabel(z) {
-  return NAME_OVERRIDES.get(z.svgId) ?? z.label;
-}
-function getZoneEntityIds() {
-  return ZONE_FLOW_CONFIG.map((z) => z.entityId);
-}
-function getZoneFlow(entityId) {
-  const z = BY_ENTITY.get(entityId);
-  if (!z) return void 0;
-  return { ...z, label: effectiveLabel(z) };
-}
-function getZoneGpm(entityId) {
-  return BY_ENTITY.get(entityId)?.gpm ?? DEFAULT_GPM_BY_TYPE.spray;
-}
-function gallonsFromRuntime(entityId, minutes) {
-  const gpm = getZoneGpm(entityId);
-  const safeMinutes = Math.max(0, minutes);
-  return +(gpm * safeMinutes).toFixed(2);
-}
-var DEFAULT_GPM_BY_TYPE, ZONE_FLOW_CONFIG, BY_ENTITY, NAME_OVERRIDES;
-var init_irrigationFlow = __esm({
-  "server/lib/irrigationFlow.ts"() {
-    DEFAULT_GPM_BY_TYPE = {
-      rotor: 12,
-      // lawn rotors — high flow, large coverage
-      spray: 8,
-      // fixed spray heads — medium flow
-      drip: 2
-      // drip/bubbler — low flow, plantings
-    };
-    ZONE_FLOW_CONFIG = [
-      // ── ESP-TM2 (switch.rain_bird_sprinkler_1 … _12) → clock-1-valve-N ──
-      zone("switch.rain_bird_sprinkler_1", "clock-1-valve-1", "SW Front Lawn", "ESP-TM2", "rotor"),
-      zone("switch.rain_bird_sprinkler_2", "clock-1-valve-2", "SE Front Lawn", "ESP-TM2", "rotor"),
-      zone("switch.rain_bird_sprinkler_3", "clock-1-valve-3", "Gate Left Planting", "ESP-TM2", "drip"),
-      zone("switch.rain_bird_sprinkler_4", "clock-1-valve-4", "Gate Right Planting", "ESP-TM2", "drip"),
-      zone("switch.rain_bird_sprinkler_5", "clock-1-valve-5", "Entry Left Strip", "ESP-TM2", "spray"),
-      zone("switch.rain_bird_sprinkler_6", "clock-1-valve-6", "Entry Right Strip", "ESP-TM2", "spray"),
-      zone("switch.rain_bird_sprinkler_7", "clock-1-valve-7", "Rear Garden East", "ESP-TM2", "drip"),
-      zone("switch.rain_bird_sprinkler_8", "clock-1-valve-8", "Rear Garden West", "ESP-TM2", "drip"),
-      zone("switch.rain_bird_sprinkler_9", "clock-1-valve-9", "Service Yard", "ESP-TM2", "spray"),
-      zone("switch.rain_bird_sprinkler_10", "clock-1-valve-10", "North Lawn Left", "ESP-TM2", "rotor"),
-      zone("switch.rain_bird_sprinkler_11", "clock-1-valve-11", "North Lawn Right", "ESP-TM2", "rotor"),
-      zone("switch.rain_bird_sprinkler_12", "clock-1-valve-12", "Back Border", "ESP-TM2", "spray"),
-      // ── ESP-ME3 (switch.rain_bird_sprinkler_1_2 … _7_2) → clock-2-valve-N ──
-      zone("switch.rain_bird_sprinkler_1_2", "clock-2-valve-1", "NW Corner Garden", "ESP-ME3", "drip"),
-      zone("switch.rain_bird_sprinkler_2_2", "clock-2-valve-2", "North Left Strip", "ESP-ME3", "spray"),
-      zone("switch.rain_bird_sprinkler_3_2", "clock-2-valve-3", "West Side Corridor", "ESP-ME3", "drip"),
-      zone("switch.rain_bird_sprinkler_4_2", "clock-2-valve-4", "West Garden Mid", "ESP-ME3", "drip"),
-      zone("switch.rain_bird_sprinkler_5_2", "clock-2-valve-5", "West Garden Lower", "ESP-ME3", "drip"),
-      zone("switch.rain_bird_sprinkler_6_2", "clock-2-valve-6", "House East Trim (Upper)", "ESP-ME3", "spray"),
-      zone("switch.rain_bird_sprinkler_7_2", "clock-2-valve-7", "House East Trim (Lower)", "ESP-ME3", "spray")
-    ];
-    BY_ENTITY = new Map(ZONE_FLOW_CONFIG.map((z) => [z.entityId, z]));
-    NAME_OVERRIDES = /* @__PURE__ */ new Map();
-  }
-});
-
 // server/lib/error-sanitizer.ts
-function sanitizeErrorMessage(error) {
+function sanitizeErrorMessage2(error) {
   let message;
   if (error instanceof Error) {
     message = error.message;
@@ -6319,7 +8392,7 @@ function sanitizeErrorMessage(error) {
   } else {
     message = "An internal error occurred";
   }
-  for (const pattern of SENSITIVE_PATTERNS) {
+  for (const pattern of SENSITIVE_PATTERNS2) {
     message = message.replace(pattern, "[REDACTED]");
   }
   if (message.length > 200) {
@@ -6327,10 +8400,10 @@ function sanitizeErrorMessage(error) {
   }
   return message;
 }
-var SENSITIVE_PATTERNS;
+var SENSITIVE_PATTERNS2;
 var init_error_sanitizer = __esm({
   "server/lib/error-sanitizer.ts"() {
-    SENSITIVE_PATTERNS = [
+    SENSITIVE_PATTERNS2 = [
       /Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi,
       /apikey[=:]\s*["']?[A-Za-z0-9\-._~+/]+["']?/gi,
       /password[=:]\s*["']?[^\s"',}]+["']?/gi,
@@ -6347,7 +8420,7 @@ __export(google_exports, {
   default: () => google_default,
   getServiceAccountToken: () => getServiceAccountToken
 });
-import { Router as Router3 } from "express";
+import { Router as Router4 } from "express";
 async function getUserOAuthToken(userId) {
   try {
     const serviceClient = getServiceClient2();
@@ -6596,13 +8669,14 @@ async function handleEnvironment(req, res) {
     return res.status(500).json({ error: "Failed to fetch environment data" });
   }
 }
-var router3, SCOPES, CALENDAR_BASE, google_default;
+var router4, SCOPES, CALENDAR_BASE, google_default;
 var init_google = __esm({
   "server/routes/google.ts"() {
     init_helpers();
     init_error_sanitizer();
     init_db2();
-    router3 = Router3();
+    init_estateConfig();
+    router4 = Router4();
     SCOPES = [
       "https://www.googleapis.com/auth/calendar.readonly",
       "https://www.googleapis.com/auth/gmail.readonly",
@@ -6610,10 +8684,10 @@ var init_google = __esm({
       "https://www.googleapis.com/auth/contacts.readonly"
     ].join(" ");
     CALENDAR_BASE = "https://www.googleapis.com/calendar/v3";
-    router3.options("/auth", (_req, res) => {
+    router4.options("/auth", (_req, res) => {
       res.sendStatus(204);
     });
-    router3.post("/auth", async (req, res) => {
+    router4.post("/auth", async (req, res) => {
       try {
         const action = req.query.action || req.body?.action;
         if (action === "authorize") {
@@ -6754,10 +8828,10 @@ var init_google = __esm({
         return res.status(500).json({ success: false, error: msg });
       }
     });
-    router3.options("/calendar", (_req, res) => {
+    router4.options("/calendar", (_req, res) => {
       res.sendStatus(204);
     });
-    router3.post("/calendar", async (req, res) => {
+    router4.post("/calendar", async (req, res) => {
       const auth = await authenticateRequest(req.headers.authorization, req.cookies?.auth_token);
       if (auth.error) return res.status(401).json({ error: auth.error });
       try {
@@ -6823,8 +8897,8 @@ var init_google = __esm({
           const cId = calendarId || impersonateEmail;
           const event = {
             summary: title,
-            start: start?.includes("T") ? { dateTime: start, timeZone: "America/Los_Angeles" } : { date: start },
-            end: end?.includes("T") ? { dateTime: end, timeZone: "America/Los_Angeles" } : { date: end }
+            start: start?.includes("T") ? { dateTime: start, timeZone: getEstateTimezone() } : { date: start },
+            end: end?.includes("T") ? { dateTime: end, timeZone: getEstateTimezone() } : { date: end }
           };
           if (description) event.description = description;
           if (location) event.location = location;
@@ -6861,10 +8935,10 @@ var init_google = __esm({
           if (typeof description === "string") patch.description = description;
           if (typeof location === "string") patch.location = location;
           if (start) {
-            patch.start = start.includes("T") ? { dateTime: start, timeZone: "America/Los_Angeles" } : { date: start };
+            patch.start = start.includes("T") ? { dateTime: start, timeZone: getEstateTimezone() } : { date: start };
           }
           if (end) {
-            patch.end = end.includes("T") ? { dateTime: end, timeZone: "America/Los_Angeles" } : { date: end };
+            patch.end = end.includes("T") ? { dateTime: end, timeZone: getEstateTimezone() } : { date: end };
           }
           if (Array.isArray(attendees) && attendees.length) {
             patch.attendees = attendees.map((e) => ({
@@ -7014,15 +9088,15 @@ var init_google = __esm({
           summary: `Calendar proxy error: ${error instanceof Error ? error.message : "unknown"}`,
           status: "error"
         });
-        return res.status(500).json({ success: false, error: sanitizeErrorMessage(error) });
+        return res.status(500).json({ success: false, error: sanitizeErrorMessage2(error) });
       }
     });
-    router3.options("/environment", (_req, res) => {
+    router4.options("/environment", (_req, res) => {
       res.sendStatus(204);
     });
-    router3.get("/environment", handleEnvironment);
-    router3.post("/environment", handleEnvironment);
-    google_default = router3;
+    router4.get("/environment", handleEnvironment);
+    router4.post("/environment", handleEnvironment);
+    google_default = router4;
   }
 });
 
@@ -7327,1853 +9401,6 @@ var init_network_devices = __esm({
   }
 });
 
-// server/middleware/auth.ts
-import { timingSafeEqual as timingSafeEqual2 } from "node:crypto";
-function validComputerToken(headerValue) {
-  const configured = process.env.COMPUTER_ADMIN_TOKEN?.trim();
-  if (!configured || configured.length < 24) return false;
-  if (typeof headerValue !== "string" || !headerValue.trim()) return false;
-  if (process.env.NODE_ENV === "test") return false;
-  const a = Buffer.from(configured);
-  const b2 = Buffer.from(headerValue.trim());
-  if (a.length !== b2.length) return false;
-  return timingSafeEqual2(a, b2);
-}
-function requireAuth2(req, res, next) {
-  const cronSecret = process.env.CRON_SECRET;
-  const isCronCall = !!cronSecret && req.headers["x-cron-secret"] === cronSecret;
-  if (isCronCall) {
-    req.userId = "system";
-    req.userRole = "admin";
-    next();
-    return;
-  }
-  if (validComputerToken(req.headers["x-computer-token"])) {
-    req.userId = "computer-agent";
-    req.userRole = "admin";
-    next();
-    return;
-  }
-  const isHAEnvironment = Boolean(process.env.SUPERVISOR_TOKEN);
-  const haUserId = req.headers["x-remote-user-id"] || req.headers["x-ingress-user-id"];
-  if (isHAEnvironment && haUserId) {
-    const haAdminHeader = req.headers["x-remote-user-is-admin"];
-    let isAdmin2 = false;
-    if (haAdminHeader !== void 0 && haAdminHeader !== "") {
-      isAdmin2 = String(haAdminHeader).toLowerCase() === "true" || haAdminHeader === "1";
-    } else {
-      const haUserName = req.headers["x-remote-user-name"] || req.headers["x-remote-user-display-name"];
-      isAdmin2 = isHAUserAdminSync(haUserId, haUserName);
-    }
-    req.userId = `ha:${haUserId}`;
-    req.userRole = isAdmin2 ? "admin" : "member";
-    next();
-    return;
-  }
-  const authHeader = req.headers.authorization;
-  const cookieToken = req.cookies?.auth_token;
-  if (!authHeader?.startsWith("Bearer ") && !cookieToken) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-  const token = cookieToken || authHeader.replace("Bearer ", "");
-  const isServiceRole = process.env.JWT_SECRET && token === process.env.JWT_SECRET || process.env.SESSION_SECRET && token === process.env.SESSION_SECRET;
-  if (isServiceRole) {
-    req.userId = "system";
-    req.userRole = "admin";
-    next();
-    return;
-  }
-  const user = verifyToken(token);
-  if (!user) {
-    res.status(401).json({ error: "Invalid token" });
-    return;
-  }
-  req.userId = user.userId;
-  if (user.roles?.includes("admin")) {
-    req.userRole = "admin";
-  } else if (user.roles?.includes("worker")) {
-    req.userRole = "worker";
-  } else {
-    req.userRole = "member";
-  }
-  next();
-}
-function rejectWorkers(req, res, next) {
-  const authHeader = req.headers.authorization;
-  const cookieToken = req.cookies?.auth_token;
-  const token = cookieToken || (authHeader?.startsWith("Bearer ") ? authHeader.replace("Bearer ", "") : null);
-  if (!token) {
-    next();
-    return;
-  }
-  const isServiceRole = process.env.JWT_SECRET && token === process.env.JWT_SECRET || process.env.SESSION_SECRET && token === process.env.SESSION_SECRET;
-  if (isServiceRole) {
-    next();
-    return;
-  }
-  const user = verifyToken(token);
-  if (!user || !user.roles?.includes("worker")) {
-    next();
-    return;
-  }
-  const allowed = req.path.startsWith("/api/time/") || req.path === "/api/auth/me" || req.path === "/api/auth/logout" || req.path === "/api/auth/google" || req.path === "/api/auth/google/callback" || req.path === "/api/health";
-  if (!allowed) {
-    res.status(403).json({ error: "Worker accounts are restricted to /api/time/* endpoints" });
-    return;
-  }
-  next();
-}
-var init_auth2 = __esm({
-  "server/middleware/auth.ts"() {
-    init_auth();
-    init_haWebSocket();
-  }
-});
-
-// server/lib/encryption.ts
-import { webcrypto as webcrypto2 } from "crypto";
-async function getEncryptionKey() {
-  const keySource = process.env.ENCRYPTION_KEY || process.env.SESSION_SECRET || "";
-  if (!keySource) {
-    throw new Error(
-      "ENCRYPTION_KEY (or SESSION_SECRET fallback) is not set; cannot encrypt/decrypt tokens"
-    );
-  }
-  const digest = await subtle.digest("SHA-256", new TextEncoder().encode(keySource));
-  return subtle.importKey("raw", new Uint8Array(digest), "AES-GCM", false, ["encrypt", "decrypt"]);
-}
-async function encryptToken(plaintext) {
-  const key = await getEncryptionKey();
-  const iv = webcrypto2.getRandomValues(new Uint8Array(12));
-  const encoded = new TextEncoder().encode(plaintext);
-  const ciphertext = new Uint8Array(await subtle.encrypt({ name: "AES-GCM", iv }, key, encoded));
-  const combined = new Uint8Array(iv.length + ciphertext.length);
-  combined.set(iv);
-  combined.set(ciphertext, iv.length);
-  return Buffer.from(combined).toString("base64");
-}
-async function decryptToken(encrypted) {
-  const key = await getEncryptionKey();
-  const combined = new Uint8Array(Buffer.from(encrypted, "base64"));
-  const iv = combined.slice(0, 12);
-  const ciphertext = combined.slice(12);
-  const decrypted = await subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
-  return new TextDecoder().decode(decrypted);
-}
-var subtle;
-var init_encryption = __esm({
-  "server/lib/encryption.ts"() {
-    subtle = webcrypto2.subtle;
-  }
-});
-
-// server/lib/ssrfGuard.ts
-import { lookup as lookupCb } from "node:dns";
-import net from "node:net";
-import { Agent, fetch as undiciFetch } from "undici";
-function isBlockedIp(ip) {
-  if (net.isIPv4(ip)) {
-    const [a, b2] = ip.split(".").map(Number);
-    if (a === 0 || a === 127 || a === 10) return true;
-    if (a === 172 && b2 >= 16 && b2 <= 31) return true;
-    if (a === 192 && b2 === 168) return true;
-    if (a === 169 && b2 === 254) return true;
-    if (a === 100 && b2 >= 64 && b2 <= 127) return true;
-    if (a >= 224) return true;
-    return false;
-  }
-  if (net.isIPv6(ip)) {
-    const lower = ip.toLowerCase();
-    if (lower === "::" || lower === "::1") return true;
-    if (lower.startsWith("fe8") || lower.startsWith("fe9") || lower.startsWith("fea") || lower.startsWith("feb")) return true;
-    if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
-    if (lower.startsWith("::ffff:")) {
-      const mapped = lower.slice("::ffff:".length);
-      if (net.isIPv4(mapped)) return isBlockedIp(mapped);
-      return true;
-    }
-    return false;
-  }
-  return true;
-}
-function guardedLookup(hostname, options, callback) {
-  if (hostname.toLowerCase() === "supervisor" && (Boolean(process.env.SUPERVISOR_TOKEN) || Boolean(process.env.HASSIO_TOKEN) || process.env.HA_ALLOWED_HOSTS?.includes("supervisor"))) {
-    lookupCb(hostname, options, callback);
-    return;
-  }
-  if (hostname === "localhost" || hostname.endsWith(".localhost")) {
-    callback(Object.assign(new Error(`Blocked host: ${hostname}`), { code: "EBLOCKED" }), "", 4);
-    return;
-  }
-  lookupCb(hostname, { ...options, all: true }, (err, addresses) => {
-    if (err) {
-      callback(err, "", 4);
-      return;
-    }
-    const list = addresses.filter(
-      (a) => !isBlockedIp(a.address)
-    );
-    if (list.length === 0) {
-      callback(
-        Object.assign(new Error(`Blocked host: ${hostname} resolves only to disallowed addresses`), {
-          code: "EBLOCKED"
-        }),
-        "",
-        4
-      );
-      return;
-    }
-    if (options.all) {
-      callback(null, list);
-    } else {
-      callback(null, list[0].address, list[0].family);
-    }
-  });
-}
-async function guardedFetch(url, init) {
-  const hostname = new URL(url).hostname.replace(/^\[|\]$/g, "").toLowerCase();
-  if (hostname === "supervisor" && (Boolean(process.env.SUPERVISOR_TOKEN) || Boolean(process.env.HASSIO_TOKEN) || process.env.HA_ALLOWED_HOSTS?.includes("supervisor"))) {
-    return undiciFetch(url, init);
-  }
-  if (hostname === "localhost" || hostname.endsWith(".localhost") || net.isIP(hostname) !== 0 && isBlockedIp(hostname)) {
-    throw new Error(`Blocked host: ${hostname}`);
-  }
-  return undiciFetch(url, { ...init, dispatcher: guardedAgent });
-}
-var guardedAgent;
-var init_ssrfGuard = __esm({
-  "server/lib/ssrfGuard.ts"() {
-    guardedAgent = new Agent({ connect: { lookup: guardedLookup } });
-  }
-});
-
-// server/lib/errorSanitizer.ts
-function sanitizeErrorMessage2(error) {
-  let message;
-  if (error instanceof Error) {
-    message = error.message;
-  } else if (typeof error === "string") {
-    message = error;
-  } else {
-    message = "An internal error occurred";
-  }
-  for (const pattern of SENSITIVE_PATTERNS2) {
-    message = message.replace(pattern, "[REDACTED]");
-  }
-  if (message.length > 200) {
-    message = message.slice(0, 200) + "...";
-  }
-  return message;
-}
-function safeErrorJson(error) {
-  return { error: sanitizeErrorMessage2(error) };
-}
-var SENSITIVE_PATTERNS2;
-var init_errorSanitizer = __esm({
-  "server/lib/errorSanitizer.ts"() {
-    SENSITIVE_PATTERNS2 = [
-      /Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi,
-      /apikey[=:]\s*["']?[A-Za-z0-9\-._~+/]+["']?/gi,
-      /password[=:]\s*["']?[^\s"',}]+["']?/gi,
-      /secret[=:]\s*["']?[^\s"',}]+["']?/gi,
-      /token[=:]\s*["']?[A-Za-z0-9\-._~+/]+["']?/gi,
-      /eyJ[A-Za-z0-9\-_]+\.eyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_.+/=]*/g
-    ];
-  }
-});
-
-// server/lib/castBroadcast.ts
-import fs5 from "fs";
-import path6 from "path";
-async function cleanupOldBroadcasts(bucket, subdir, filePrefix, keep) {
-  const dirs = [
-    path6.join(process.cwd(), "public", bucket, subdir),
-    path6.join(process.cwd(), "dist", "public", bucket, subdir)
-  ];
-  for (const dir of dirs) {
-    try {
-      if (!fs5.existsSync(dir)) continue;
-      const entries = await fs5.promises.readdir(dir, { withFileTypes: true });
-      const matched = entries.filter(
-        (e) => e.isFile() && e.name.startsWith(filePrefix) && e.name.endsWith(".mp3")
-      );
-      const withMtime = await Promise.all(
-        matched.map(async (e) => {
-          const mtime = await fs5.promises.stat(path6.join(dir, e.name)).then((s3) => s3.mtimeMs).catch(() => 0);
-          return { name: e.name, mtime };
-        })
-      );
-      withMtime.sort((a, b2) => b2.mtime - a.mtime);
-      for (const f of withMtime.slice(keep)) {
-        await fs5.promises.unlink(path6.join(dir, f.name)).catch(() => {
-        });
-        console.log(`[castBroadcast] Cleaned up old broadcast file: ${f.name}`);
-      }
-    } catch {
-    }
-  }
-  try {
-    const objKeys = await listObjects(VOICE_REPLIES_BUCKET, `${subdir}/`);
-    const matched = objKeys.map((key) => ({ key, base: key.split("/").pop() ?? "" })).filter((o) => o.base.startsWith(filePrefix) && o.base.endsWith(".mp3")).map((o) => {
-      const m = o.base.match(/-(\d+)\.mp3$/);
-      return { key: o.key, ts: m ? Number(m[1]) : 0 };
-    }).sort((a, b2) => b2.ts - a.ts);
-    for (const o of matched.slice(keep)) {
-      await deleteObjectKey(o.key);
-      console.log(`[castBroadcast] Cleaned up old broadcast object: ${o.key}`);
-    }
-  } catch {
-  }
-}
-async function generateAndUploadTTS(message, filePrefix = "broadcast") {
-  const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
-  let supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
-  if (!elevenLabsKey) {
-    console.error("[castBroadcast] ELEVENLABS_API_KEY not set \u2014 cannot generate TTS");
-    return null;
-  }
-  const isDeletedSupabase = !supabaseUrl;
-  if (isDeletedSupabase) {
-    supabaseUrl = `http://localhost:${process.env.PORT || 5e3}`;
-  }
-  console.log(`[castBroadcast] Calling ElevenLabs TTS (${message.length} chars)`);
-  let audioBuffer;
-  try {
-    const ttsRes = await fetchT2(
-      `https://api.elevenlabs.io/v1/text-to-speech/${JANUS_VOICE_ID}`,
-      {
-        method: "POST",
-        headers: {
-          "xi-api-key": elevenLabsKey,
-          "Content-Type": "application/json",
-          Accept: "audio/mpeg"
-        },
-        body: JSON.stringify({
-          text: message,
-          model_id: "eleven_turbo_v2_5",
-          voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.75,
-            style: 0,
-            use_speaker_boost: true
-          }
-        })
-      },
-      3e4
-    );
-    if (!ttsRes.ok) {
-      const errText = await ttsRes.text().catch(() => "");
-      console.error(
-        `[castBroadcast] ElevenLabs TTS failed: HTTP ${ttsRes.status} \u2014 ${errText.slice(0, 300)}`
-      );
-      return null;
-    }
-    audioBuffer = await ttsRes.arrayBuffer();
-    console.log(`[castBroadcast] ElevenLabs TTS generated ${audioBuffer.byteLength} bytes`);
-  } catch (e) {
-    console.error(
-      `[castBroadcast] ElevenLabs TTS error: ${e instanceof Error ? e.message : "unknown"}`
-    );
-    return null;
-  }
-  const timestamp2 = Date.now();
-  const filename = `${BROADCAST_SUBDIR}/${filePrefix}-${timestamp2}.mp3`;
-  const storageUrl = `${supabaseUrl.replace(/\/$/, "")}/storage/v1/object/${VOICE_REPLIES_BUCKET}/${filename}`;
-  const internalKey = process.env.JWT_SECRET || process.env.SESSION_SECRET || "janus-dev-secret-change-in-production";
-  try {
-    const uploadRes = await fetchT2(
-      storageUrl,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${internalKey}`,
-          apikey: internalKey,
-          "Content-Type": "audio/mpeg",
-          "x-upsert": "true"
-        },
-        body: audioBuffer
-      },
-      2e4
-    );
-    if (!uploadRes.ok) {
-      const errText = await uploadRes.text().catch(() => "");
-      console.error(
-        `[castBroadcast] Storage upload failed: HTTP ${uploadRes.status} \u2014 ${errText.slice(0, 300)}`
-      );
-      return null;
-    }
-    console.log(`[castBroadcast] MP3 uploaded: ${filename} (${audioBuffer.byteLength} bytes)`);
-  } catch (e) {
-    console.error(
-      `[castBroadcast] Storage upload error: ${e instanceof Error ? e.message : "unknown"}`
-    );
-    return null;
-  }
-  cleanupOldBroadcasts(VOICE_REPLIES_BUCKET, BROADCAST_SUBDIR, filePrefix, MAX_BROADCAST_FILES).catch(
-    () => {
-    }
-  );
-  const baseUrl = process.env.MEDIA_BASE_URL || process.env.APP_URL || "http://localhost:5000";
-  return `${baseUrl.replace(/\/$/, "")}/storage/v1/object/public/${VOICE_REPLIES_BUCKET}/${filename}`;
-}
-async function verifyPlaybackState(haUrl, haToken, entityId, expectedUrl, announceMode = false) {
-  try {
-    const res = await guardedFetch(`${haUrl.replace(/\/$/, "")}/api/states/${entityId}`, {
-      headers: { Authorization: `Bearer ${haToken}` },
-      signal: AbortSignal.timeout(5e3)
-    });
-    if (!res.ok) return { verified: false, state: null, contentId: null, urlMatch: null };
-    const data = await res.json();
-    const state2 = data?.state ?? "unknown";
-    const contentId = data?.attributes?.media_content_id ?? null;
-    const isPlaying = state2 === "playing";
-    const isUnavailable = state2 === "unavailable";
-    let urlMatch = null;
-    if (expectedUrl) {
-      urlMatch = contentId !== null && contentId === expectedUrl;
-    }
-    let verified;
-    if (announceMode) {
-      verified = !isUnavailable && urlMatch === true;
-    } else {
-      verified = isPlaying && (urlMatch === null || urlMatch === true);
-    }
-    return { verified, state: state2, contentId, urlMatch };
-  } catch {
-    return { verified: false, state: null, contentId: null, urlMatch: null };
-  }
-}
-async function detectSilentDropRisk(haUrl, haToken, speakers, expectedUrl, firstPollDelayMs = 3500) {
-  const TARGET_DELAY_MS = 8e3;
-  const remaining = Math.max(0, TARGET_DELAY_MS - firstPollDelayMs);
-  if (remaining > 0) {
-    await new Promise((r) => setTimeout(r, remaining));
-  }
-  const secondPoll = {};
-  for (const speaker of speakers) {
-    const v = await verifyPlaybackState(haUrl, haToken, speaker, expectedUrl, true);
-    secondPoll[speaker] = { state: v.state, contentId: v.contentId, urlMatch: v.urlMatch };
-  }
-  const entries = Object.values(secondPoll);
-  const silentDropRisk = entries.length > 0 && entries.every((v) => v.urlMatch === true && v.state === "idle");
-  return { silentDropRisk, secondPoll };
-}
-var JANUS_VOICE_ID, VOICE_REPLIES_BUCKET, BROADCAST_SUBDIR, MAX_BROADCAST_FILES;
-var init_castBroadcast = __esm({
-  "server/lib/castBroadcast.ts"() {
-    init_fetchWithTimeout();
-    init_ssrfGuard();
-    init_objectStore();
-    JANUS_VOICE_ID = "iLVmqjzCGGvqtMCk6vVQ";
-    VOICE_REPLIES_BUCKET = "voice-replies";
-    BROADCAST_SUBDIR = "broadcasts";
-    MAX_BROADCAST_FILES = 5;
-  }
-});
-
-// server/lib/haUrlGuard.ts
-import { isIP } from "node:net";
-import { lookup } from "node:dns/promises";
-function getAllowedHaHosts(env = process.env) {
-  const hosts = /* @__PURE__ */ new Set();
-  if (env.SUPERVISOR_TOKEN || env.HASSIO_TOKEN) {
-    hosts.add("supervisor");
-  }
-  if (env.HA_URL) {
-    try {
-      hosts.add(new URL(env.HA_URL).hostname.toLowerCase());
-    } catch {
-    }
-  }
-  for (const raw of (env.HA_ALLOWED_HOSTS ?? "").split(",")) {
-    const h = raw.trim().toLowerCase();
-    if (h) hosts.add(h);
-  }
-  return hosts;
-}
-function isPrivateOrReservedIp(ip) {
-  const version = isIP(ip);
-  if (version === 4) return isPrivateV4(ip);
-  if (version === 6) return isPrivateV6(ip);
-  return true;
-}
-function isPrivateV4(ip) {
-  const parts = ip.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((p) => Number.isNaN(p) || p < 0 || p > 255)) return true;
-  const [a, b2] = parts;
-  return a === 0 || // 0.0.0.0/8 "this network"
-  a === 10 || // 10.0.0.0/8 private
-  a === 127 || // 127.0.0.0/8 loopback
-  a === 100 && b2 >= 64 && b2 <= 127 || // 100.64.0.0/10 CGNAT
-  a === 169 && b2 === 254 || // 169.254.0.0/16 link-local + cloud metadata
-  a === 172 && b2 >= 16 && b2 <= 31 || // 172.16.0.0/12 private
-  a === 192 && b2 === 168 || // 192.168.0.0/16 private
-  a === 192 && b2 === 0 || // 192.0.0.0/24 IETF protocol assignments
-  a === 198 && (b2 === 18 || b2 === 19) || // 198.18.0.0/15 benchmarking
-  a >= 224;
-}
-function isPrivateV6(ip) {
-  const lower = ip.toLowerCase();
-  const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapped) return isPrivateV4(mapped[1]);
-  const hexMapped = lower.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
-  if (hexMapped) {
-    const hi = parseInt(hexMapped[1], 16);
-    const lo = parseInt(hexMapped[2], 16);
-    return isPrivateV4(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
-  }
-  if (lower === "::" || lower === "::1") return true;
-  if (lower.startsWith("fe80:") || lower.startsWith("fe9") || lower.startsWith("fea") || lower.startsWith("feb")) return true;
-  if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
-  if (lower.startsWith("64:ff9b:")) return true;
-  return false;
-}
-function checkHaUrlSync(rawUrl, env = process.env) {
-  let parsed;
-  try {
-    parsed = new URL(rawUrl);
-  } catch {
-    return { ok: false, reason: "ha_url must be a valid http(s) URL" };
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    return { ok: false, reason: "ha_url must use http or https" };
-  }
-  if (parsed.username || parsed.password) {
-    return { ok: false, reason: "ha_url must not contain embedded credentials" };
-  }
-  const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (hostname === "supervisor" && (env.SUPERVISOR_TOKEN || env.HASSIO_TOKEN || env.HA_ALLOWED_HOSTS?.includes("supervisor"))) {
-    return { ok: true, url: rawUrl };
-  }
-  if (isIP(hostname)) {
-    if (isPrivateOrReservedIp(hostname)) {
-      return { ok: false, reason: "ha_url must not point at a private, loopback, or reserved address" };
-    }
-  }
-  const allowed = getAllowedHaHosts(env);
-  if (allowed.size > 0 && !allowed.has(hostname)) {
-    return { ok: false, reason: "ha_url host is not on the allowed Home Assistant host list" };
-  }
-  return { ok: true, url: rawUrl };
-}
-async function validateHaUrl(rawUrl, env = process.env) {
-  const sync2 = checkHaUrlSync(rawUrl, env);
-  if (!sync2.ok) return sync2;
-  const hostname = new URL(rawUrl).hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (hostname === "supervisor" && (env.SUPERVISOR_TOKEN || env.HASSIO_TOKEN || env.HA_ALLOWED_HOSTS?.includes("supervisor"))) {
-    return sync2;
-  }
-  if (isIP(hostname)) return sync2;
-  let addrs;
-  try {
-    addrs = await lookup(hostname, { all: true, verbatim: true });
-  } catch {
-    return { ok: false, reason: "ha_url hostname could not be resolved" };
-  }
-  if (addrs.length === 0) {
-    return { ok: false, reason: "ha_url hostname could not be resolved" };
-  }
-  for (const { address } of addrs) {
-    if (isPrivateOrReservedIp(address)) {
-      return { ok: false, reason: "ha_url resolves to a private, loopback, or reserved address" };
-    }
-  }
-  return sync2;
-}
-var init_haUrlGuard = __esm({
-  "server/lib/haUrlGuard.ts"() {
-  }
-});
-
-// server/routes/homeAssistant.ts
-import { Router as Router6 } from "express";
-import { fetch as undiciFetch2 } from "undici";
-function requireAdmin(req, res, next) {
-  if (req.userRole !== "admin") {
-    res.status(403).json({ error: "Admin access required" });
-    return;
-  }
-  next();
-}
-function invalidateHACredsCache(userId) {
-  if (userId) haCredsCache.delete(userId);
-  else haCredsCache.clear();
-}
-async function resolveHACreds(userId) {
-  const cacheKey = userId && userId !== "UNKNOWN" ? userId : "__env__";
-  const cached = haCredsCache.get(cacheKey);
-  if (cached && Date.now() - cached.fetchedAt < HA_CREDS_CACHE_TTL_MS) return cached.creds;
-  let creds = null;
-  if (userId && userId !== "UNKNOWN") {
-    try {
-      const settings = await storage.getHomeAssistantSettings(userId);
-      if (settings?.encryptedToken) {
-        const token = await decryptToken(settings.encryptedToken);
-        let url = settings.haUrl || process.env.HA_URL || "";
-        if (url && settings.haUrl) {
-          const check = await validateHaUrl(url);
-          if (!check.ok) {
-            console.warn(`[home-assistant] Stored HA URL for user ${userId} rejected (${check.reason}) \u2014 falling back to env HA_URL`);
-            url = process.env.HA_URL || "";
-          }
-        }
-        if (url && token) creds = { haUrl: url, haToken: token, source: "settings" };
-      }
-    } catch (err) {
-      console.error(
-        `[home-assistant] Failed to load stored HA credentials for user ${userId}; falling back to env:`,
-        err instanceof Error ? err.message : err
-      );
-    }
-  }
-  if (!creds) {
-    const supervisorToken2 = process.env.SUPERVISOR_TOKEN || process.env.HASSIO_TOKEN;
-    const envUrl = process.env.HA_URL || process.env.HOME_ASSISTANT_URL || (supervisorToken2 ? "http://supervisor/core" : "");
-    const envToken = process.env.HA_TOKEN || process.env.HOME_ASSISTANT_TOKEN || supervisorToken2 || "";
-    if (envUrl && envToken) creds = { haUrl: envUrl, haToken: envToken, source: supervisorToken2 ? "supervisor" : "env" };
-  }
-  haCredsCache.set(cacheKey, { creds, fetchedAt: Date.now() });
-  return creds;
-}
-async function getCrestronEntryId(haUrl, haToken) {
-  const now = Date.now();
-  if (crestronEntryIdCache && now - crestronEntryIdFetchedAt < CRESTRON_ENTRY_CACHE_TTL_MS) {
-    return crestronEntryIdCache;
-  }
-  const { status, data } = await callHA(haUrl, haToken, "GET", "/api/config/config_entries/entry");
-  if (status !== 200 || !Array.isArray(data)) return null;
-  const entries = data;
-  const crestron = entries.find(
-    (e) => e.domain === "crestron_home" || typeof e.title === "string" && e.title.toLowerCase().includes("crestron")
-  );
-  if (!crestron) return null;
-  crestronEntryIdCache = crestron.entry_id;
-  crestronEntryIdFetchedAt = now;
-  return crestronEntryIdCache;
-}
-async function getGoveeCloudEntryId(haUrl, haToken) {
-  const now = Date.now();
-  if (goveeEntryCache && goveeEntryIdCache && now - goveeEntryIdFetchedAt < CRESTRON_ENTRY_CACHE_TTL_MS) {
-    return goveeEntryCache;
-  }
-  const { status, data } = await callHA(haUrl, haToken, "GET", "/api/config/config_entries/entry");
-  if (status !== 200 || !Array.isArray(data)) return null;
-  const entries = data;
-  const goveeAll = entries.filter(
-    (e) => e.domain.toLowerCase().includes("govee") || typeof e.title === "string" && e.title.toLowerCase().includes("govee")
-  );
-  const goveeCloud = goveeAll.find(
-    (e) => e.domain === "govee_cloud" || typeof e.title === "string" && e.title.toLowerCase().includes("govee cloud")
-  );
-  const govee = goveeCloud ?? goveeAll[0];
-  if (!govee) return null;
-  goveeEntryCache = govee;
-  goveeEntryIdCache = govee.entry_id;
-  goveeEntryIdFetchedAt = now;
-  return govee;
-}
-async function callHA(haUrl, haToken, method, path12, body, opts) {
-  const url = `${haUrl.replace(/\/$/, "")}${path12}`;
-  const MAX_RETRIES = opts?.maxRetries ?? 3;
-  const retryOn401 = opts?.retryOn401 ?? true;
-  let lastError = null;
-  let lastStatus = 0;
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const init = {
-        method,
-        headers: {
-          "Authorization": `Bearer ${haToken}`,
-          "Content-Type": "application/json"
-        },
-        body: body ? JSON.stringify(body) : void 0,
-        // Never follow redirects: a redirecting host could bounce the request
-        // (and its bearer token) to an unvalidated internal destination.
-        // HA's REST API does not redirect in normal operation; a 3xx is
-        // surfaced to the caller as-is.
-        redirect: "manual"
-      };
-      const res = await breakers.ha.execute(() => opts?.dispatcher ? undiciFetch2(url, { ...init, dispatcher: opts.dispatcher }) : guardedFetch(url, init));
-      const text2 = await res.text();
-      let data;
-      try {
-        data = JSON.parse(text2);
-      } catch {
-        data = text2;
-      }
-      lastStatus = res.status;
-      if (res.status >= 500 && attempt < MAX_RETRIES) {
-        console.warn(`callHA: HA returned ${res.status} on attempt ${attempt}/${MAX_RETRIES} for ${method} ${path12} \u2014 retrying in 2s`);
-        await new Promise((r) => setTimeout(r, 2e3));
-        continue;
-      }
-      if (retryOn401 && res.status === 401 && attempt < MAX_RETRIES) {
-        console.warn(`callHA: HA returned 401 on attempt ${attempt}/${MAX_RETRIES} for ${method} ${path12} \u2014 retrying in 2s`);
-        await new Promise((r) => setTimeout(r, 2e3));
-        continue;
-      }
-      if (retryOn401 && res.status === 401 && attempt === MAX_RETRIES) {
-        console.error(`callHA: HA returned 401 after ${MAX_RETRIES} attempts for ${method} ${path12} \u2014 HA token likely expired or revoked`);
-        logAudit("home-assistant-proxy", {
-          category: "home",
-          event_type: "ha_auth_failure",
-          severity: "critical",
-          actor_id: "system",
-          actor_name: "System",
-          channel: "system",
-          summary: `CRITICAL: Home Assistant rejected auth (401) for ${method} ${path12} after ${MAX_RETRIES} retries. Token may need rotation.`,
-          detail: { method, path: path12, attempts: MAX_RETRIES },
-          status: "error"
-        });
-      }
-      return { status: res.status, data };
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-      if (err instanceof CircuitOpenError) {
-        console.warn(`callHA: breaker open for HA, skipping remaining ${MAX_RETRIES - attempt} retries for ${method} ${path12}`);
-        throw err;
-      }
-      console.warn(`callHA attempt ${attempt}/${MAX_RETRIES} failed for ${method} ${path12}: ${lastError.message}`);
-      if (attempt < MAX_RETRIES) {
-        await new Promise((r) => setTimeout(r, 500));
-      }
-    }
-  }
-  throw lastError;
-}
-function prettifyEntityId(id) {
-  const zoneLabel = getZoneFlow(id)?.label;
-  if (zoneLabel) return zoneLabel;
-  const raw = id.replace(/^[^.]+\./, "");
-  const parts = raw.split("_");
-  if (parts.length >= 3) {
-    for (let len = Math.floor(parts.length / 2); len >= 1; len--) {
-      const a = parts.slice(0, len).join("_");
-      const b2 = parts.slice(len, len * 2).join("_");
-      if (a === b2) {
-        parts.splice(0, len);
-        break;
-      }
-    }
-  }
-  return parts.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
-}
-function resolveTargetSpeakers(target) {
-  const cached = getEntityCache();
-  const allMediaPlayers = cached.map((e) => e.entity_id).filter((id) => id.startsWith("media_player."));
-  if (allMediaPlayers.length === 0) {
-    if (target === "bedrooms") {
-      return { speakers: ["media_player.bedroom_speaker"], tvs: [], displays: [] };
-    }
-    return {
-      speakers: ["media_player.living_room_speaker", "media_player.bedroom_speaker"],
-      tvs: ["media_player.living_room_tv"],
-      displays: ["media_player.kitchen_display"]
-    };
-  }
-  const tvs = allMediaPlayers.filter((id) => id.includes("_tv") || id.includes("television"));
-  const displays = allMediaPlayers.filter((id) => id.includes("display") || id.includes("hub"));
-  if (target === "bedrooms") {
-    const bedroomSpeakers = allMediaPlayers.filter(
-      (id) => (id.includes("bedroom") || id.includes("room") || id.includes("closet")) && !tvs.includes(id)
-    );
-    return {
-      speakers: bedroomSpeakers.length > 0 ? bedroomSpeakers : allMediaPlayers.filter((id) => !tvs.includes(id)),
-      tvs: [],
-      displays: []
-    };
-  }
-  if (target === "google-home") {
-    const ghSpeakers = allMediaPlayers.filter(
-      (id) => !tvs.includes(id) && (id.includes("speaker") || id.includes("display") || id.includes("google"))
-    );
-    return {
-      speakers: ghSpeakers.length > 0 ? ghSpeakers : allMediaPlayers.filter((id) => !tvs.includes(id)),
-      tvs: [],
-      displays
-    };
-  }
-  return {
-    speakers: allMediaPlayers,
-    tvs,
-    displays
-  };
-}
-var router5, haCredsCache, HA_CREDS_CACHE_TTL_MS, crestronEntryIdCache, crestronEntryIdFetchedAt, CRESTRON_ENTRY_CACHE_TTL_MS, goveeEntryCache, goveeEntryIdCache, goveeEntryIdFetchedAt, HA_TOKEN_ALERT_COOLDOWN_MS, JANUS_LOGO_URL, homeAssistant_default;
-var init_homeAssistant = __esm({
-  "server/routes/homeAssistant.ts"() {
-    init_auth2();
-    init_auth();
-    init_storage();
-    init_auditLog();
-    init_encryption();
-    init_ssrfGuard();
-    init_breakers();
-    init_errorSanitizer();
-    init_haWebSocket();
-    init_helpers();
-    init_castBroadcast();
-    init_irrigationFlow();
-    init_haUrlGuard();
-    router5 = Router6();
-    haCredsCache = /* @__PURE__ */ new Map();
-    HA_CREDS_CACHE_TTL_MS = 60 * 1e3;
-    crestronEntryIdCache = null;
-    crestronEntryIdFetchedAt = 0;
-    CRESTRON_ENTRY_CACHE_TTL_MS = 60 * 60 * 1e3;
-    goveeEntryCache = null;
-    goveeEntryIdCache = null;
-    goveeEntryIdFetchedAt = 0;
-    router5.post("/crestron/reload", requireAuth2, requireAdmin, async (req, res) => {
-      const creds = await resolveHACreds(req.userId);
-      const HA_URL2 = creds?.haUrl ?? "";
-      const HA_TOKEN2 = creds?.haToken ?? "";
-      const userId = req.userId ?? "unknown";
-      const userInfo = getAuthUser(req);
-      const actorName = userInfo?.name ?? userInfo?.email ?? userId;
-      const t0 = Date.now();
-      if (!HA_URL2 || !HA_TOKEN2) {
-        res.status(503).json({ error: "Home Assistant not configured" });
-        return;
-      }
-      try {
-        const entryId = await getCrestronEntryId(HA_URL2, HA_TOKEN2);
-        if (!entryId) {
-          await logAudit("crestron-reload", {
-            category: "crestron_bridge",
-            event_type: "crestron_reload",
-            severity: "error",
-            actor_id: userId,
-            actor_name: actorName,
-            channel: "web",
-            summary: "Crestron reload failed \u2014 config entry not found",
-            detail: {},
-            status: "error",
-            duration_ms: Date.now() - t0
-          });
-          res.status(404).json({ error: "Crestron Home config entry not found in Home Assistant" });
-          return;
-        }
-        const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/homeassistant/reload_config_entry", {
-          entry_id: entryId
-        });
-        const success = status < 400;
-        let haErrorMsg;
-        if (!success && data) {
-          if (typeof data === "string") haErrorMsg = data.slice(0, 300);
-          else if (typeof data === "object") {
-            const d = data;
-            haErrorMsg = String(d.message ?? d.error ?? JSON.stringify(data)).slice(0, 300);
-          }
-        }
-        await logAudit("crestron-reload", {
-          category: "crestron_bridge",
-          event_type: "crestron_reload",
-          severity: success ? "info" : "warn",
-          actor_id: userId,
-          actor_name: actorName,
-          channel: "web",
-          summary: success ? `Crestron integration reloaded by ${actorName}` : `Crestron reload failed (HTTP ${status})`,
-          detail: { entry_id: entryId, ha_status: status, ...haErrorMsg ? { ha_error: haErrorMsg } : {} },
-          status: success ? "success" : "error",
-          duration_ms: Date.now() - t0
-        });
-        res.status(success ? 200 : 502).json({ success, entry_id: entryId, data });
-      } catch (err) {
-        console.error("[crestron-reload] Error:", err);
-        await logAudit("crestron-reload", {
-          category: "crestron_bridge",
-          event_type: "crestron_reload",
-          severity: "error",
-          actor_id: userId,
-          actor_name: actorName,
-          channel: "web",
-          summary: `Crestron reload error: ${err instanceof Error ? err.message : String(err)}`,
-          detail: { error: err instanceof Error ? err.message : String(err) },
-          status: "error",
-          duration_ms: Date.now() - t0
-        });
-        res.status(500).json({ error: "Failed to reload Crestron integration" });
-      }
-    });
-    router5.post("/govee/reload", requireAuth2, requireAdmin, async (req, res) => {
-      const creds = await resolveHACreds(req.userId);
-      const HA_URL2 = creds?.haUrl ?? "";
-      const HA_TOKEN2 = creds?.haToken ?? "";
-      const userId = req.userId ?? "unknown";
-      const userInfo = getAuthUser(req);
-      const actorName = userInfo?.name ?? userInfo?.email ?? userId;
-      const t0 = Date.now();
-      if (!HA_URL2 || !HA_TOKEN2) {
-        res.status(503).json({ error: "Home Assistant not configured" });
-        return;
-      }
-      try {
-        const entry = await getGoveeCloudEntryId(HA_URL2, HA_TOKEN2);
-        if (!entry) {
-          await logAudit("govee-reload", {
-            category: "home",
-            event_type: "govee_reload",
-            severity: "error",
-            actor_id: userId,
-            actor_name: actorName,
-            channel: "web",
-            summary: "Govee reload failed \u2014 config entry not found in Home Assistant",
-            detail: {},
-            status: "error",
-            duration_ms: Date.now() - t0
-          });
-          res.status(404).json({ error: "Govee config entry not found in Home Assistant" });
-          return;
-        }
-        const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/homeassistant/reload_config_entry", {
-          entry_id: entry.entry_id
-        });
-        const success = status < 400;
-        let haErrorMsg;
-        if (!success && data) {
-          if (typeof data === "string") haErrorMsg = data.slice(0, 300);
-          else if (typeof data === "object") {
-            const d = data;
-            haErrorMsg = String(d.message ?? d.error ?? JSON.stringify(data)).slice(0, 300);
-          }
-        }
-        goveeEntryCache = null;
-        goveeEntryIdCache = null;
-        goveeEntryIdFetchedAt = 0;
-        await logAudit("govee-reload", {
-          category: "home",
-          event_type: "govee_reload",
-          severity: success ? "info" : "warn",
-          actor_id: userId,
-          actor_name: actorName,
-          channel: "web",
-          summary: success ? `Govee integration (${entry.domain}) reloaded by ${actorName}` : `Govee reload failed (HTTP ${status})`,
-          detail: {
-            entry_id: entry.entry_id,
-            domain: entry.domain,
-            title: entry.title,
-            ha_status: status,
-            ...haErrorMsg ? { ha_error: haErrorMsg } : {}
-          },
-          status: success ? "success" : "error",
-          duration_ms: Date.now() - t0
-        });
-        res.status(success ? 200 : 502).json({ success, entry_id: entry.entry_id, domain: entry.domain, title: entry.title, data });
-      } catch (err) {
-        console.error("[govee-reload] Error:", err);
-        await logAudit("govee-reload", {
-          category: "home",
-          event_type: "govee_reload",
-          severity: "error",
-          actor_id: userId,
-          actor_name: actorName,
-          channel: "web",
-          summary: `Govee reload error: ${err instanceof Error ? err.message : String(err)}`,
-          detail: { error: err instanceof Error ? err.message : String(err) },
-          status: "error",
-          duration_ms: Date.now() - t0
-        });
-        res.status(500).json({ error: "Failed to reload Govee integration" });
-      }
-    });
-    router5.get("/govee/config-entries", requireAuth2, requireAdmin, async (req, res) => {
-      const creds = await resolveHACreds(req.userId);
-      const HA_URL2 = creds?.haUrl ?? "";
-      const HA_TOKEN2 = creds?.haToken ?? "";
-      if (!HA_URL2 || !HA_TOKEN2) {
-        res.status(503).json({ error: "Home Assistant not configured" });
-        return;
-      }
-      try {
-        const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", "/api/config/config_entries/entry");
-        if (status !== 200 || !Array.isArray(data)) {
-          res.status(502).json({ error: "Failed to fetch config entries from HA" });
-          return;
-        }
-        const entries = data;
-        const goveeEntries = entries.filter(
-          (e) => e.domain.toLowerCase().includes("govee") || typeof e.title === "string" && e.title.toLowerCase().includes("govee")
-        );
-        res.json({ entries: goveeEntries });
-      } catch (err) {
-        res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
-      }
-    });
-    router5.get("/states", requireAuth2, (_req, res) => {
-      if (!isCacheReady()) {
-        res.status(503).json({ error: "State cache not ready yet" });
-        return;
-      }
-      res.json(getEntityCache());
-    });
-    router5.get("/cameras", requireAuth2, async (req, res) => {
-      try {
-        const creds = await resolveHACreds(req.userId);
-        if (!creds?.haUrl || !creds?.haToken) {
-          res.json({ success: true, cameras: [] });
-          return;
-        }
-        let states = [];
-        if (isCacheReady()) {
-          const cache3 = getEntityCache();
-          states = Object.values(cache3);
-        } else {
-          const { status, data } = await callHA(creds.haUrl, creds.haToken, "GET", "/api/states", void 0, { maxRetries: 1 });
-          if (status === 200 && Array.isArray(data)) {
-            states = data;
-          }
-        }
-        const cameras = states.filter((s3) => s3.entity_id && s3.entity_id.startsWith("camera.")).map((s3) => ({
-          camera_id: s3.entity_id,
-          entity_id: s3.entity_id,
-          name: s3.attributes?.friendly_name || s3.entity_id.replace(/^camera\./, "").replace(/_/g, " "),
-          status: s3.state === "unavailable" ? "offline" : "live",
-          model: s3.attributes?.brand || s3.attributes?.model_name || s3.attributes?.model || "Home Assistant",
-          location: s3.attributes?.area_id || "",
-          thumbnail_url: `/api/ha/camera_proxy/${s3.entity_id}`,
-          stream_url: `/api/ha/camera_stream/${s3.entity_id}`,
-          is_ha: true
-        }));
-        res.json({ success: true, cameras });
-      } catch (err) {
-        console.error("[ha-cameras] Failed to list cameras:", err);
-        res.json({ success: false, cameras: [], error: String(err) });
-      }
-    });
-    router5.get("/camera_proxy/:entityId", requireAuth2, async (req, res) => {
-      const rawEntityId = req.params.entityId;
-      const entityId = Array.isArray(rawEntityId) ? rawEntityId[0] : rawEntityId;
-      if (!entityId || !entityId.startsWith("camera.")) {
-        res.status(400).json({ error: "Valid camera entityId required" });
-        return;
-      }
-      const creds = await resolveHACreds(req.userId);
-      if (!creds?.haUrl || !creds?.haToken) {
-        res.status(503).json({ error: "Home Assistant not configured" });
-        return;
-      }
-      try {
-        const haUrl = creds.haUrl.replace(/\/$/, "");
-        const proxyUrl = `${haUrl}/api/camera_proxy/${encodeURIComponent(entityId)}`;
-        const haRes = await undiciFetch2(proxyUrl, {
-          method: "GET",
-          headers: {
-            "Authorization": `Bearer ${creds.haToken}`
-          }
-        });
-        if (!haRes.ok) {
-          res.status(haRes.status).json({ error: `HA camera proxy returned ${haRes.status}` });
-          return;
-        }
-        const contentType = haRes.headers.get("content-type") || "image/jpeg";
-        res.setHeader("Content-Type", contentType);
-        res.setHeader("Cache-Control", "no-cache, max-age=0, must-revalidate");
-        const buffer = Buffer.from(await haRes.arrayBuffer());
-        res.send(buffer);
-      } catch (err) {
-        console.error(`[ha-camera-proxy] Error proxying ${entityId}:`, err);
-        res.status(500).json({ error: "Failed to fetch camera snapshot" });
-      }
-    });
-    router5.get("/camera_stream/:entityId", requireAuth2, async (req, res) => {
-      const rawEntityId = req.params.entityId;
-      const entityId = Array.isArray(rawEntityId) ? rawEntityId[0] : rawEntityId;
-      if (!entityId || !entityId.startsWith("camera.")) {
-        res.status(400).json({ error: "Valid camera entityId required" });
-        return;
-      }
-      const creds = await resolveHACreds(req.userId);
-      if (!creds?.haUrl || !creds?.haToken) {
-        res.status(503).json({ error: "Home Assistant not configured" });
-        return;
-      }
-      try {
-        const haUrl = creds.haUrl.replace(/\/$/, "");
-        const streamUrl = `${haUrl}/api/camera_proxy_stream/${encodeURIComponent(entityId)}`;
-        const haRes = await undiciFetch2(streamUrl, {
-          method: "GET",
-          headers: {
-            "Authorization": `Bearer ${creds.haToken}`
-          }
-        });
-        if (!haRes.ok) {
-          res.status(haRes.status).json({ error: `HA camera stream returned ${haRes.status}` });
-          return;
-        }
-        const contentType = haRes.headers.get("content-type") || "multipart/x-mixed-replace; boundary=--frame";
-        res.setHeader("Content-Type", contentType);
-        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-        res.setHeader("Connection", "close");
-        if (haRes.body) {
-          const reader = haRes.body.getReader();
-          req.on("close", () => {
-            reader.cancel().catch(() => {
-            });
-          });
-          const pump = async () => {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              res.write(value);
-            }
-            res.end();
-          };
-          pump().catch(() => res.end());
-        } else {
-          res.status(500).json({ error: "No stream body available" });
-        }
-      } catch (err) {
-        console.error(`[ha-camera-stream] Error streaming ${entityId}:`, err);
-        if (!res.headersSent) res.status(500).json({ error: "Failed to stream camera" });
-      }
-    });
-    router5.get("/govee-ids", requireAuth2, (_req, res) => {
-      res.json(getGoveeEntityIdsFromCache());
-    });
-    HA_TOKEN_ALERT_COOLDOWN_MS = 60 * 60 * 1e3;
-    JANUS_LOGO_URL = process.env.APP_LOGO_URL || "/icon.svg";
-    router5.post("/", requireAuth2, async (req, res) => {
-      const authUser = getAuthUser(req);
-      const userId = authUser?.userId || req.userId || "UNKNOWN";
-      const actorName = authUser?.displayName || authUser?.email || "UNKNOWN";
-      const isAdmin2 = authUser?.roles?.includes("admin") || req.userRole === "admin";
-      try {
-        const body = req.body;
-        const { action, path: path12, method = "GET", payload } = body;
-        if (action === "save-settings") {
-          if (userId === "UNKNOWN") {
-            res.status(401).json({ error: "Authentication required" });
-            return;
-          }
-          if (!isAdmin2) {
-            res.status(403).json({ error: "Admin privileges required to save Home Assistant configuration" });
-            return;
-          }
-          const haUrlInput = typeof body.ha_url === "string" ? body.ha_url.trim().replace(/\/$/, "") : "";
-          const tokenInput = typeof body.access_token === "string" ? body.access_token.trim() : "";
-          if (!haUrlInput) {
-            res.status(400).json({ error: "ha_url is required" });
-            return;
-          }
-          const urlCheck = await validateHaUrl(haUrlInput);
-          if (!urlCheck.ok) {
-            res.status(400).json({ error: urlCheck.reason });
-            return;
-          }
-          const existing = await storage.getHomeAssistantSettings(userId);
-          if (!tokenInput && !existing?.encryptedToken) {
-            res.status(400).json({ error: "access_token is required" });
-            return;
-          }
-          const update = { userId, haUrl: haUrlInput };
-          if (tokenInput) {
-            update.encryptedToken = await encryptToken(tokenInput);
-          }
-          await storage.upsertHomeAssistantSettings(update);
-          invalidateHACredsCache(userId);
-          logAudit("home-assistant-proxy", {
-            category: "home",
-            event_type: "ha_settings_saved",
-            severity: "info",
-            actor_id: userId,
-            actor_name: actorName,
-            channel: "web",
-            summary: tokenInput ? `Home Assistant settings saved (URL + new token) by ${actorName}` : `Home Assistant URL updated by ${actorName}`,
-            detail: { ha_url: haUrlInput, token_updated: Boolean(tokenInput) },
-            status: "success"
-          });
-          res.json({ success: true, ha_url: haUrlInput, token_saved: Boolean(tokenInput) });
-          return;
-        }
-        if (action === "get-settings") {
-          if (userId === "UNKNOWN") {
-            res.status(401).json({ error: "Authentication required" });
-            return;
-          }
-          const settings = await storage.getHomeAssistantSettings(userId);
-          res.json({
-            settings: settings ? {
-              id: settings.id,
-              ha_url: settings.haUrl,
-              is_connected: settings.isConnected,
-              last_connected_at: settings.lastConnectedAt,
-              has_token: Boolean(settings.encryptedToken)
-            } : null
-          });
-          return;
-        }
-        if (action === "disconnect") {
-          if (userId === "UNKNOWN") {
-            res.status(401).json({ error: "Authentication required" });
-            return;
-          }
-          if (!isAdmin2) {
-            res.status(403).json({ error: "Admin privileges required to disconnect Home Assistant" });
-            return;
-          }
-          const existing = await storage.getHomeAssistantSettings(userId);
-          if (existing) {
-            await storage.upsertHomeAssistantSettings({
-              userId,
-              haUrl: existing.haUrl,
-              encryptedToken: null,
-              isConnected: false
-            });
-            invalidateHACredsCache(userId);
-            logAudit("home-assistant-proxy", {
-              category: "home",
-              event_type: "ha_disconnected",
-              severity: "info",
-              actor_id: userId,
-              actor_name: actorName,
-              channel: "web",
-              summary: `Home Assistant disconnected by ${actorName}`,
-              detail: { ha_url: existing.haUrl },
-              status: "success"
-            });
-          }
-          res.json({ success: true });
-          return;
-        }
-        const creds = await resolveHACreds(userId);
-        if (action === "test-connection") {
-          const suppliedUrl = typeof body.ha_url === "string" ? body.ha_url.trim().replace(/\/$/, "") : "";
-          const suppliedToken = typeof body.access_token === "string" ? body.access_token.trim() : "";
-          let testUrl;
-          let testToken;
-          if (suppliedToken) {
-            testUrl = suppliedUrl || creds?.haUrl || "";
-            testToken = suppliedToken;
-          } else {
-            if (suppliedUrl && creds && suppliedUrl !== creds.haUrl) {
-              res.status(400).json({ error: "To test a new URL, provide its access token too" });
-              return;
-            }
-            testUrl = creds?.haUrl || "";
-            testToken = creds?.haToken || "";
-          }
-          if (!testUrl || !testToken) {
-            res.status(503).json({ unavailable: true, reason: "not_configured", message: "ha_not_configured" });
-            return;
-          }
-          const urlCheck = await validateHaUrl(testUrl);
-          if (!urlCheck.ok) {
-            res.status(400).json({ error: urlCheck.reason });
-            return;
-          }
-          const { status } = await callHA(testUrl, testToken, "GET", "/api/");
-          const connected = status === 200;
-          if (connected && userId && userId !== "UNKNOWN") {
-            const existing = await storage.getHomeAssistantSettings(userId);
-            if (existing) {
-              await storage.upsertHomeAssistantSettings({
-                userId,
-                isConnected: true,
-                lastConnectedAt: /* @__PURE__ */ new Date()
-              });
-            }
-          }
-          logAudit("home-assistant-proxy", {
-            category: "home",
-            event_type: "ha_test_connection",
-            severity: "info",
-            actor_id: userId,
-            actor_name: actorName,
-            channel: "web",
-            summary: connected ? "Home Assistant connection test succeeded" : `Home Assistant connection test failed (HTTP ${status})`,
-            detail: { status, connected },
-            status: connected ? "success" : "error"
-          });
-          res.json({ connected });
-          return;
-        }
-        if (!creds) {
-          res.status(503).json({ unavailable: true, reason: "not_configured", message: "ha_not_configured" });
-          return;
-        }
-        const HA_URL2 = creds.haUrl;
-        const HA_TOKEN2 = creds.haToken;
-        if (action === "proxy" && path12) {
-          if (typeof path12 !== "string" || !path12.startsWith("/") || path12.startsWith("//") || path12.includes("\\")) {
-            res.status(400).json({ error: "path must be an absolute URL path" });
-            return;
-          }
-          const t0 = Date.now();
-          const { status, data } = await callHA(HA_URL2, HA_TOKEN2, method, path12, payload);
-          if (status >= 400 && path12.startsWith("/api/calendars/")) {
-            console.warn(`Calendar endpoint returned ${status} \u2014 returning empty array`);
-            logAudit("home-assistant-proxy", {
-              category: "home",
-              event_type: "ha_proxy_error",
-              severity: "warn",
-              actor_id: userId,
-              actor_name: actorName,
-              channel: "web",
-              summary: `Home Assistant calendar proxy ${method} ${path12} returned HTTP ${status} (suppressed)`,
-              detail: { method, path: path12, status, suppressed: true },
-              status: "error",
-              duration_ms: Date.now() - t0
-            });
-            res.json([]);
-            return;
-          }
-          if (status >= 400) {
-            const payloadBytes = payload ? JSON.stringify(payload).length : 0;
-            const responseBytes = JSON.stringify(data).length;
-            const errorDetail = typeof data === "object" && data !== null ? data.message || data.error || void 0 : void 0;
-            logAudit("home-assistant-proxy", {
-              category: "home",
-              event_type: "ha_proxy_error",
-              severity: "warn",
-              actor_id: userId,
-              actor_name: actorName,
-              channel: "web",
-              summary: `Home Assistant proxy ${method} ${path12} returned HTTP ${status}`,
-              detail: {
-                method,
-                path: path12,
-                status,
-                request_bytes: payloadBytes || void 0,
-                response_bytes: responseBytes,
-                ...errorDetail ? { error: errorDetail } : {}
-              },
-              status: "error",
-              duration_ms: Date.now() - t0
-            });
-          } else if (method !== "GET") {
-            const responseBytes = JSON.stringify(data).length;
-            const payloadBytes = payload ? JSON.stringify(payload).length : 0;
-            logAudit("home-assistant-proxy", {
-              category: "home",
-              event_type: "ha_proxy_request",
-              severity: "info",
-              actor_id: userId,
-              actor_name: actorName,
-              channel: "web",
-              summary: `HA proxy ${method} ${path12}`,
-              detail: { method, path: path12, status, request_bytes: payloadBytes || void 0, response_bytes: responseBytes },
-              status: "success",
-              duration_ms: Date.now() - t0
-            });
-          }
-          res.status(status).json(data);
-          return;
-        }
-        if (action === "get-states") {
-          const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", "/api/states");
-          const entityIds = body.entity_ids;
-          if (entityIds && Array.isArray(entityIds) && entityIds.length > 0 && Array.isArray(data)) {
-            const idSet = new Set(entityIds);
-            const filtered = data.filter((s3) => idSet.has(s3.entity_id));
-            res.status(status).json(filtered);
-            return;
-          }
-          res.status(status).json(data);
-          return;
-        }
-        if (action === "get-state") {
-          const { entity_id } = body;
-          if (!entity_id) {
-            res.status(400).json({ error: "entity_id required" });
-            return;
-          }
-          const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", `/api/states/${entity_id}`);
-          res.status(status).json(data);
-          return;
-        }
-        if (action === "get-domain") {
-          const { domain } = body;
-          if (!domain) {
-            res.status(400).json({ error: "domain required" });
-            return;
-          }
-          const { status: domainStatus, data: allStates } = await callHA(HA_URL2, HA_TOKEN2, "GET", "/api/states");
-          const statesArray = Array.isArray(allStates) ? allStates : [];
-          const states = statesArray.filter((s3) => s3.entity_id?.startsWith(`${domain}.`));
-          res.status(domainStatus < 400 ? 200 : domainStatus).json(states);
-          return;
-        }
-        if (action === "call-service") {
-          if (!isAdmin2) {
-            res.status(403).json({ error: "Device control requires admin privileges" });
-            return;
-          }
-          const { domain: svcDomain, service, service_data } = body;
-          if (!svcDomain || !service) {
-            res.status(400).json({ error: "domain and service required" });
-            return;
-          }
-          const t0 = Date.now();
-          const entityId = service_data?.entity_id;
-          const svcPath = `/api/services/${svcDomain}/${service}`;
-          const svcPayload = service_data || {};
-          let callResult;
-          if (svcDomain === "climate" && creds.source === "env") {
-            try {
-              const wsResult = await callHAService(svcDomain, service, svcPayload);
-              console.log(
-                `[HA climate] WebSocket call succeeded for entity_id=${entityId ?? "unknown"} service=${service}`
-              );
-              callResult = { status: 200, data: wsResult ?? [] };
-            } catch (wsErr) {
-              const wsErrMsg = wsErr instanceof Error ? wsErr.message : String(wsErr);
-              console.warn(
-                `[HA climate] WebSocket call failed for entity_id=${entityId ?? "unknown"} service=${service} error=${wsErrMsg} \u2014 falling back to REST`
-              );
-              try {
-                const restResult = await callHA(HA_URL2, HA_TOKEN2, "POST", svcPath, svcPayload, { maxRetries: 1, retryOn401: false });
-                if (restResult.status >= 400) {
-                  console.error(
-                    `[HA climate] REST fallback returned ${restResult.status} for entity_id=${entityId ?? "unknown"} service=${service} (WS error: ${wsErrMsg})`
-                  );
-                  callResult = { status: 500, data: { error: `Climate control failed \u2014 WS: ${wsErrMsg}, REST: HTTP ${restResult.status}` } };
-                } else {
-                  callResult = restResult;
-                }
-              } catch (restErr) {
-                const restErrMsg = restErr instanceof Error ? restErr.message : String(restErr);
-                console.error(
-                  `[HA climate] REST fallback also threw for entity_id=${entityId ?? "unknown"} service=${service} ws_error=${wsErrMsg} rest_error=${restErrMsg}`
-                );
-                callResult = { status: 500, data: { error: `Climate control failed \u2014 WS: ${wsErrMsg}, REST: ${restErrMsg}` } };
-              }
-            }
-          } else {
-            callResult = await callHA(HA_URL2, HA_TOKEN2, "POST", svcPath, svcPayload);
-          }
-          const { status, data } = callResult;
-          const ids = entityId ? Array.isArray(entityId) ? entityId : [entityId] : [];
-          const count = ids.length;
-          const verbMap = {
-            turn_on: svcDomain === "scene" ? "Activated scene" : "Turned on",
-            turn_off: "Turned off",
-            toggle: "Toggled",
-            set_temperature: service_data?.temperature != null ? `Set temperature to ${service_data.temperature}\xB0F` : "Set temperature",
-            set_hvac_mode: service_data?.hvac_mode ? `Set mode to ${service_data.hvac_mode}` : "Set HVAC mode",
-            volume_set: service_data?.volume_level != null ? `Set volume to ${Math.round(service_data.volume_level * 100)}%` : "Set volume",
-            select_source: service_data?.source ? `Selected source ${service_data.source} on` : "Selected source on",
-            activate: "Activated scene"
-          };
-          const verb = verbMap[service] || service.replace(/_/g, " ");
-          let summary;
-          if (count === 0) {
-            summary = `${verb} (${svcDomain})`;
-          } else if (count === 1) {
-            summary = `${verb} ${prettifyEntityId(ids[0])}`;
-          } else if (count <= 2) {
-            summary = `${verb} ${ids.map(prettifyEntityId).join(" & ")}`;
-          } else {
-            summary = `${verb} ${ids.slice(0, 2).map(prettifyEntityId).join(", ")} +${count - 2} more`;
-          }
-          const extras = [];
-          if (service_data?.brightness != null && !verbMap[service]?.includes("brightness"))
-            extras.push(`brightness ${Math.round(service_data.brightness / 255 * 100)}%`);
-          if (extras.length) summary += ` (${extras.join(", ")})`;
-          if (status >= 400 && svcDomain === "climate") {
-            const responseBody = typeof data === "object" ? JSON.stringify(data) : String(data ?? "");
-            console.error(
-              `[HA climate] call-service failed: entity_id=${entityId ?? "unknown"} service=${service} status=${status} body=${responseBody}`
-            );
-          }
-          logAudit("home-assistant-proxy", {
-            category: "home",
-            event_type: "ha_call_service",
-            severity: "info",
-            actor_id: userId,
-            actor_name: actorName,
-            channel: "web",
-            summary,
-            detail: { domain: svcDomain, service, entity_id: entityId, service_data, status },
-            duration_ms: Date.now() - t0,
-            status: status < 400 ? "success" : "error"
-          });
-          res.status(status).json(data);
-          return;
-        }
-        if (action === "get-climate-debug") {
-          const t0 = Date.now();
-          const { status, data: allStates } = await callHA(HA_URL2, HA_TOKEN2, "GET", "/api/states");
-          const statesArray = Array.isArray(allStates) ? allStates : [];
-          const climateEntities = statesArray.filter((s3) => s3.entity_id?.startsWith("climate."));
-          const poolSpaFilter = /pool|spa/i;
-          const debug = climateEntities.map((e) => ({
-            entity_id: e.entity_id,
-            friendly_name: e.attributes?.friendly_name || e.entity_id,
-            state: e.state,
-            hvac_modes: e.attributes?.hvac_modes || [],
-            current_temperature: e.attributes?.current_temperature ?? null,
-            target_temperature: e.attributes?.temperature ?? null,
-            hvac_action: e.attributes?.hvac_action ?? null,
-            is_pool_spa: poolSpaFilter.test(e.entity_id),
-            category: poolSpaFilter.test(e.entity_id) ? "pool_spa" : "hvac"
-          }));
-          const hvacCount = debug.filter((d) => d.category === "hvac").length;
-          const poolSpaCount = debug.filter((d) => d.category === "pool_spa").length;
-          logAudit("home-assistant-proxy", {
-            category: "home",
-            event_type: "ha_climate_debug",
-            severity: "info",
-            actor_id: userId,
-            actor_name: actorName,
-            channel: "web",
-            summary: `Climate debug: ${climateEntities.length} entities (${hvacCount} HVAC, ${poolSpaCount} pool/spa)`,
-            duration_ms: Date.now() - t0,
-            status: status < 400 ? "success" : "error"
-          });
-          res.json({
-            total_climate_entities: climateEntities.length,
-            hvac_count: hvacCount,
-            pool_spa_count: poolSpaCount,
-            total_ha_entities: statesArray.length,
-            timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-            entities: debug
-          });
-          return;
-        }
-        if (action === "get-history") {
-          const { entity_id, hours = 24 } = body;
-          const end = (/* @__PURE__ */ new Date()).toISOString();
-          const start = new Date(Date.now() - hours * 3600 * 1e3).toISOString();
-          let histPath = `/api/history/period/${start}?end_time=${encodeURIComponent(end)}&minimal_response`;
-          if (entity_id) histPath += `&filter_entity_id=${entity_id}`;
-          const t0 = Date.now();
-          const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", histPath);
-          const entityLabel = entity_id ? prettifyEntityId(entity_id) : "all entities";
-          logAudit("home-assistant-proxy", {
-            category: "home",
-            event_type: "ha_get_history",
-            severity: "info",
-            actor_id: userId,
-            actor_name: actorName,
-            channel: "web",
-            summary: `Retrieved ${hours}h history for ${entityLabel}`,
-            detail: { entity_id: entity_id || void 0, hours },
-            status: status < 400 ? "success" : "error",
-            duration_ms: Date.now() - t0
-          });
-          res.status(status).json(data);
-          return;
-        }
-        if (action === "get-logbook") {
-          const { hours = 24, entity_id } = body;
-          const start = new Date(Date.now() - hours * 3600 * 1e3).toISOString();
-          let logPath = `/api/logbook/${start}`;
-          if (entity_id) logPath += `?entity=${entity_id}`;
-          const t0 = Date.now();
-          const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", logPath);
-          const entityLabel = entity_id ? prettifyEntityId(entity_id) : "all entities";
-          const entryCount = Array.isArray(data) ? data.length : 0;
-          logAudit("home-assistant-proxy", {
-            category: "home",
-            event_type: "ha_get_logbook",
-            severity: "info",
-            actor_id: userId,
-            actor_name: actorName,
-            channel: "web",
-            summary: `Retrieved ${entryCount} logbook entries (${hours}h) for ${entityLabel}`,
-            detail: { entity_id: entity_id || void 0, hours, entry_count: entryCount },
-            status: status < 400 ? "success" : "error",
-            duration_ms: Date.now() - t0
-          });
-          res.status(status).json(data);
-          return;
-        }
-        if (action === "get-services") {
-          const t0 = Date.now();
-          const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", "/api/services");
-          const domainCount = Array.isArray(data) ? data.length : 0;
-          logAudit("home-assistant-proxy", {
-            category: "home",
-            event_type: "ha_get_services",
-            severity: "info",
-            actor_id: userId,
-            actor_name: actorName,
-            channel: "web",
-            summary: `Fetched HA service list (${domainCount} domain${domainCount !== 1 ? "s" : ""})`,
-            detail: { domain_count: domainCount },
-            status: status < 400 ? "success" : "error",
-            duration_ms: Date.now() - t0
-          });
-          res.status(status).json(data);
-          return;
-        }
-        if (action === "get-config") {
-          const t0 = Date.now();
-          const { status, data } = await callHA(HA_URL2, HA_TOKEN2, "GET", "/api/config");
-          logAudit("home-assistant-proxy", {
-            category: "home",
-            event_type: "ha_get_config",
-            severity: "info",
-            actor_id: userId,
-            actor_name: actorName,
-            channel: "web",
-            summary: "Fetched Home Assistant configuration",
-            detail: {},
-            status: status < 400 ? "success" : "error",
-            duration_ms: Date.now() - t0
-          });
-          res.status(status).json(data);
-          return;
-        }
-        if (action === "broadcast-all") {
-          const { speakers, tvs, displays } = resolveTargetSpeakers("all");
-          const requestedVolumeAll = Number.isFinite(body.volume) ? body.volume : 0.75;
-          const volumeLevelAll = Math.min(1, Math.max(0, requestedVolumeAll));
-          await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/turn_on", { entity_id: speakers });
-          await new Promise((r) => setTimeout(r, 3e3));
-          await Promise.all([
-            callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/volume_set", {
-              entity_id: speakers,
-              volume_level: volumeLevelAll
-            }),
-            ...displays.length > 0 ? [
-              callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/play_media", {
-                entity_id: displays,
-                media_content_id: JANUS_LOGO_URL,
-                media_content_type: "image/png"
-              })
-            ] : []
-          ]);
-          await new Promise((r) => setTimeout(r, 1500));
-          const t0 = Date.now();
-          await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/tts/speak", {
-            entity_id: "tts.elevenlabs_text_to_speech",
-            media_player_entity_id: speakers,
-            message: body.message,
-            options: { voice: "iLVmqjzCGGvqtMCk6vVQ" }
-          });
-          if (tvs.length > 0) {
-            setTimeout(async () => {
-              try {
-                await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/turn_off", { entity_id: tvs });
-              } catch {
-              }
-            }, 6e4);
-          }
-          logAudit("home-assistant-proxy", {
-            category: "home",
-            event_type: "broadcast_all",
-            severity: "info",
-            actor_id: userId,
-            actor_name: actorName,
-            channel: "web",
-            summary: `Broadcast to ${speakers.length} devices (vol ${Math.round(volumeLevelAll * 100)}%)`,
-            detail: { message: body.message?.slice(0, 100), volume: volumeLevelAll },
-            duration_ms: Date.now() - t0,
-            status: "success"
-          });
-          res.json({ success: true, devices: speakers.length });
-          return;
-        }
-        if (action === "broadcast-bedrooms" || action === "broadcast-girls") {
-          const { speakers } = resolveTargetSpeakers("bedrooms");
-          const requestedVolumeBedrooms = Number.isFinite(body.volume) ? body.volume : 0.85;
-          const volumeLevelBedrooms = Math.min(1, Math.max(0, requestedVolumeBedrooms));
-          await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/turn_on", { entity_id: speakers });
-          await new Promise((r) => setTimeout(r, 3e3));
-          await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/volume_set", {
-            entity_id: speakers,
-            volume_level: volumeLevelBedrooms
-          });
-          await new Promise((r) => setTimeout(r, 1500));
-          const t0 = Date.now();
-          await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/tts/speak", {
-            entity_id: "tts.elevenlabs_text_to_speech",
-            media_player_entity_id: speakers,
-            message: body.message,
-            options: { voice: "iLVmqjzCGGvqtMCk6vVQ" }
-          });
-          logAudit("home-assistant-proxy", {
-            category: "home",
-            event_type: "broadcast_bedrooms",
-            severity: "info",
-            actor_id: userId,
-            actor_name: actorName,
-            channel: "web",
-            summary: `Broadcast to bedrooms (${speakers.length} speakers)`,
-            detail: { message: body.message?.slice(0, 100) },
-            duration_ms: Date.now() - t0,
-            status: "success"
-          });
-          res.json({ success: true, devices: speakers.length });
-          return;
-        }
-        if (action === "broadcast-google-home") {
-          const { speakers, displays } = resolveTargetSpeakers("google-home");
-          const requestedVolumeGH = Number.isFinite(body.volume) ? body.volume : 0.75;
-          const volumeLevelGH = Math.min(1, Math.max(0, requestedVolumeGH));
-          await callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/turn_on", { entity_id: speakers });
-          await new Promise((r) => setTimeout(r, 3e3));
-          await Promise.all([
-            callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/volume_set", {
-              entity_id: speakers,
-              volume_level: volumeLevelGH
-            }),
-            callHA(HA_URL2, HA_TOKEN2, "POST", "/api/services/media_player/play_media", {
-              entity_id: displays,
-              media_content_id: JANUS_LOGO_URL,
-              media_content_type: "image/png"
-            })
-          ]);
-          await new Promise((r) => setTimeout(r, 1500));
-          const t0 = Date.now();
-          const messageText = typeof body.message === "string" ? body.message : "";
-          let ttsOk = true;
-          let ttsError = null;
-          let whatsappFallback = false;
-          let whatsappAlert = false;
-          const audioUrl = await generateAndUploadTTS(messageText, "google-home-broadcast");
-          if (audioUrl) {
-            const speakerErrors = [];
-            for (const speaker of speakers) {
-              const { status: playStatus } = await callHA(
-                HA_URL2,
-                HA_TOKEN2,
-                "POST",
-                "/api/services/media_player/play_media",
-                {
-                  entity_id: speaker,
-                  media_content_id: audioUrl,
-                  media_content_type: "audio/mpeg",
-                  announce: true,
-                  extra: {
-                    metadata: { metadataType: 3, title: "Home Announcement", artist: "Janus" }
-                  }
-                }
-              );
-              if (playStatus >= 400) {
-                speakerErrors.push(`${speaker}: HTTP ${playStatus}`);
-                console.warn(`[home-assistant-proxy] play_media failed on ${speaker}: HTTP ${playStatus}`);
-              } else {
-                console.log(`[home-assistant-proxy] \u2713 play_media accepted on ${speaker}`);
-              }
-              await new Promise((r) => setTimeout(r, 400));
-            }
-            if (speakerErrors.length > 0) {
-              ttsOk = false;
-              ttsError = `play_media failed on ${speakerErrors.length} speaker(s): ${speakerErrors.join("; ")}`;
-            }
-          } else {
-            ttsOk = false;
-            ttsError = "ElevenLabs TTS or storage upload failed";
-          }
-          if (!ttsOk) {
-            try {
-              const fallbackPhone = await getBroadcastFallbackPhone();
-              whatsappFallback = await sendWhatsAppTo(fallbackPhone, `\u{1F4E2} Home broadcast: ${messageText}`);
-              if (whatsappFallback) {
-                console.log("[home-assistant-proxy] WhatsApp fallback sent for broadcast-google-home");
-              } else {
-                console.warn("[home-assistant-proxy] WhatsApp fallback failed for broadcast-google-home");
-              }
-            } catch (e) {
-              console.error("[home-assistant-proxy] WhatsApp fallback error:", e);
-            }
-            try {
-              const alertPhone = await getAlertPhoneNumber();
-              const fallbackNote = whatsappFallback ? " WhatsApp fallback sent to family." : " WhatsApp fallback failed.";
-              whatsappAlert = await sendWhatsAppTo(
-                alertPhone,
-                `\u26A0\uFE0F All Google Home broadcast failed: ${ttsError ?? "unknown TTS error"}.${fallbackNote}`
-              );
-            } catch (e) {
-              console.error("[home-assistant-proxy] WhatsApp alert error:", e);
-            }
-          }
-          logAudit("home-assistant-proxy", {
-            category: "home",
-            event_type: "broadcast_google_home",
-            severity: ttsOk ? "info" : "warn",
-            actor_id: userId,
-            actor_name: actorName,
-            channel: "web",
-            summary: ttsOk ? `Broadcast to ${speakers.length} Google Home devices (vol ${Math.round(volumeLevelGH * 100)}%)` : `Broadcast to ${speakers.length} Google Home devices FAILED (vol ${Math.round(volumeLevelGH * 100)}%)`,
-            detail: {
-              message: messageText.slice(0, 100),
-              volume: volumeLevelGH,
-              ttsError,
-              whatsappFallback,
-              whatsappAlert
-            },
-            duration_ms: Date.now() - t0,
-            status: ttsOk ? "success" : "error"
-          });
-          res.json({
-            success: ttsOk,
-            devices: speakers.length,
-            ttsError,
-            whatsappFallback,
-            whatsappAlert
-          });
-          if (ttsOk && audioUrl) {
-            setTimeout(async () => {
-              const tVerify = Date.now();
-              const verifications = {};
-              let verifiedCount = 0;
-              for (const speaker of speakers) {
-                const v = await verifyPlaybackState(HA_URL2, HA_TOKEN2, speaker, audioUrl, true);
-                verifications[speaker] = v;
-                if (v.verified) {
-                  verifiedCount++;
-                  console.log(`[home-assistant-proxy] \u2713 Cast state verified: ${speaker} loaded correct content (announce-mode, state=${v.state})`);
-                } else {
-                  console.warn(
-                    `[home-assistant-proxy] \u26A0 Cast state check: ${speaker} state=${v.state ?? "null"} urlMatch=${v.urlMatch} (announce-mode: urlMatch must be true and state must not be unavailable)`
-                  );
-                }
-              }
-              const allVerified = verifiedCount === speakers.length;
-              let silentDropRisk = false;
-              if (allVerified) {
-                const { silentDropRisk: risk } = await detectSilentDropRisk(
-                  HA_URL2,
-                  HA_TOKEN2,
-                  speakers,
-                  audioUrl,
-                  3500
-                );
-                silentDropRisk = risk;
-                if (risk) {
-                  console.warn(
-                    `[home-assistant-proxy] \u26A0 silent_drop_risk: all speakers urlMatch=true but still idle at ~8s \u2014 audio may have been silently dropped (no failure alert raised)`
-                  );
-                }
-              }
-              logAudit("home-assistant-proxy", {
-                category: "home",
-                event_type: "broadcast_cast_verification",
-                severity: allVerified && !silentDropRisk ? "info" : "warn",
-                actor_id: userId,
-                actor_name: actorName,
-                channel: "web",
-                summary: silentDropRisk ? `Cast state verified ${verifiedCount}/${speakers.length} Google Home speakers (silent-drop risk: still idle at 8s)` : `Cast state verified ${verifiedCount}/${speakers.length} Google Home speakers`,
-                detail: {
-                  broadcast: "all-google-home",
-                  expectedUrl: audioUrl,
-                  verifiedCount,
-                  totalSpeakers: speakers.length,
-                  verifications,
-                  silent_drop_risk: silentDropRisk
-                },
-                duration_ms: Date.now() - tVerify,
-                status: allVerified ? "success" : "warning"
-              });
-            }, 3500).unref?.();
-          }
-          return;
-        }
-        res.status(400).json({ error: `Unknown action: ${action}` });
-      } catch (err) {
-        console.error("Home Assistant proxy error:", err);
-        res.status(500).json(safeErrorJson(err));
-      }
-    });
-    homeAssistant_default = router5;
-  }
-});
-
 // server/utils/notifications.ts
 var notifications_exports = {};
 __export(notifications_exports, {
@@ -9265,149 +9492,6 @@ var init_notifications = __esm({
     init_janus_tools();
     _cooldowns = {};
     BASE_URL = `http://localhost:${process.env.PORT || 5e3}`;
-  }
-});
-
-// server/lib/estateConfig.ts
-var estateConfig_exports = {};
-__export(estateConfig_exports, {
-  getEntityMappings: () => getEntityMappings,
-  getEstateConfig: () => getEstateConfig,
-  getEstateTimezone: () => getEstateTimezone,
-  invalidateEntityMappingsCache: () => invalidateEntityMappingsCache,
-  invalidateEstateConfigCache: () => invalidateEstateConfigCache
-});
-async function getEstateConfig() {
-  const now = Date.now();
-  if (cachedConfig && now - lastFetchTime < CACHE_TTL_MS2) {
-    return cachedConfig;
-  }
-  const fallback = {
-    latitude: Number(process.env.HOME_LAT) || 37.7749,
-    longitude: Number(process.env.HOME_LNG) || -122.4194,
-    elevation: 0,
-    timeZone: process.env.TZ || process.env.TIME_ZONE || "UTC",
-    unitSystem: {
-      length: "mi",
-      mass: "lb",
-      pressure: "psi",
-      temperature: "\xB0F",
-      volume: "gal"
-    },
-    locationName: process.env.HOME_LOCATION || "Home"
-  };
-  const haUrl = process.env.HA_URL || "http://supervisor/core";
-  const haToken = process.env.HA_TOKEN || process.env.SUPERVISOR_TOKEN;
-  if (!haToken) {
-    cachedConfig = fallback;
-    lastFetchTime = now;
-    return cachedConfig;
-  }
-  try {
-    const { status, data } = await callHA(haUrl, haToken, "GET", "/api/config", void 0, { maxRetries: 1 });
-    if (status === 200 && data && typeof data === "object") {
-      const d = data;
-      cachedConfig = {
-        latitude: typeof d.latitude === "number" ? d.latitude : fallback.latitude,
-        longitude: typeof d.longitude === "number" ? d.longitude : fallback.longitude,
-        elevation: typeof d.elevation === "number" ? d.elevation : fallback.elevation,
-        timeZone: d.time_zone || fallback.timeZone,
-        unitSystem: d.unit_system || fallback.unitSystem,
-        locationName: d.location_name || fallback.locationName
-      };
-      lastFetchTime = now;
-      return cachedConfig;
-    }
-  } catch (err) {
-    console.warn("[estateConfig] Failed to fetch HA /api/config, using fallback:", err instanceof Error ? err.message : err);
-  }
-  cachedConfig = fallback;
-  lastFetchTime = now;
-  return cachedConfig;
-}
-function invalidateEstateConfigCache() {
-  cachedConfig = null;
-  lastFetchTime = 0;
-}
-function getEstateTimezone() {
-  if (cachedConfig?.timeZone) return cachedConfig.timeZone;
-  return process.env.TZ || process.env.TIME_ZONE || "UTC";
-}
-async function getEntityMappings() {
-  const now = Date.now();
-  if (cachedEntityMappings && now - lastEntityMappingsFetchTime < CACHE_TTL_MS2) {
-    return cachedEntityMappings;
-  }
-  const fallback = {
-    energy: [],
-    irrigation: [],
-    pool: {
-      pool_heater: "switch.pool_heater",
-      spa_heater: "switch.spa_heater",
-      pool_temp: "sensor.pool_temp",
-      spa_temp: "sensor.spa_temp",
-      pool_pump: "switch.pool_pump",
-      spa_pump: "switch.spa_pump"
-    },
-    climate: [],
-    cameras: [],
-    vehicles: [],
-    speedtest: {
-      download: "sensor.speedtest_download",
-      upload: "sensor.speedtest_upload",
-      ping: "sensor.speedtest_ping"
-    },
-    utility_rates: {
-      electricity_kwh_cost: 0.28,
-      water_hcf_cost: 12.5
-    }
-  };
-  try {
-    const { query: query2 } = await Promise.resolve().then(() => (init_db2(), db_exports));
-    const res = await query2(
-      `SELECT value FROM system_configs WHERE key = 'entity_mappings' LIMIT 1`
-    );
-    if (res?.rows?.[0]?.value) {
-      const parsed = typeof res.rows[0].value === "string" ? JSON.parse(res.rows[0].value) : res.rows[0].value;
-      cachedEntityMappings = {
-        ...fallback,
-        ...parsed,
-        pool: {
-          ...fallback.pool,
-          ...parsed.pool || {}
-        },
-        speedtest: {
-          ...fallback.speedtest,
-          ...parsed.speedtest || {}
-        },
-        utility_rates: {
-          ...fallback.utility_rates,
-          ...parsed.utility_rates || {}
-        }
-      };
-      lastEntityMappingsFetchTime = now;
-      return cachedEntityMappings;
-    }
-  } catch (err) {
-    console.warn("[estateConfig] Failed to fetch entity_mappings from system_configs:", err instanceof Error ? err.message : err);
-  }
-  cachedEntityMappings = fallback;
-  lastEntityMappingsFetchTime = now;
-  return cachedEntityMappings;
-}
-function invalidateEntityMappingsCache() {
-  cachedEntityMappings = null;
-  lastEntityMappingsFetchTime = 0;
-}
-var cachedConfig, lastFetchTime, CACHE_TTL_MS2, cachedEntityMappings, lastEntityMappingsFetchTime;
-var init_estateConfig = __esm({
-  "server/lib/estateConfig.ts"() {
-    init_homeAssistant();
-    cachedConfig = null;
-    lastFetchTime = 0;
-    CACHE_TTL_MS2 = 10 * 60 * 1e3;
-    cachedEntityMappings = null;
-    lastEntityMappingsFetchTime = 0;
   }
 });
 
@@ -11692,16 +11776,18 @@ router2.post("/api/functions/invoke", requireAuth, async (req, res) => {
 var proxy_default = router2;
 
 // server/routes/janus.ts
-import { Router as Router4 } from "express";
+import { Router as Router5 } from "express";
 
 // server/handlers/chat.ts
 init_supabase();
+init_estateConfig();
 init_janus_tools();
 
 // server/utils/tools/home-automation.ts
 init_janus_tools();
 init_breakers();
 init_irrigationFlow();
+init_estateConfig();
 async function callHAProxy(action, extra = {}) {
   const HA_URL2 = process.env.HA_URL;
   const HA_TOKEN2 = process.env.HA_TOKEN;
@@ -11867,7 +11953,7 @@ async function executeCheckVerkadaSecurity(svc) {
         lines.push(`
 **Recent Access Events (${events.length}):**`);
         for (const e of events.slice(0, 10)) {
-          const time = e.timestamp ? new Date(e.timestamp * 1e3).toLocaleString("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit" }) : "?";
+          const time = e.timestamp ? new Date(e.timestamp * 1e3).toLocaleString("en-US", { timeZone: getEstateTimezone(), hour: "numeric", minute: "2-digit" }) : "?";
           lines.push(`- ${time}: ${e.actor_name || "Unknown"} \u2014 ${e.event_type || "access"} at ${e.door_name || "unknown door"}`);
         }
       } else {
@@ -11882,7 +11968,7 @@ async function executeCheckVerkadaSecurity(svc) {
       lines.push(`
 **POI Sightings (last 24h): ${sightings.length}**`);
       for (const s3 of sightings.slice(0, 10)) {
-        const time = new Date(s3.seen_at).toLocaleString("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit" });
+        const time = new Date(s3.seen_at).toLocaleString("en-US", { timeZone: getEstateTimezone(), hour: "numeric", minute: "2-digit" });
         lines.push(`- ${time}: ${s3.label || "Unknown person"} at ${s3.camera_name || "unknown camera"}`);
       }
     } else {
@@ -11920,6 +12006,7 @@ async function executeCheckGeneratorStatus() {
 }
 
 // server/utils/tools/calendar-maps.ts
+init_estateConfig();
 async function callCalendarProxy(body) {
   const { getServiceAccountToken: getServiceAccountToken2 } = await Promise.resolve().then(() => (init_google(), google_exports));
   const CALENDAR_BASE3 = "https://www.googleapis.com/calendar/v3";
@@ -11958,8 +12045,8 @@ async function callCalendarProxy(body) {
       const cId = calendarId;
       const event = {
         summary: body.title,
-        start: body.start?.includes("T") ? { dateTime: body.start, timeZone: "America/Los_Angeles" } : { date: body.start },
-        end: body.end?.includes("T") ? { dateTime: body.end, timeZone: "America/Los_Angeles" } : { date: body.end }
+        start: body.start?.includes("T") ? { dateTime: body.start, timeZone: getEstateTimezone() } : { date: body.start },
+        end: body.end?.includes("T") ? { dateTime: body.end, timeZone: getEstateTimezone() } : { date: body.end }
       };
       if (body.description) event.description = body.description;
       if (body.location) event.location = body.location;
@@ -11994,10 +12081,10 @@ async function callCalendarProxy(body) {
       if (typeof body.description === "string") patch.description = body.description;
       if (typeof body.location === "string") patch.location = body.location;
       if (body.start) {
-        patch.start = body.start.includes("T") ? { dateTime: body.start, timeZone: "America/Los_Angeles" } : { date: body.start };
+        patch.start = body.start.includes("T") ? { dateTime: body.start, timeZone: getEstateTimezone() } : { date: body.start };
       }
       if (body.end) {
-        patch.end = body.end.includes("T") ? { dateTime: body.end, timeZone: "America/Los_Angeles" } : { date: body.end };
+        patch.end = body.end.includes("T") ? { dateTime: body.end, timeZone: getEstateTimezone() } : { date: body.end };
       }
       if (Array.isArray(body.attendees) && body.attendees.length) {
         patch.attendees = body.attendees.map((e) => ({ email: e }));
@@ -12033,7 +12120,8 @@ async function callCalendarProxy(body) {
 }
 function normalizeToPacific(dt) {
   if (!dt || !dt.includes("T")) return dt;
-  const laFormatter = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", timeZoneName: "shortOffset" });
+  const tz = getEstateTimezone();
+  const laFormatter = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "shortOffset" });
   const parts = laFormatter.formatToParts(/* @__PURE__ */ new Date());
   const tzPart = parts.find((p) => p.type === "timeZoneName");
   let pacificOffset = "-08:00";
@@ -12047,7 +12135,7 @@ function normalizeToPacific(dt) {
   if (dt.endsWith("Z") || dt.endsWith("z")) {
     const utcDate = new Date(dt);
     if (!isNaN(utcDate.getTime())) {
-      const laTime = new Date(utcDate.toLocaleString("en-US", { timeZone: "America/Los_Angeles" }));
+      const laTime = new Date(utcDate.toLocaleString("en-US", { timeZone: tz }));
       const year = laTime.getFullYear();
       const month = String(laTime.getMonth() + 1).padStart(2, "0");
       const day = String(laTime.getDate()).padStart(2, "0");
@@ -12055,7 +12143,7 @@ function normalizeToPacific(dt) {
       const minutes = String(laTime.getMinutes()).padStart(2, "0");
       const seconds = String(laTime.getSeconds()).padStart(2, "0");
       const result = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}${pacificOffset}`;
-      console.log(`[Time Normalize] UTC "${dt}" \u2192 Pacific "${result}"`);
+      console.log(`[Time Normalize] UTC "${dt}" \u2192 Local "${result}"`);
       return result;
     }
   }
@@ -12331,19 +12419,21 @@ async function executeSearchPlaces(query2, near, type) {
 async function executeGetEnvironmentData() {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) return JSON.stringify({ error: "Google Maps API key not configured" });
-  const HOME_LAT5 = Number(process.env.HOME_LAT) || 34.0522;
-  const HOME_LNG5 = Number(process.env.HOME_LNG) || -118.2437;
+  const { getEstateConfig: getEstateConfig2 } = await Promise.resolve().then(() => (init_estateConfig(), estateConfig_exports));
+  const estateConfig = await getEstateConfig2();
+  const HOME_LAT2 = estateConfig.latitude;
+  const HOME_LNG2 = estateConfig.longitude;
   try {
     const [aqRes, pollenRes] = await Promise.all([
       fetch(`https://airquality.googleapis.com/v1/currentConditions:lookup?key=${apiKey}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          location: { latitude: HOME_LAT5, longitude: HOME_LNG5 },
+          location: { latitude: HOME_LAT2, longitude: HOME_LNG2 },
           extraComputations: ["HEALTH_RECOMMENDATIONS", "DOMINANT_POLLUTANT_CONCENTRATION", "LOCAL_AQI"]
         })
       }),
-      fetch(`https://pollen.googleapis.com/v1/forecast:lookup?key=${apiKey}&location.latitude=${HOME_LAT5}&location.longitude=${HOME_LNG5}&days=3`)
+      fetch(`https://pollen.googleapis.com/v1/forecast:lookup?key=${apiKey}&location.latitude=${HOME_LAT2}&location.longitude=${HOME_LNG2}&days=3`)
     ]);
     const [aqData, pollenData] = await Promise.all([
       aqRes.json().catch(() => ({})),
@@ -12811,6 +12901,7 @@ async function executeAttachFileToNotion(pageId, base64Data, filename, mimeType)
 
 // server/utils/tools/media-trips.ts
 init_janus_tools();
+init_estateConfig();
 async function executeGenerateMedia(prompt, type, emailTo, whatsappNumber, userId, platform, ctx) {
   const BASE_URL3 = `http://localhost:${process.env.PORT || 5e3}`;
   const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
@@ -12986,7 +13077,7 @@ async function executeQueryEntertainment(args, svc) {
     let query2 = sb.from("entertainment_events").select("*").order("event_date", { ascending: true });
     if (args.category) query2 = query2.eq("category", args.category);
     if (args.upcoming_only !== false) {
-      const todayLA = (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+      const todayLA = (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: getEstateTimezone() });
       query2 = query2.gte("event_date", todayLA);
     }
     const { data, error } = await query2.limit(20);
@@ -13032,8 +13123,8 @@ init_db2();
 init_janus_tools();
 import { readFileSync, readdirSync, existsSync as existsSync2 } from "node:fs";
 import { createHash } from "node:crypto";
-import path2 from "node:path";
-var SKILLS_DIR = path2.resolve(process.cwd(), "skills", "janus");
+import path3 from "node:path";
+var SKILLS_DIR = path3.resolve(process.cwd(), "skills", "janus");
 var DEFAULT_CHANNELS = ["chat", "whatsapp", "email"];
 var DEFAULT_ROLES = ["admin", "member"];
 function parseInlineList(value) {
@@ -13074,7 +13165,7 @@ function loadSkillFiles() {
   const out = [];
   for (const entry of readdirSync(SKILLS_DIR, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
-    const file = path2.join(SKILLS_DIR, entry.name, "SKILL.md");
+    const file = path3.join(SKILLS_DIR, entry.name, "SKILL.md");
     if (!existsSync2(file)) continue;
     try {
       const parsed = parseSkillFile(entry.name, readFileSync(file, "utf8"));
@@ -13520,6 +13611,7 @@ var STREAM_USAGE_OPTION = { stream_options: { include_usage: true } };
 // server/utils/tools/research-admin.ts
 init_janus_tools();
 init_db2();
+init_estateConfig();
 async function executeLaunchResearch(topic, instructions, email_to, project_id, userId) {
   try {
     const baseUrl = `http://localhost:${process.env.PORT || 5e3}`;
@@ -13551,7 +13643,7 @@ async function checkDuplicateReminder(sb, userId, message, due_at) {
     if (!existing || existing.length === 0) return null;
     for (const r of existing) {
       if (reminderWordsOverlap(message, r.reminder_text)) {
-        const existingDue = new Date(r.due_at).toLocaleString("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" });
+        const existingDue = new Date(r.due_at).toLocaleString("en-US", { timeZone: getEstateTimezone(), weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" });
         return `\u23F0 A similar reminder is already set for ${existingDue}: "${r.reminder_text}" \u2014 skipping duplicate.`;
       }
     }
@@ -13580,7 +13672,7 @@ async function executeSetReminder(due_at, message, channel, whatsapp_number, use
       whatsapp_number: channel === "whatsapp" ? whatsapp_number : null
     });
     if (error) return `TOOL_ERROR: Failed to save reminder: ${error.message}`;
-    const dueDate = new Date(due_at).toLocaleString("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" });
+    const dueDate = new Date(due_at).toLocaleString("en-US", { timeZone: getEstateTimezone(), weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" });
     return `\u2705 Reminder set! I'll send you a ${channel} message on ${dueDate}: "${message}"`;
   } catch (e) {
     return `TOOL_ERROR: ${e instanceof Error ? e.message : "unknown"}`;
@@ -13646,7 +13738,7 @@ async function fetchAppActivity(o) {
       if (!rows2.length) return `No app activity in the last ${hours}h${filterDesc}.`;
       const total = rows2.reduce((s3, r) => s3 + Number(r.n), 0);
       const lines2 = rows2.map((r) => {
-        const t = new Date(r.latest).toLocaleString("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+        const t = new Date(r.latest).toLocaleString("en-US", { timeZone: getEstateTimezone(), month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
         const flags = [Number(r.errors) > 0 ? `${r.errors} err` : null, Number(r.warns) > 0 ? `${r.warns} warn` : null].filter(Boolean).join(", ");
         return `- **${r.category || "uncategorized"}**: ${r.n} events${flags ? ` (${flags})` : ""} \u2014 last ${t}`;
       });
@@ -13666,7 +13758,7 @@ _Drill into an area with category=<name> (add severity=warn|error|critical to cu
     );
     if (!rows.length) return `No app activity found in the last ${hours}h${filterDesc}.`;
     const lines = rows.map((e) => {
-      const t = new Date(e.created_at).toLocaleString("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+      const t = new Date(e.created_at).toLocaleString("en-US", { timeZone: getEstateTimezone(), month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
       const actor = e.actor_name ? ` by ${e.actor_name}` : "";
       const st = e.status && e.status !== "success" && e.status !== "logged" ? ` [${e.status}]` : "";
       const cat = e.category ? `${e.category}/` : "";
@@ -13688,7 +13780,7 @@ async function executeQuerySystemHealth(svc) {
     const lines = [];
     const { data: health } = await svc.from("janus_health_logs").select("*").order("created_at", { ascending: false }).limit(1).single();
     if (health) {
-      lines.push(`**Last Health Check:** ${health.overall_status.toUpperCase()} (${health.total_ms}ms, ${new Date(health.created_at).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })})`);
+      lines.push(`**Last Health Check:** ${health.overall_status.toUpperCase()} (${health.total_ms}ms, ${new Date(health.created_at).toLocaleString("en-US", { timeZone: getEstateTimezone() })})`);
       const results = health.results;
       if (Array.isArray(results)) {
         const failed = results.filter((r) => r.status !== "ok" && r.status !== "pass");
@@ -13707,7 +13799,7 @@ async function executeQuerySystemHealth(svc) {
       lines.push(`
 **Recent Audit Log (${audit2.length} entries):**`);
       for (const a of audit2) {
-        const time = new Date(a.created_at).toLocaleString("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit" });
+        const time = new Date(a.created_at).toLocaleString("en-US", { timeZone: getEstateTimezone(), hour: "numeric", minute: "2-digit" });
         lines.push(`- ${time} [${a.severity}] ${a.event_type}: ${a.summary}${a.edge_function ? ` (${a.edge_function})` : ""}`);
       }
     }
@@ -13721,7 +13813,7 @@ async function executeQuerySystemUpdates(limit, svc) {
     const { data, error } = await svc.from("system_updates").select("*").order("published_at", { ascending: false }).limit(limit || 5);
     if (error) return `TOOL_ERROR: ${error.message}`;
     if (!data?.length) return "No system updates found.";
-    const lines = data.map((u) => `- **v${u.version}** (${u.update_type}, ${new Date(u.published_at).toLocaleDateString("en-US", { timeZone: "America/Los_Angeles" })}): ${u.title} \u2014 ${u.description.slice(0, 150)}`);
+    const lines = data.map((u) => `- **v${u.version}** (${u.update_type}, ${new Date(u.published_at).toLocaleDateString("en-US", { timeZone: getEstateTimezone() })}): ${u.title} \u2014 ${u.description.slice(0, 150)}`);
     return `**Recent Updates (${data.length}):**
 ${lines.join("\n")}`;
   } catch (e) {
@@ -13745,7 +13837,7 @@ async function executeGetNetworkHistory(hours) {
     );
     if (!rows.length) return `No network health snapshots in the last ${h}h.`;
     const lines = rows.map((r) => {
-      const t = new Date(r.captured_at).toLocaleString("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+      const t = new Date(r.captured_at).toLocaleString("en-US", { timeZone: getEstateTimezone(), month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
       const wan = r.wan_status ? ` WAN:${r.wan_status}` : "";
       const threats = r.threat_count > 0 ? ` threats:${r.threat_count}` : "";
       return `- ${t} CPU:${r.cpu_usage ?? "?"}% MEM:${r.memory_usage ?? "?"}% sessions:${r.active_sessions ?? "?"}${wan}${threats}`;
@@ -13819,7 +13911,7 @@ async function executeGetProjectNotes(projectId, svc) {
     if (error) return `TOOL_ERROR: ${error.message}`;
     if (!artifacts || artifacts.length === 0) return "No notes or artifacts saved to this project yet.";
     const lines = artifacts.map((a, i) => {
-      const date2 = new Date(a.created_at).toLocaleDateString("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric" });
+      const date2 = new Date(a.created_at).toLocaleDateString("en-US", { timeZone: getEstateTimezone(), month: "short", day: "numeric" });
       const by = a.saved_by_display_name ? ` (by ${a.saved_by_display_name})` : "";
       const preview = a.content.length > 200 ? a.content.slice(0, 200) + "\u2026" : a.content;
       return `${i + 1}. **${a.title}** [${a.artifact_type}]${by} \u2014 ${date2}
@@ -13835,25 +13927,25 @@ ${lines.join("\n\n")}`;
 
 // server/utils/tools/browse-website-guard.ts
 init_auditLog();
+init_estateConfig();
 var DAILY_CAP = 30;
 var MIN_SPACING_MS = 3e4;
 var COST_USD_PER_CALL = 0.05;
-var laDateFormatter = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "America/Los_Angeles",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit"
-});
-function laDayKey(now = /* @__PURE__ */ new Date()) {
-  return laDateFormatter.format(now);
+function estateDayKey(now = /* @__PURE__ */ new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: getEstateTimezone(),
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(now);
 }
 var state = {
-  dayKey: laDayKey(),
+  dayKey: estateDayKey(),
   count: 0,
   lastAllowedAtMs: 0
 };
 function rolloverIfNeeded(now) {
-  const today = laDayKey(now);
+  const today = estateDayKey(now);
   if (today !== state.dayKey) {
     state.dayKey = today;
     state.count = 0;
@@ -14742,8 +14834,8 @@ ${lines.join("\n")}`;
 }
 
 // server/handlers/chat.ts
-import fs2 from "fs";
-import path3 from "path";
+import fs3 from "fs";
+import path4 from "path";
 var APP_DOMAIN2 = process.env.APP_DOMAIN || "example.com";
 function isAllowedOrigin2(origin) {
   if (origin === `https://${APP_DOMAIN2}` || origin === `https://www.${APP_DOMAIN2}`) return true;
@@ -14765,7 +14857,7 @@ var MODEL_SUMMARIZE = process.env.JANUS_MODEL_SUMMARIZE || "google/gemini-2.5-fl
 var FALLBACK_MODELS = (process.env.JANUS_FALLBACK_MODELS || "google/gemini-2.5-flash-lite,openai/gpt-5-mini,google/gemini-2.5-pro").split(",").map((s3) => s3.trim());
 var SYSTEM_PROMPT;
 try {
-  SYSTEM_PROMPT = fs2.readFileSync(path3.resolve(process.cwd(), "supabase/functions/_shared/SOUL.md"), "utf8");
+  SYSTEM_PROMPT = fs3.readFileSync(path4.resolve(process.cwd(), "supabase/functions/_shared/SOUL.md"), "utf8");
 } catch {
   SYSTEM_PROMPT = "You are Janus, the AI assistant for Janus.";
 }
@@ -14880,7 +14972,7 @@ async function fetchTodayCalendar(svc) {
     events.sort((a, b2) => (a.start?.dateTime || a.start?.date || "").localeCompare(b2.start?.dateTime || b2.start?.date || ""));
     if (events.length === 0) return "";
     const lines = events.map((e) => {
-      const time = e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Los_Angeles" }) : "All day";
+      const time = e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: getEstateTimezone() }) : "All day";
       const loc = e.location ? ` (${e.location})` : "";
       return `- ${time} \u2014 ${e.summary || "(No title)"}${loc}`;
     });
@@ -15470,10 +15562,11 @@ You already have this data \u2014 answer calendar/weather/task questions directl
 
 Permanent memory \u2014 25 most recent facts about this user (use recall_facts tool to search all memories):
 ${memories.map((m) => `- ${m.key}: ${m.value}${m.context ? ` (${m.context})` : ""}`).join("\n")}` : "";
-    const nowLA = (/* @__PURE__ */ new Date()).toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: "America/Los_Angeles" });
+    const tz = getEstateTimezone();
+    const nowLA = (/* @__PURE__ */ new Date()).toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: tz });
     const dateHeader = `Current date and time: ${nowLA}
-Household timezone: America/Los_Angeles (Pacific Time). ALL times you mention, calculate, or create MUST be in Pacific Time.
-When creating calendar events, ALWAYS use timeZone: "America/Los_Angeles".
+Household timezone: ${tz}. ALL times you mention, calculate, or create MUST be in this local timezone.
+When creating calendar events, ALWAYS use timeZone: "${tz}".
 
 `;
     const systemPrompt = dateHeader + resolvedCorePrompt + audioInstruction + skillsIndexBlock + briefingBlock + memoryContext + getRoleSystemPromptAddendum(role) + (chatAddendum ? "\n\n" + chatAddendum : "");
@@ -16251,12 +16344,13 @@ async function logJanusEmailDecision(input) {
 }
 
 // server/handlers/email-poll.ts
-import fs3 from "fs";
-import path4 from "path";
+init_estateConfig();
+import fs4 from "fs";
+import path5 from "path";
 var executeSendEmail3 = (to, subject, body) => executeSendEmail(to, subject, body, "email", "janus-email-poll");
 var JANUS_EMAIL_SYSTEM_PROMPT;
 try {
-  JANUS_EMAIL_SYSTEM_PROMPT = fs3.readFileSync(path4.resolve(process.cwd(), "supabase/functions/_shared/SOUL.md"), "utf8");
+  JANUS_EMAIL_SYSTEM_PROMPT = fs4.readFileSync(path5.resolve(process.cwd(), "supabase/functions/_shared/SOUL.md"), "utf8");
 } catch {
   JANUS_EMAIL_SYSTEM_PROMPT = "You are Janus, the AI assistant for Janus.";
 }
@@ -16734,9 +16828,10 @@ async function askJanusWithTools(fromEmail, fromName, subject, userMessage, role
 
 Permanent memory:
 ${memories.map((m) => `- ${m.key}: ${m.value}${m.context ? ` (${m.context})` : ""}`).join("\n")}` : "";
-  const nowLA = (/* @__PURE__ */ new Date()).toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: "America/Los_Angeles" });
+  const tz = getEstateTimezone();
+  const nowLA = (/* @__PURE__ */ new Date()).toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: tz });
   const dateHeader = `Current date and time: ${nowLA}
-Household timezone: America/Los_Angeles (Pacific Time).
+Household timezone: ${tz}.
 
 `;
   const systemPrompt = dateHeader + corePrompt + skillsIndexBlock + memoryContext + (emailAddendum ? "\n\n" + emailAddendum : "") + getRoleAddendum(role);
@@ -17412,8 +17507,9 @@ async function logJanusChannelDecision(input) {
 }
 
 // server/handlers/whatsapp.ts
-import fs4 from "fs";
-import path5 from "path";
+init_estateConfig();
+import fs5 from "fs";
+import path6 from "path";
 var logAudit5 = (entry) => logAudit3("janus-whatsapp", entry);
 var executeSendEmail4 = (to, subject, body) => executeSendEmail(to, subject, body, "whatsapp", "janus-whatsapp");
 var executeSaveToCart2 = (userId, platform, productName, productUrl, price, quantity, notes) => executeSaveToCart(getServiceClient(), userId, platform, productName, productUrl, price, quantity, notes);
@@ -17423,7 +17519,7 @@ var executeRememberFact2 = (userId, key, value, context, pinned) => executeRemem
 var executeRecallFacts2 = (userId, keySearch) => executeRecallFacts(getServiceClient(), userId, keySearch);
 var JANUS_SYSTEM_PROMPT;
 try {
-  JANUS_SYSTEM_PROMPT = fs4.readFileSync(path5.resolve(process.cwd(), "supabase/functions/_shared/SOUL.md"), "utf8");
+  JANUS_SYSTEM_PROMPT = fs5.readFileSync(path6.resolve(process.cwd(), "supabase/functions/_shared/SOUL.md"), "utf8");
 } catch {
   JANUS_SYSTEM_PROMPT = "You are Janus, the AI assistant for Janus.";
 }
@@ -17669,7 +17765,7 @@ async function executeSetReminderWA(due_at, message, channel, whatsapp_number, u
       whatsapp_number: whatsapp_number || null
     });
     if (error) return `TOOL_ERROR: Failed to save reminder: ${error.message}`;
-    const dueDate = new Date(due_at).toLocaleString("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" });
+    const dueDate = new Date(due_at).toLocaleString("en-US", { timeZone: getEstateTimezone(), weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" });
     return `\u2705 Reminder set! I'll send you a ${channel} message on ${dueDate}: "${message}"`;
   } catch (e) {
     return `TOOL_ERROR: ${e instanceof Error ? e.message : "unknown"}`;
@@ -18041,8 +18137,9 @@ async function fetchTodayCalendar2() {
     }
     events.sort((a, b2) => (a.start?.dateTime || a.start?.date || "").localeCompare(b2.start?.dateTime || b2.start?.date || ""));
     if (events.length === 0) return "";
+    const tz = getEstateTimezone();
     const lines = events.map((e) => {
-      const time = e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Los_Angeles" }) : "All day";
+      const time = e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: tz }) : "All day";
       const loc = e.location ? ` (${e.location})` : "";
       return `- ${time} \u2014 ${e.summary || "(No title)"}${loc}`;
     });
@@ -18174,10 +18271,11 @@ async function askJanusWithTools2(conversationHistory, userMessage, role, userId
 
 Permanent memory \u2014 facts you know about this user (never forget these):
 ${memories.map((m) => `- ${m.key}: ${m.value}${m.context ? ` (${m.context})` : ""}`).join("\n")}` : "";
-  const nowLA = (/* @__PURE__ */ new Date()).toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: "America/Los_Angeles" });
+  const tz = getEstateTimezone();
+  const nowLA = (/* @__PURE__ */ new Date()).toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: tz });
   const dateHeader = `Current date and time: ${nowLA}
-Household timezone: America/Los_Angeles (Pacific Time). ALL times you mention, calculate, or create MUST be in Pacific Time.
-When creating calendar events, ALWAYS use timeZone: "America/Los_Angeles".
+Household timezone: ${tz}. ALL times you mention, calculate, or create MUST be in this timezone.
+When creating calendar events, ALWAYS use timeZone: "${tz}".
 
 `;
   const audioInstruction = "\n\nWhen the user sends an audio message, briefly acknowledge what they said before responding. Keep the acknowledgment under 10 words.";
@@ -20319,6 +20417,7 @@ init_google_jwt();
 init_db2();
 init_auditLog();
 init_janus_tools();
+init_estateConfig();
 function extractErrorMessage(body, prefix) {
   const msg = body.error?.message || body.message || "";
   return `${prefix}: ${msg}`;
@@ -20358,8 +20457,6 @@ async function runCheck(name, fn) {
     };
   }
 }
-var HOME_LAT2 = Number(process.env.HOME_LAT) || 34.0522;
-var HOME_LNG2 = Number(process.env.HOME_LNG) || -118.2437;
 async function checkJanusChat(signal) {
   const port = process.env.PORT || "5000";
   const res = await fetch(`http://localhost:${port}/api/janus/chat/ping`, {
@@ -20462,7 +20559,8 @@ async function checkGoogleDrive(signal) {
 async function checkGoogleMapsRoutes(signal) {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) return "not_configured: Missing GOOGLE_MAPS_API_KEY";
-  const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${HOME_LAT2},${HOME_LNG2}&destinations=34.05,${HOME_LNG2}&units=imperial&key=${apiKey}`;
+  const { latitude, longitude } = await getEstateConfig();
+  const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${latitude},${longitude}&destinations=${latitude + 0.05},${longitude}&units=imperial&key=${apiKey}`;
   const res = await fetch(url, { signal });
   if (!res.ok) return `Distance Matrix returned ${res.status}`;
   const data = await res.json();
@@ -20472,12 +20570,13 @@ async function checkGoogleMapsRoutes(signal) {
 async function checkGoogleAirQuality(signal) {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) return "not_configured: Missing GOOGLE_MAPS_API_KEY";
+  const { latitude, longitude } = await getEstateConfig();
   const res = await fetch(
     `https://airquality.googleapis.com/v1/currentConditions:lookup?key=${apiKey}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ location: { latitude: HOME_LAT2, longitude: HOME_LNG2 } }),
+      body: JSON.stringify({ location: { latitude, longitude } }),
       signal
     }
   );
@@ -20490,8 +20589,9 @@ async function checkGoogleAirQuality(signal) {
 async function checkGooglePollen(signal) {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) return "not_configured: Missing GOOGLE_MAPS_API_KEY";
+  const { latitude, longitude } = await getEstateConfig();
   const res = await fetch(
-    `https://pollen.googleapis.com/v1/forecast:lookup?key=${apiKey}&location.latitude=${HOME_LAT2}&location.longitude=${HOME_LNG2}&days=1`,
+    `https://pollen.googleapis.com/v1/forecast:lookup?key=${apiKey}&location.latitude=${latitude}&location.longitude=${longitude}&days=1`,
     { signal }
   );
   if (!res.ok) {
@@ -21088,7 +21188,7 @@ init_schema();
 init_socket();
 init_auditLog();
 init_helpers();
-var janusRouter = Router4();
+var janusRouter = Router5();
 janusRouter.all("/chat", handleChat);
 janusRouter.all("/chat/ping", handleChat);
 janusRouter.post("/email-poll", handleEmailPoll);
@@ -21206,9 +21306,9 @@ init_auth();
 init_storage();
 init_schema();
 init_socket();
-import { Router as Router5 } from "express";
-var router4 = Router5();
-router4.get("/api/system-updates", requireAuth, async (req, res, next) => {
+import { Router as Router6 } from "express";
+var router5 = Router6();
+router5.get("/api/system-updates", requireAuth, async (req, res, next) => {
   try {
     const limit = Math.min(Number(req.query.limit) || 20, 100);
     const updates = await storage.getSystemUpdates(limit);
@@ -21217,7 +21317,7 @@ router4.get("/api/system-updates", requireAuth, async (req, res, next) => {
     next(err);
   }
 });
-router4.post("/api/system-updates", requireRole("admin"), async (req, res, next) => {
+router5.post("/api/system-updates", requireRole("admin"), async (req, res, next) => {
   try {
     const parsed = insertSystemUpdateSchema.parse(req.body);
     const update = await storage.createSystemUpdate(parsed);
@@ -21231,7 +21331,7 @@ router4.post("/api/system-updates", requireRole("admin"), async (req, res, next)
     next(err);
   }
 });
-router4.delete("/api/system-updates/:id", requireRole("admin"), async (req, res, next) => {
+router5.delete("/api/system-updates/:id", requireRole("admin"), async (req, res, next) => {
   try {
     await storage.deleteSystemUpdate(String(req.params.id));
     res.status(204).end();
@@ -21239,7 +21339,7 @@ router4.delete("/api/system-updates/:id", requireRole("admin"), async (req, res,
     next(err);
   }
 });
-router4.get("/api/poi/profiles", requireAuth, async (req, res, next) => {
+router5.get("/api/poi/profiles", requireAuth, async (req, res, next) => {
   try {
     const profiles2 = await storage.getPoiProfiles();
     res.json(profiles2);
@@ -21247,7 +21347,7 @@ router4.get("/api/poi/profiles", requireAuth, async (req, res, next) => {
     next(err);
   }
 });
-router4.post("/api/poi/profiles", requireAuth, async (req, res, next) => {
+router5.post("/api/poi/profiles", requireAuth, async (req, res, next) => {
   try {
     const parsed = insertPoiProfileSchema.parse(req.body);
     const profile = await storage.createPoiProfile(parsed);
@@ -21257,7 +21357,7 @@ router4.post("/api/poi/profiles", requireAuth, async (req, res, next) => {
     next(err);
   }
 });
-router4.patch("/api/poi/profiles/:id", requireAuth, async (req, res, next) => {
+router5.patch("/api/poi/profiles/:id", requireAuth, async (req, res, next) => {
   try {
     const profile = await storage.updatePoiProfile(String(req.params.id), req.body);
     if (!profile) {
@@ -21270,7 +21370,7 @@ router4.patch("/api/poi/profiles/:id", requireAuth, async (req, res, next) => {
     next(err);
   }
 });
-router4.delete("/api/poi/profiles/:id", requireAuth, async (req, res, next) => {
+router5.delete("/api/poi/profiles/:id", requireAuth, async (req, res, next) => {
   try {
     await storage.deletePoiProfile(String(req.params.id));
     res.status(204).end();
@@ -21278,7 +21378,7 @@ router4.delete("/api/poi/profiles/:id", requireAuth, async (req, res, next) => {
     next(err);
   }
 });
-router4.post("/api/poi/sightings", requireAuth, async (req, res, next) => {
+router5.post("/api/poi/sightings", requireAuth, async (req, res, next) => {
   try {
     const parsed = insertPoiSightingSchema.parse(req.body);
     const sighting = await storage.createPoiSighting(parsed);
@@ -21288,7 +21388,7 @@ router4.post("/api/poi/sightings", requireAuth, async (req, res, next) => {
     next(err);
   }
 });
-router4.get("/api/poi/sightings/:verkadaPersonId", requireAuth, async (req, res, next) => {
+router5.get("/api/poi/sightings/:verkadaPersonId", requireAuth, async (req, res, next) => {
   try {
     const sightings = await storage.getPoiSightings(String(req.params.verkadaPersonId));
     res.json(sightings);
@@ -21296,7 +21396,7 @@ router4.get("/api/poi/sightings/:verkadaPersonId", requireAuth, async (req, res,
     next(err);
   }
 });
-router4.post("/api/notion/webhook-events", requireAuth, async (req, res, next) => {
+router5.post("/api/notion/webhook-events", requireAuth, async (req, res, next) => {
   try {
     const parsed = insertNotionWebhookEventSchema.parse(req.body);
     const event = await storage.createNotionWebhookEvent(parsed);
@@ -21309,7 +21409,7 @@ router4.post("/api/notion/webhook-events", requireAuth, async (req, res, next) =
     next(err);
   }
 });
-router4.get("/api/notion/sync-configs", requireAuth, async (req, res, next) => {
+router5.get("/api/notion/sync-configs", requireAuth, async (req, res, next) => {
   try {
     const configs2 = await storage.getNotionSyncConfigs(req.user.userId);
     res.json(configs2);
@@ -21317,7 +21417,7 @@ router4.get("/api/notion/sync-configs", requireAuth, async (req, res, next) => {
     next(err);
   }
 });
-router4.post("/api/notion/sync-configs", requireAuth, async (req, res, next) => {
+router5.post("/api/notion/sync-configs", requireAuth, async (req, res, next) => {
   try {
     const parsed = insertNotionSyncConfigSchema.parse(req.body);
     const config = await storage.createNotionSyncConfig(parsed);
@@ -21327,7 +21427,7 @@ router4.post("/api/notion/sync-configs", requireAuth, async (req, res, next) => 
     next(err);
   }
 });
-router4.patch("/api/notion/sync-configs/:id", requireAuth, async (req, res, next) => {
+router5.patch("/api/notion/sync-configs/:id", requireAuth, async (req, res, next) => {
   try {
     const config = await storage.updateNotionSyncConfig(String(req.params.id), req.body);
     if (!config) {
@@ -21340,7 +21440,7 @@ router4.patch("/api/notion/sync-configs/:id", requireAuth, async (req, res, next
     next(err);
   }
 });
-router4.delete("/api/notion/sync-configs/:id", requireAuth, async (req, res, next) => {
+router5.delete("/api/notion/sync-configs/:id", requireAuth, async (req, res, next) => {
   try {
     await storage.deleteNotionSyncConfig(String(req.params.id));
     emitToAll("notion:sync-config", { id: req.params.id });
@@ -21349,7 +21449,7 @@ router4.delete("/api/notion/sync-configs/:id", requireAuth, async (req, res, nex
     next(err);
   }
 });
-var productivity_default = router4;
+var productivity_default = router5;
 
 // server/routes.ts
 init_homeAssistant();
@@ -21504,6 +21604,7 @@ init_errorSanitizer();
 init_db2();
 init_db();
 init_socket();
+init_estateConfig();
 import { Router as Router8 } from "express";
 import { webcrypto as webcrypto3 } from "crypto";
 var router7 = Router8();
@@ -21575,6 +21676,18 @@ function toISO(ts, fallback) {
   const v = ts || fallback;
   if (typeof v === "string") return new Date(v).toISOString();
   return new Date(v > 1e12 ? v : v * 1e3).toISOString();
+}
+function getTodayStartLA() {
+  const tz = getEstateTimezone();
+  const laDateStr = (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: tz });
+  const probe = /* @__PURE__ */ new Date(`${laDateStr}T12:00:00Z`);
+  const laHour = parseInt(
+    new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false }).format(probe)
+  );
+  const offsetMs = (laHour - 12) * 36e5;
+  const midnightLA = /* @__PURE__ */ new Date(`${laDateStr}T00:00:00Z`);
+  midnightLA.setTime(midnightLA.getTime() - offsetMs);
+  return midnightLA.toISOString();
 }
 router7.post("/", requireAuth2, async (req, res) => {
   try {
@@ -21999,7 +22112,7 @@ router7.post("/poi-webhook", async (req, res) => {
       if (label && now - lastNotified > SIGHTING_COOLDOWN_MS) {
         sightingCooldown.set(cooldownKey, now);
         const timeStr = new Date(occurredAt2).toLocaleString("en-US", {
-          timeZone: "America/Los_Angeles",
+          timeZone: getEstateTimezone(),
           hour: "numeric",
           minute: "2-digit",
           hour12: true
@@ -22175,15 +22288,8 @@ router7.post("/poi-webhook", async (req, res) => {
 });
 router7.get("/activity-summary", requireAuth2, async (_req, res) => {
   try {
-    const laDateStr = (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
-    const probe = /* @__PURE__ */ new Date(`${laDateStr}T12:00:00Z`);
-    const laHour = parseInt(
-      new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", hour12: false }).format(probe)
-    );
-    const offsetMs = (laHour - 12) * 36e5;
-    const midnightLA = /* @__PURE__ */ new Date(`${laDateStr}T00:00:00Z`);
-    midnightLA.setTime(midnightLA.getTime() - offsetMs);
-    const todayStart = midnightLA.toISOString();
+    const todayStart = getTodayStartLA();
+    const tz = getEstateTimezone();
     const { rows: uniquePeopleRows } = await query(
       `SELECT COUNT(DISTINCT
          CASE
@@ -22208,7 +22314,7 @@ router7.get("/activity-summary", requireAuth2, async (_req, res) => {
     );
     const { rows: hourlyRows } = await query(
       `SELECT
-        EXTRACT(HOUR FROM occurred_at AT TIME ZONE 'America/Los_Angeles') as hour,
+        EXTRACT(HOUR FROM occurred_at AT TIME ZONE '${tz}') as hour,
         COUNT(DISTINCT CASE WHEN event_type = 'person_of_interest' AND person_id IS NOT NULL THEN
           CASE
             WHEN person_label IS NOT NULL AND person_label != '' THEN person_label
@@ -22219,7 +22325,7 @@ router7.get("/activity-summary", requireAuth2, async (_req, res) => {
         COUNT(DISTINCT CASE WHEN event_type = 'license_plate' AND vehicle_plate IS NOT NULL THEN vehicle_plate END) as unique_vehicles
       FROM verkada_events
       WHERE occurred_at >= $1
-      GROUP BY EXTRACT(HOUR FROM occurred_at AT TIME ZONE 'America/Los_Angeles')
+      GROUP BY EXTRACT(HOUR FROM occurred_at AT TIME ZONE '${tz}')
       ORDER BY hour`,
       [todayStart]
     );
@@ -22303,7 +22409,7 @@ router7.get("/webhook-health", requireAuth2, async (_req, res) => {
     const lastEventAt = rows.length > 0 ? new Date(rows[0].occurred_at).getTime() : null;
     const lastWebhookAt = lastWebhookReceivedAt;
     const nowLA = /* @__PURE__ */ new Date();
-    const laHourStr = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", hour12: false }).format(nowLA);
+    const laHourStr = new Intl.DateTimeFormat("en-US", { timeZone: getEstateTimezone(), hour: "numeric", hour12: false }).format(nowLA);
     const laHour = parseInt(laHourStr);
     const isDaytime = laHour >= 7 && laHour < 22;
     const latestTimestamp = Math.max(lastEventAt || 0, lastWebhookAt || 0);
@@ -22356,15 +22462,7 @@ router7.get("/connection-status", requireAuth2, async (_req, res) => {
 });
 router7.get("/sighting-health", requireAuth2, async (_req, res) => {
   try {
-    const laDateStr = (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
-    const probe = /* @__PURE__ */ new Date(`${laDateStr}T12:00:00Z`);
-    const laHour = parseInt(
-      new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", hour12: false }).format(probe)
-    );
-    const offsetMs = (laHour - 12) * 36e5;
-    const midnightLA = /* @__PURE__ */ new Date(`${laDateStr}T00:00:00Z`);
-    midnightLA.setTime(midnightLA.getTime() - offsetMs);
-    const todayStart = midnightLA.toISOString();
+    const todayStart = getTodayStartLA();
     const { rows: byCameraRows } = await query(
       `SELECT camera_name,
               COUNT(*) as sighting_count,
@@ -22524,15 +22622,7 @@ router7.delete("/vehicle-profiles/:id", requireAuth2, async (req, res) => {
 });
 router7.get("/vehicle-sightings", requireAuth2, async (req, res) => {
   try {
-    const laDateStr = (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
-    const probe = /* @__PURE__ */ new Date(`${laDateStr}T12:00:00Z`);
-    const laHour = parseInt(
-      new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", hour12: false }).format(probe)
-    );
-    const offsetMs = (laHour - 12) * 36e5;
-    const midnightLA = /* @__PURE__ */ new Date(`${laDateStr}T00:00:00Z`);
-    midnightLA.setTime(midnightLA.getTime() - offsetMs);
-    const todayStart = midnightLA.toISOString();
+    const todayStart = getTodayStartLA();
     const filterPlate = typeof req.query.plate === "string" && req.query.plate.trim() ? req.query.plate.trim().toUpperCase() : null;
     const plateFilter = filterPlate ? ` AND UPPER(vehicle_plate) = $2` : "";
     const plateParams = (base) => filterPlate ? [...base, filterPlate] : base;
@@ -22853,6 +22943,7 @@ var verkada_default = router7;
 
 // server/scheduledTasks.ts
 init_helpers();
+init_estateConfig();
 var TESLA_API_BASE3 = "https://fleet-api.prd.na.vn.cloud.tesla.com";
 var TESLA_AUTH_BASE3 = "https://fleet-auth.prd.vn.cloud.tesla.com";
 var RANGE_THRESHOLD_MILES = 100;
@@ -23211,7 +23302,7 @@ async function runVerkadaWebhookHealthCheck() {
   try {
     const lastAt = getLastWebhookReceivedAt();
     const nowLA = /* @__PURE__ */ new Date();
-    const laHourStr = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", hour12: false }).format(nowLA);
+    const laHourStr = new Intl.DateTimeFormat("en-US", { timeZone: getEstateTimezone(), hour: "numeric", hour12: false }).format(nowLA);
     const laHour = parseInt(laHourStr);
     const isDaytime = laHour >= 7 && laHour < 22;
     if (!isDaytime) return;
@@ -23250,6 +23341,7 @@ function startScheduledTasks() {
 
 // server/routes/tesla.ts
 init_homeAssistant();
+init_estateConfig();
 var router8 = Router9();
 var TESLA_API_BASE4 = "https://fleet-api.prd.na.vn.cloud.tesla.com";
 var TESLA_AUTH_BASE4 = "https://fleet-auth.prd.vn.cloud.tesla.com";
@@ -23701,8 +23793,9 @@ router8.get("/map", requireAuth2, async (req, res) => {
     res.status(500).json({ error: "Google Maps API key not configured" });
     return;
   }
-  const HOME_LAT5 = Number(process.env.HOME_LAT) || 34.0522;
-  const HOME_LNG5 = Number(process.env.HOME_LNG) || -118.2437;
+  const estateConfig = await getEstateConfig();
+  const HOME_LAT2 = estateConfig.latitude;
+  const HOME_LNG2 = estateConfig.longitude;
   const action = req.query.action;
   if (action === "api-key") {
     res.json({ api_key: apiKey });
@@ -23714,10 +23807,10 @@ router8.get("/map", requireAuth2, async (req, res) => {
       res.status(400).json({ error: "Missing destinations" });
       return;
     }
-    const dmUrl = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${HOME_LAT5},${HOME_LNG5}&destinations=${encodeURIComponent(destinations)}&units=imperial&key=${apiKey}`;
+    const dmUrl = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${HOME_LAT2},${HOME_LNG2}&destinations=${encodeURIComponent(destinations)}&units=imperial&key=${apiKey}`;
     const apiRes = await fetch(dmUrl);
     const data = await apiRes.json();
-    res.json({ home: { lat: HOME_LAT5, lng: HOME_LNG5 }, ...data });
+    res.json({ home: { lat: HOME_LAT2, lng: HOME_LNG2 }, ...data });
     return;
   }
   res.status(400).json({ error: "Unknown action" });
@@ -24065,11 +24158,6 @@ router9.post("/", requireAuth2, async (req, res) => {
     res.status(500).json({ success: false, ...safeErrorJson(error) });
   }
 });
-var LAT = Number(process.env.HOME_LAT) || 34.0522;
-var LON = Number(process.env.HOME_LNG) || -118.2437;
-var POOL_HEATER_ENTITY = "switch.pool_heater";
-var SPA_HEATER_ENTITY = "switch.spa_heater";
-var POOL_CLIMATE_ENTITY = "climate.pool";
 var TARGET_TEMP = 87;
 async function callHAProxy4(body) {
   const haUrl = process.env.HA_URL;
@@ -24085,7 +24173,8 @@ async function callHAProxy4(body) {
   return { status: res.status, data };
 }
 async function fetchForecast() {
-  const hours = await fetchGoogleHourlyForecast(LAT, LON, 48);
+  const estate = await getEstateConfig();
+  const hours = await fetchGoogleHourlyForecast(estate.latitude, estate.longitude, 48);
   return hours.map((h) => h.precipitation?.qpf?.quantity ?? 0);
 }
 router9.post("/rain-guard", requireAuth2, async (req, res) => {
@@ -24099,6 +24188,13 @@ router9.post("/rain-guard", requireAuth2, async (req, res) => {
       }
       automationId = automations[0].id;
     }
+    const mappings = await getEntityMappings();
+    const poolHeaterEntity = mappings.pool?.pool_heater;
+    const spaHeaterEntity = mappings.pool?.spa_heater;
+    const poolClimateEntity = mappings.pool?.pool_temp ? mappings.pool.pool_temp.replace("sensor.", "climate.") : "";
+    if (!poolHeaterEntity && !spaHeaterEntity) {
+      return res.json({ skipped: true, reason: "no_pool_heaters_mapped" });
+    }
     const precipitation = await fetchForecast();
     const hours0to24 = precipitation.slice(0, 24);
     const hours24to48 = precipitation.slice(24, 48);
@@ -24108,22 +24204,26 @@ router9.post("/rain-guard", requireAuth2, async (req, res) => {
     const maxPrecip48 = Math.max(...hours0to24, ...hours24to48);
     let action;
     const haResults = [];
-    const mappings = await getEntityMappings();
-    const poolHeaterEntity = mappings.pool?.pool_heater || POOL_HEATER_ENTITY;
-    const spaHeaterEntity = mappings.pool?.spa_heater || SPA_HEATER_ENTITY;
-    const poolClimateEntity = POOL_CLIMATE_ENTITY;
     if (rainIn24h) {
       action = "heaters_off";
-      const r1 = await callHAProxy4({ action: "call-service", domain: "switch", service: "turn_off", service_data: { entity_id: poolHeaterEntity } });
-      haResults.push({ entity: poolHeaterEntity, service: "turn_off", status: r1.status });
-      const r2 = await callHAProxy4({ action: "call-service", domain: "switch", service: "turn_off", service_data: { entity_id: spaHeaterEntity } });
-      haResults.push({ entity: spaHeaterEntity, service: "turn_off", status: r2.status });
+      if (poolHeaterEntity) {
+        const r1 = await callHAProxy4({ action: "call-service", domain: "switch", service: "turn_off", service_data: { entity_id: poolHeaterEntity } });
+        haResults.push({ entity: poolHeaterEntity, service: "turn_off", status: r1.status });
+      }
+      if (spaHeaterEntity) {
+        const r2 = await callHAProxy4({ action: "call-service", domain: "switch", service: "turn_off", service_data: { entity_id: spaHeaterEntity } });
+        haResults.push({ entity: spaHeaterEntity, service: "turn_off", status: r2.status });
+      }
     } else if (!rainIn48h) {
       action = "pool_heater_on_87";
-      const r1 = await callHAProxy4({ action: "call-service", domain: "switch", service: "turn_on", service_data: { entity_id: poolHeaterEntity } });
-      haResults.push({ entity: poolHeaterEntity, service: "turn_on", status: r1.status });
-      const r2 = await callHAProxy4({ action: "call-service", domain: "climate", service: "set_temperature", service_data: { entity_id: poolClimateEntity, temperature: TARGET_TEMP } });
-      haResults.push({ entity: poolClimateEntity, service: "set_temperature", status: r2.status });
+      if (poolHeaterEntity) {
+        const r1 = await callHAProxy4({ action: "call-service", domain: "switch", service: "turn_on", service_data: { entity_id: poolHeaterEntity } });
+        haResults.push({ entity: poolHeaterEntity, service: "turn_on", status: r1.status });
+      }
+      if (poolClimateEntity) {
+        const r2 = await callHAProxy4({ action: "call-service", domain: "climate", service: "set_temperature", service_data: { entity_id: poolClimateEntity, temperature: TARGET_TEMP } });
+        haResults.push({ entity: poolClimateEntity, service: "set_temperature", status: r2.status });
+      }
     } else {
       action = "no_change";
     }
@@ -24202,12 +24302,15 @@ function aggregateToDailyAverages(historyPoints) {
 router9.get("/temp-history", requireAuth2, async (req, res) => {
   try {
     const mappings = await getEntityMappings();
-    const poolSensor = mappings.pool?.pool_temp || "sensor.pool_temp";
-    const spaSensor = mappings.pool?.spa_temp || "sensor.spa_temp";
+    const poolSensor = mappings.pool?.pool_temp;
+    const spaSensor = mappings.pool?.spa_temp;
+    if (!poolSensor && !spaSensor) {
+      return res.json({ success: true, data: [] });
+    }
     const hours = 30 * 24;
     const [poolHistory, spaHistory] = await Promise.all([
-      fetchHAHistory(poolSensor, hours),
-      fetchHAHistory(spaSensor, hours)
+      poolSensor ? fetchHAHistory(poolSensor, hours) : Promise.resolve([]),
+      spaSensor ? fetchHAHistory(spaSensor, hours) : Promise.resolve([])
     ]);
     const poolDaily = aggregateToDailyAverages(poolHistory);
     const spaDaily = aggregateToDailyAverages(spaHistory);
@@ -24233,7 +24336,8 @@ async function fetchCurrentPoolTemp() {
   if (!haUrl || !haToken) return null;
   try {
     const mappings = await getEntityMappings();
-    const poolSensor = mappings.pool?.pool_temp || "sensor.pool_temp";
+    const poolSensor = mappings.pool?.pool_temp;
+    if (!poolSensor) return null;
     const url = `${haUrl.replace(/\/$/, "")}/api/states/${poolSensor}`;
     const res = await fetchT2(url, {
       method: "GET",
@@ -24348,7 +24452,8 @@ async function fetchSpaPumpState() {
   if (!haUrl || !haToken) return null;
   try {
     const mappings = await getEntityMappings();
-    const spaPumpEntity = mappings.pool?.spa_pump || "switch.spa_pump";
+    const spaPumpEntity = mappings.pool?.spa_pump;
+    if (!spaPumpEntity) return null;
     const url = `${haUrl.replace(/\/$/, "")}/api/states/${spaPumpEntity}`;
     const res = await fetchT2(url, {
       method: "GET",
@@ -25469,6 +25574,7 @@ init_google();
 
 // server/routes/calendar.ts
 init_helpers();
+init_estateConfig();
 import { Router as Router14 } from "express";
 var router13 = Router14();
 var CALENDAR_BASE2 = "https://www.googleapis.com/calendar/v3";
@@ -25792,7 +25898,7 @@ router13.post("/nav-tesla", async (req, res) => {
           {
             hour: "numeric",
             minute: "2-digit",
-            timeZone: "America/Los_Angeles"
+            timeZone: getEstateTimezone()
           }
         );
         logAudit2("calendar-nav-tesla", {
@@ -26463,7 +26569,7 @@ router14.post("/proxy", async (req, res) => {
       summary: `Notion proxy error: ${error instanceof Error ? error.message : "unknown"}`,
       status: "error"
     });
-    return res.status(500).json({ success: false, error: sanitizeErrorMessage(error) });
+    return res.status(500).json({ success: false, error: sanitizeErrorMessage2(error) });
   }
 });
 router14.get("/webhook", (_req, res) => {
@@ -26779,7 +26885,7 @@ router14.post("/poll", async (req, res) => {
     });
   } catch (err) {
     console.error("[notion-poll] error:", err);
-    return res.status(500).json({ success: false, error: sanitizeErrorMessage(err) });
+    return res.status(500).json({ success: false, error: sanitizeErrorMessage2(err) });
   }
 });
 var notion_default = router14;
@@ -26793,6 +26899,7 @@ init_error_sanitizer();
 init_auth2();
 init_schoolMorningBriefing();
 init_haWebSocket();
+init_estateConfig();
 import { Router as Router16 } from "express";
 var router15 = Router16();
 function getMorningSpeakers() {
@@ -26896,8 +27003,6 @@ async function maybeAlertSilentDropStreak(dateStr) {
 }
 var SCHOOL_YEAR_START = { month: 8, day: 24 };
 var SCHOOL_YEAR_END = { month: 6, day: 3 };
-var BROADCAST_HOME_LAT = Number(process.env.HOME_LAT) || 34.0522;
-var BROADCAST_HOME_LNG = Number(process.env.HOME_LNG) || -118.2437;
 function googleConditionToWords(type) {
   switch (type) {
     case "CLEAR":
@@ -26970,7 +27075,8 @@ async function fetchCurrentBriefWeather() {
     return null;
   }
   try {
-    const url = `https://weather.googleapis.com/v1/currentConditions:lookup?key=${apiKey}&location.latitude=${BROADCAST_HOME_LAT}&location.longitude=${BROADCAST_HOME_LNG}&unitsSystem=IMPERIAL&languageCode=en`;
+    const estateConfig = await getEstateConfig();
+    const url = `https://weather.googleapis.com/v1/currentConditions:lookup?key=${apiKey}&location.latitude=${estateConfig.latitude}&location.longitude=${estateConfig.longitude}&unitsSystem=IMPERIAL&languageCode=en`;
     const resp = await fetch(url, { signal: AbortSignal.timeout(5e3) });
     if (!resp.ok) {
       console.error(
@@ -27003,7 +27109,7 @@ function buildWeatherClause(w) {
 function getLADate() {
   const now = /* @__PURE__ */ new Date();
   const laStr = now.toLocaleString("en-US", {
-    timeZone: "America/Los_Angeles"
+    timeZone: getEstateTimezone()
   });
   const la = new Date(laStr);
   const year = la.getFullYear();
@@ -27759,13 +27865,14 @@ router15.post("/elevenlabs-voice", async (req, res) => {
       status: "error",
       duration_ms: Date.now() - start
     });
-    return res.status(500).json({ error: sanitizeErrorMessage(e) });
+    return res.status(500).json({ error: sanitizeErrorMessage2(e) });
   }
 });
 var broadcast_default = router15;
 
 // server/routes/followup.ts
 init_helpers();
+init_estateConfig();
 import { Router as Router17 } from "express";
 var router16 = Router17();
 async function fetchOverdueReminders(svc) {
@@ -27781,10 +27888,10 @@ async function fetchOverdueReminders(svc) {
 async function fetchDueTodayReminders(svc) {
   const now = /* @__PURE__ */ new Date();
   const laDate = now.toLocaleDateString("en-CA", {
-    timeZone: "America/Los_Angeles"
+    timeZone: getEstateTimezone()
   });
   const utcStr = now.toLocaleString("en-US", { timeZone: "UTC" });
-  const laStr = now.toLocaleString("en-US", { timeZone: "America/Los_Angeles" });
+  const laStr = now.toLocaleString("en-US", { timeZone: getEstateTimezone() });
   const diffMs = new Date(utcStr).getTime() - new Date(laStr).getTime();
   const diffHours = Math.round(diffMs / 36e5);
   const offsetSign = diffHours >= 0 ? "-" : "+";
@@ -27897,7 +28004,7 @@ router16.post("/accountability", async (_req, res) => {
         weekday: "long",
         month: "long",
         day: "numeric",
-        timeZone: "America/Los_Angeles"
+        timeZone: getEstateTimezone()
       });
       const sections = [
         `Follow-Up Accountability \u2014 ${dateStr}`,
@@ -27925,7 +28032,7 @@ router16.post("/accountability", async (_req, res) => {
           const due = item.due ? new Date(item.due).toLocaleTimeString("en-US", {
             hour: "numeric",
             minute: "2-digit",
-            timeZone: "America/Los_Angeles"
+            timeZone: getEstateTimezone()
           }) : "";
           sections.push(
             `  \u{1F4CC} ${item.text}${due ? ` (at ${due})` : ""}`
@@ -27992,11 +28099,12 @@ var followup_default = router16;
 
 // server/routes/reports.ts
 init_auth2();
+init_estateConfig();
 init_helpers();
 import { Router as Router18 } from "express";
 
 // server/services/morningReportData.ts
-var LA_TIME_ZONE = "America/Los_Angeles";
+init_estateConfig();
 var CNBC_QUOTE_URL = "https://quote.cnbc.com/quote-html-webservice/restQuote/symbolType/symbol";
 var CNBC_SYMBOLS = [".DJI", ".SPX", ".IXIC", "@GC.1", "@CL.1", "EUR=", "GBP=", "JPY="];
 function finiteNumber(value) {
@@ -28012,7 +28120,7 @@ function laDateHour(value) {
   const date2 = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date2.getTime())) return null;
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: LA_TIME_ZONE,
+    timeZone: getEstateTimezone(),
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -28084,7 +28192,7 @@ async function fetchOpenMeteoWeather(lat, lng, fetchImpl = fetch) {
       hourly: "temperature_2m,apparent_temperature,precipitation_probability,weather_code,wind_speed_10m,uv_index",
       temperature_unit: "fahrenheit",
       wind_speed_unit: "mph",
-      timezone: LA_TIME_ZONE,
+      timezone: getEstateTimezone(),
       forecast_days: "2"
     });
     const response = await fetchImpl(`https://api.open-meteo.com/v1/forecast?${params}`, {
@@ -28226,7 +28334,7 @@ async function fetchMarketSnapshot(fetchImpl = fetch) {
     const allTimes = quoteList.map((quote) => quote.last_time ? new Date(quote.last_time).getTime() : NaN).filter(Number.isFinite);
     const latestTime = allTimes.length ? Math.max(...allTimes) : NaN;
     const asOf = Number.isFinite(latestTime) ? new Date(latestTime).toLocaleTimeString("en-US", {
-      timeZone: LA_TIME_ZONE,
+      timeZone: getEstateTimezone(),
       hour: "numeric",
       minute: "2-digit",
       timeZoneName: "short"
@@ -28639,7 +28747,7 @@ router17.post("/meeting-prep", async (_req, res) => {
 function getLAOffset(forDate) {
   const d = forDate || /* @__PURE__ */ new Date();
   const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Los_Angeles",
+    timeZone: getEstateTimezone(),
     timeZoneName: "shortOffset"
   });
   const parts = formatter.formatToParts(d);
@@ -28666,7 +28774,7 @@ async function fetchTodaysCalendar(saKey, email, label) {
     );
     const now = /* @__PURE__ */ new Date();
     const laDate = now.toLocaleDateString("en-CA", {
-      timeZone: "America/Los_Angeles"
+      timeZone: getEstateTimezone()
     });
     const offset = getLAOffset();
     const timeMin = `${laDate}T00:00:00${offset}`;
@@ -28682,7 +28790,7 @@ async function fetchTodaysCalendar(saKey, email, label) {
       const time = e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString("en-US", {
         hour: "numeric",
         minute: "2-digit",
-        timeZone: "America/Los_Angeles"
+        timeZone: getEstateTimezone()
       }) : "All day";
       return `\u2022 ${time} \u2014 ${e.summary || "Busy"}`;
     }).join("\n");
@@ -28700,7 +28808,7 @@ async function fetchTomorrowsCalendar(saKey) {
     const now = /* @__PURE__ */ new Date();
     const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1e3);
     const laDate = tomorrow.toLocaleDateString("en-CA", {
-      timeZone: "America/Los_Angeles"
+      timeZone: getEstateTimezone()
     });
     const offset = getLAOffset(tomorrow);
     const timeMin = `${laDate}T00:00:00${offset}`;
@@ -28716,7 +28824,7 @@ async function fetchTomorrowsCalendar(saKey) {
       const time = e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString("en-US", {
         hour: "numeric",
         minute: "2-digit",
-        timeZone: "America/Los_Angeles"
+        timeZone: getEstateTimezone()
       }) : "All day";
       return `\u2022 ${time} \u2014 ${e.summary || "Busy"}`;
     }).join("\n");
@@ -28736,7 +28844,7 @@ router17.post("/eod-summary", requireAuth2, async (_req, res) => {
   try {
     const { query: dbQuery } = await Promise.resolve().then(() => (init_db2(), db_exports));
     const laDate = (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", {
-      timeZone: "America/Los_Angeles"
+      timeZone: getEstateTimezone()
     });
     try {
       await dbQuery(
@@ -28757,7 +28865,7 @@ router17.post("/eod-summary", requireAuth2, async (_req, res) => {
       weekday: "long",
       month: "long",
       day: "numeric",
-      timeZone: "America/Los_Angeles"
+      timeZone: getEstateTimezone()
     });
     const [todayCal, tomorrowCal] = await Promise.all([
       fetchTodaysCalendar(saKey, ADMIN_EMAIL, "Primary"),
@@ -28847,19 +28955,19 @@ router17.post("/eod-summary", requireAuth2, async (_req, res) => {
 function getThisWeekMondayLA() {
   const now = /* @__PURE__ */ new Date();
   const laDate = new Date(
-    now.toLocaleString("en-US", { timeZone: "America/Los_Angeles" })
+    now.toLocaleString("en-US", { timeZone: getEstateTimezone() })
   );
   const day = laDate.getDay();
   const diffToMonday = day === 0 ? -6 : 1 - day;
   laDate.setDate(laDate.getDate() + diffToMonday);
   return laDate.toLocaleDateString("en-CA", {
-    timeZone: "America/Los_Angeles"
+    timeZone: getEstateTimezone()
   });
 }
 function getNextWeekRange() {
   const now = /* @__PURE__ */ new Date();
   const laDate = new Date(
-    now.toLocaleString("en-US", { timeZone: "America/Los_Angeles" })
+    now.toLocaleString("en-US", { timeZone: getEstateTimezone() })
   );
   const day = laDate.getDay();
   const daysToNextMonday = day === 0 ? 1 : 8 - day;
@@ -28897,7 +29005,7 @@ router17.post("/weekly-planning", requireAuth2, async (_req, res) => {
       weekday: "long",
       month: "long",
       day: "numeric",
-      timeZone: "America/Los_Angeles"
+      timeZone: getEstateTimezone()
     });
     const nextWeekLabel = `${(/* @__PURE__ */ new Date(monday + "T12:00:00")).toLocaleDateString("en-US", { month: "short", day: "numeric" })} \u2013 ${(/* @__PURE__ */ new Date(friday + "T12:00:00")).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
     const calToken = await getServiceToken(
@@ -28914,12 +29022,12 @@ router17.post("/weekly-planning", requireAuth2, async (_req, res) => {
     const nextWeekCal = (calData.items || []).map((e) => {
       const day = e.start?.dateTime ? new Date(e.start.dateTime).toLocaleDateString("en-US", {
         weekday: "short",
-        timeZone: "America/Los_Angeles"
+        timeZone: getEstateTimezone()
       }) : "All day";
       const time = e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString("en-US", {
         hour: "numeric",
         minute: "2-digit",
-        timeZone: "America/Los_Angeles"
+        timeZone: getEstateTimezone()
       }) : "";
       return `\u2022 ${day} ${time} \u2014 ${e.summary || "Busy"}`;
     }).join("\n") || "Calendar is clear.";
@@ -29112,7 +29220,7 @@ function buildStatusHtml(results, totalMs, runTime) {
 router17.post("/executive-status", requireAuth2, async (_req, res) => {
   const startTime = Date.now();
   const { query: dbQuery } = await Promise.resolve().then(() => (init_db2(), db_exports));
-  const execStatusDate = (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+  const execStatusDate = (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: getEstateTimezone() });
   try {
     await dbQuery(
       `INSERT INTO report_email_dedup (report_type, period_key)
@@ -29134,7 +29242,7 @@ router17.post("/executive-status", requireAuth2, async (_req, res) => {
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
-    timeZone: "America/Los_Angeles"
+    timeZone: getEstateTimezone()
   });
   const results = await Promise.all([
     runCheck2("ai_gateway", "OpenRouter AI Gateway", "AI & Intelligence", async () => {
@@ -29239,7 +29347,7 @@ router17.post("/executive-status", requireAuth2, async (_req, res) => {
   const errCount = results.filter((r) => r.status === "error").length;
   const warnCount = results.filter((r) => r.status === "degraded").length;
   const emoji = overall === "ok" ? "\u2705" : overall === "degraded" ? "\u26A0\uFE0F" : "\u{1F6A8}";
-  const subject = `${emoji} Janus Status \u2014 ${errCount > 0 ? `${errCount} FAILED` : warnCount > 0 ? `${warnCount} DEGRADED` : "All Systems Go"} \xB7 ${(/* @__PURE__ */ new Date()).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Los_Angeles" })}`;
+  const subject = `${emoji} Janus Status \u2014 ${errCount > 0 ? `${errCount} FAILED` : warnCount > 0 ? `${warnCount} DEGRADED` : "All Systems Go"} \xB7 ${(/* @__PURE__ */ new Date()).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: getEstateTimezone() })}`;
   const html = buildStatusHtml(results, totalMs, runTime);
   const textLines = results.map(
     (r) => `${statusIcon(r.status)} ${r.label}: ${r.status.toUpperCase()} (${r.latency_ms}ms)${r.message ? ` \u2014 ${r.message}` : ""}`
@@ -29304,7 +29412,7 @@ function formatCalendarForAI(events) {
   if (!events.length) return [];
   return events.map((e) => {
     if (e.allDay) return { time: "All day", event: e.summary, allDay: true };
-    const st = new Date(e.start).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Los_Angeles" });
+    const st = new Date(e.start).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: getEstateTimezone() });
     return { time: st, event: e.summary };
   });
 }
@@ -29314,7 +29422,7 @@ async function generateEmailData(childName, weatherSummary, weatherRaw, news, fi
     month: "long",
     day: "numeric",
     year: "numeric",
-    timeZone: "America/Los_Angeles"
+    timeZone: getEstateTimezone()
   });
   const childCal = formatCalendarForAI(childEvents);
   const dadCal = formatCalendarForAI(dadEvents);
@@ -29363,7 +29471,7 @@ async function generateEmailData(childName, weatherSummary, weatherRaw, news, fi
       return `${Math.round(wettest.precip)}% chance of rain around ${label.toLowerCase()}`;
     })(),
     asOf: weatherRaw?.current?.observedAt ? new Date(weatherRaw.current.observedAt).toLocaleTimeString("en-US", {
-      timeZone: "America/Los_Angeles",
+      timeZone: getEstateTimezone(),
       hour: "numeric",
       minute: "2-digit",
       timeZoneName: "short"
@@ -29634,7 +29742,7 @@ function buildEmailHtml(childName, data, today) {
 router17.post("/morning-weather", requireAuth2, async (_req, res) => {
   try {
     const { query: dbQuery } = await Promise.resolve().then(() => (init_db2(), db_exports));
-    const mwDate = (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+    const mwDate = (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: getEstateTimezone() });
     try {
       const { rows: autoRows } = await dbQuery(
         `SELECT is_active FROM family_automations WHERE name = $1 LIMIT 1`,
@@ -29689,8 +29797,7 @@ router17.post("/morning-weather", requireAuth2, async (_req, res) => {
       return res.status(200).json({ ok: true, skipped: true, reason: "google_service_account_not_configured", period: mwDate });
     }
     const saKey = getSaKey();
-    const { getEstateTimezone: getEstateTimezone2 } = await Promise.resolve().then(() => (init_estateConfig(), estateConfig_exports));
-    const estateTz = getEstateTimezone2();
+    const estateTz = getEstateTimezone();
     const today = (/* @__PURE__ */ new Date()).toLocaleDateString("en-US", {
       weekday: "long",
       month: "long",
@@ -29719,7 +29826,7 @@ router17.post("/morning-weather", requireAuth2, async (_req, res) => {
         );
         const now = /* @__PURE__ */ new Date();
         const laDate = new Date(
-          now.toLocaleString("en-US", { timeZone: "America/Los_Angeles" })
+          now.toLocaleString("en-US", { timeZone: getEstateTimezone() })
         );
         const startOfDay = new Date(laDate);
         startOfDay.setHours(0, 0, 0, 0);
@@ -29843,7 +29950,7 @@ router17.post("/morning-weather", requireAuth2, async (_req, res) => {
     const allSendResults = [];
     const childStatusMap = {};
     for (const { child, data } of emailDataResults) {
-      const todayDateLA = (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+      const todayDateLA = (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: getEstateTimezone() });
       const dedupCheck = await dbQuery(
         `SELECT id FROM email_logs
          WHERE email_type = 'morning_brief'
@@ -29959,7 +30066,7 @@ router17.post("/morning-weather", requireAuth2, async (_req, res) => {
         { child: child.name }
       );
     }
-    const ccTodayDateLA = (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+    const ccTodayDateLA = (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: getEstateTimezone() });
     for (const ccEmailResult of emailDataResults) {
       const ccChildName = ccEmailResult.child.name;
       const ccMetaKey = `cc-${ccChildName}`;
@@ -30083,6 +30190,7 @@ init_storage();
 init_db();
 init_fetchWithTimeout();
 init_auditLog();
+init_estateConfig();
 import { Router as Router19 } from "express";
 import * as nodeIcal from "node-ical";
 var router18 = Router19();
@@ -30190,8 +30298,9 @@ async function syncConcerts(db2) {
       size: "100",
       sort: "date,asc"
     }));
-    const lat = process.env.HOME_LAT || "34.0522";
-    const lng = process.env.HOME_LNG || "-118.2437";
+    const estateConfig = await getEstateConfig();
+    const lat = String(estateConfig.latitude);
+    const lng = String(estateConfig.longitude);
     const geoQuery = {
       classificationName: "music",
       latlong: `${lat},${lng}`,
@@ -30236,8 +30345,9 @@ async function syncConcerts(db2) {
     console.log(`[syncConcerts] Ticketmaster: ${allConcerts.length} raw events`);
   }
   if (sgKey) {
-    const lat = process.env.HOME_LAT || "34.0522";
-    const lng = process.env.HOME_LNG || "-118.2437";
+    const estateConfig = await getEstateConfig();
+    const lat = String(estateConfig.latitude);
+    const lng = String(estateConfig.longitude);
     const sgQueries = [
       { "taxonomies.name": "concert", lat, lon: lng, range: "30mi", per_page: "200", "datetime_utc.gte": now.toISOString().slice(0, 10), "datetime_utc.lte": endDateSg, sort: "datetime_utc.asc" },
       { "taxonomies.name": "concert", lat, lon: lng, range: "30mi", per_page: "200", "datetime_utc.gte": now.toISOString().slice(0, 10), "datetime_utc.lte": endDateSg, sort: "score.desc" }
@@ -30649,8 +30759,9 @@ async function syncShows(db2) {
   if (sgKey) {
     const sgShowTypes = ["theater", "broadway_tickets_national", "comedy", "family"];
     const beforeSg = allShows.length;
-    const lat = process.env.HOME_LAT || "34.0522";
-    const lng = process.env.HOME_LNG || "-118.2437";
+    const estateConfig = await getEstateConfig();
+    const lat = String(estateConfig.latitude);
+    const lng = String(estateConfig.longitude);
     for (const taxo of sgShowTypes) {
       const events = await fetchSeatGeekEvents({
         "taxonomies.name": taxo,
@@ -31504,9 +31615,8 @@ var entertainment_default = router18;
 // server/routes/weather.ts
 init_auditLog();
 import { Router as Router20 } from "express";
+init_estateConfig();
 var router19 = Router20();
-var HOME_LAT3 = Number(process.env.HOME_LAT) || 34.0522;
-var HOME_LNG3 = Number(process.env.HOME_LNG) || -118.2437;
 var cachedData = null;
 var CACHE_TTL_MS3 = 5 * 60 * 1e3;
 router19.post("/api/weather-dashboard", async (req, res) => {
@@ -31515,7 +31625,8 @@ router19.post("/api/weather-dashboard", async (req, res) => {
   }
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   try {
-    const forecastDays = await fetchGoogleDailyForecast(HOME_LAT3, HOME_LNG3, 5);
+    const { latitude: HOME_LAT2, longitude: HOME_LNG2 } = await getEstateConfig();
+    const forecastDays = await fetchGoogleDailyForecast(HOME_LAT2, HOME_LNG2, 5);
     const forecast = forecastDays.map((day) => {
       const d = day.displayDate ?? {};
       const date2 = d.year && d.month && d.day ? `${d.year}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}` : "";
@@ -31534,13 +31645,13 @@ router19.post("/api/weather-dashboard", async (req, res) => {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            location: { latitude: HOME_LAT3, longitude: HOME_LNG3 },
+            location: { latitude: HOME_LAT2, longitude: HOME_LNG2 },
             extraComputations: ["HEALTH_RECOMMENDATIONS", "DOMINANT_POLLUTANT_CONCENTRATION"],
             languageCode: "en"
           })
         }),
-        fetch(`https://pollen.googleapis.com/v1/forecast:lookup?key=${apiKey}&location.latitude=${HOME_LAT3}&location.longitude=${HOME_LNG3}&days=5`),
-        fetch(`https://weather.googleapis.com/v1/publicAlerts:lookup?key=${apiKey}&location.latitude=${HOME_LAT3}&location.longitude=${HOME_LNG3}&languageCode=en`)
+        fetch(`https://pollen.googleapis.com/v1/forecast:lookup?key=${apiKey}&location.latitude=${HOME_LAT2}&location.longitude=${HOME_LNG2}&days=5`),
+        fetch(`https://weather.googleapis.com/v1/publicAlerts:lookup?key=${apiKey}&location.latitude=${HOME_LAT2}&location.longitude=${HOME_LNG2}&languageCode=en`)
       );
     }
     let airQuality = null;
@@ -31647,9 +31758,10 @@ router19.post("/api/weather-forecast", async (_req, res) => {
     return res.json(cachedForecastData.data);
   }
   try {
+    const { latitude: HOME_LAT2, longitude: HOME_LNG2 } = await getEstateConfig();
     const [forecastHours, forecastDays] = await Promise.all([
-      fetchGoogleHourlyForecast(HOME_LAT3, HOME_LNG3, 24),
-      fetchGoogleDailyForecast(HOME_LAT3, HOME_LNG3, 5)
+      fetchGoogleHourlyForecast(HOME_LAT2, HOME_LNG2, 24),
+      fetchGoogleDailyForecast(HOME_LAT2, HOME_LNG2, 5)
     ]);
     const hourlyTime = forecastHours.map((h) => h.startTime ?? "");
     const hourlyTemp = forecastHours.map((h) => h.temperature?.degrees ?? 0);
@@ -31919,20 +32031,20 @@ function fetchT6(input, init, timeoutMs = 3e4) {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   return fetch(input, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
-var SPEEDTEST_ENTITIES = {
-  download: "sensor.speedtest_download",
-  upload: "sensor.speedtest_upload",
-  ping: "sensor.speedtest_ping"
-};
-async function getEffectiveSpeedtestEntities() {
+async function getEffectiveSpeedtestEntities(states) {
   const mappings = await getEntityMappings();
+  const keys = states ? Object.keys(states) : [];
   return {
-    download: mappings.speedtest?.download || SPEEDTEST_ENTITIES.download,
-    upload: mappings.speedtest?.upload || SPEEDTEST_ENTITIES.upload,
-    ping: mappings.speedtest?.ping || SPEEDTEST_ENTITIES.ping
+    download: mappings.speedtest?.download || keys.find((k) => k.startsWith("sensor.") && k.includes("speedtest_download")) || "",
+    upload: mappings.speedtest?.upload || keys.find((k) => k.startsWith("sensor.") && k.includes("speedtest_upload")) || "",
+    ping: mappings.speedtest?.ping || keys.find((k) => k.startsWith("sensor.") && k.includes("speedtest_ping")) || ""
   };
 }
-var FORTIGATE_WAN_ENTITIES = ["sensor.fortigate_wan_status", "sensor.fortigate_wan1_status", "sensor.fortinet_wan_status"];
+function findWanEntity(states) {
+  return Object.keys(states).find(
+    (e) => e.startsWith("sensor.") && (e.includes("fortigate_wan") || e.includes("fortinet_wan") || e.includes("router_wan") || e.includes("wan_status"))
+  );
+}
 var INTERNET_THRESHOLDS = {
   download_degraded: 100,
   download_critical: 25,
@@ -31941,49 +32053,45 @@ var INTERNET_THRESHOLDS = {
   ping_degraded: 50,
   ping_critical: 150
 };
-var PRINTERS = [
-  {
-    name: "Office Printer 2",
-    statusEntity: "sensor.hp_color_laserjet_pro_mfp_3301_2",
-    cartridges: [
-      { color: "Black", entity: "sensor.hp_color_laserjet_pro_mfp_3301_black_cartridge_2" },
-      { color: "Cyan", entity: "sensor.hp_color_laserjet_pro_mfp_3301_cyan_cartridge_2" },
-      { color: "Magenta", entity: "sensor.hp_color_laserjet_pro_mfp_3301_magenta_cartridge_2" },
-      { color: "Yellow", entity: "sensor.hp_color_laserjet_pro_mfp_3301_yellow_cartridge_2" }
-    ]
-  },
-  {
-    name: "Office Color Printer 1",
-    statusEntity: "sensor.hp_color_laserjet_pro_mfp_3301",
-    cartridges: [
-      { color: "Black", entity: "sensor.hp_color_laserjet_pro_mfp_3301_black_cartridge" },
-      { color: "Cyan", entity: "sensor.hp_color_laserjet_pro_mfp_3301_cyan_cartridge" },
-      { color: "Magenta", entity: "sensor.hp_color_laserjet_pro_mfp_3301_magenta_cartridge" },
-      { color: "Yellow", entity: "sensor.hp_color_laserjet_pro_mfp_3301_yellow_cartridge" }
-    ]
-  },
-  {
-    name: "Office Printer",
-    statusEntity: "sensor.hl_l2460dw_status",
-    cartridges: [
-      { color: "Black", entity: "sensor.hl_l2460dw_black_toner_remaining" }
-    ],
-    drumEntity: "sensor.hl_l2460dw_drum_remaining"
+function discoverPrintersFromStates(states) {
+  const discovered = [];
+  const tonerSensors = Object.keys(states).filter(
+    (id) => id.startsWith("sensor.") && (id.includes("_cartridge") || id.includes("_toner") || id.includes("ink_level"))
+  );
+  const groups = /* @__PURE__ */ new Map();
+  for (const s3 of tonerSensors) {
+    const parts = s3.replace(/^sensor\./, "").split("_");
+    const prefix = parts.slice(0, Math.min(parts.length - 1, 3)).join("_");
+    if (!groups.has(prefix)) groups.set(prefix, []);
+    groups.get(prefix).push(s3);
   }
-];
+  for (const [prefix, sensors] of groups.entries()) {
+    const statusEnt = Object.keys(states).find((id) => id === `sensor.${prefix}` || id === `sensor.${prefix}_status`);
+    const statusEntity = statusEnt || sensors[0];
+    const friendlyName = states[statusEntity]?.attributes?.friendly_name || prefix.replace(/_/g, " ");
+    const drumEnt = Object.keys(states).find((id) => id === `sensor.${prefix}_drum_remaining` || id.includes(`${prefix}_drum`));
+    discovered.push({
+      name: friendlyName,
+      statusEntity,
+      drumEntity: drumEnt,
+      cartridges: sensors.map((id) => {
+        const lower = id.toLowerCase();
+        const color = lower.includes("cyan") ? "Cyan" : lower.includes("magenta") ? "Magenta" : lower.includes("yellow") ? "Yellow" : "Black";
+        return { color, entity: id };
+      })
+    });
+  }
+  return discovered;
+}
 var BAMBU_STATUS_SUFFIXES = ["print_status", "current_stage", "status"];
 var BAMBU_ERROR_STATES = ["error", "failed", "fault"];
 var BAMBU_TEMP_SUFFIXES = { nozzle: ["nozzle_temperature", "nozzle_temp"], bed: ["bed_temperature", "bed_temp"] };
 var BAMBU_NOZZLE_MAX = 300;
 var BAMBU_BED_MAX = 120;
 var TONER_THRESHOLD = 10;
-var HA_ENTITIES = {
-  cpu: "sensor.system_monitor_processor_use",
-  ram: "sensor.system_monitor_memory_usage",
-  swap: "sensor.system_monitor_swap_usage",
-  load: "sensor.system_monitor_load_1_min",
-  temp: "sensor.system_monitor_processor_temperature"
-};
+function findSystemEntity(states, patterns) {
+  return Object.keys(states).find((id) => patterns.every((p) => id.includes(p)));
+}
 var CPU_SUSTAINED = 85;
 var RAM_SUSTAINED = 90;
 var CRITICAL_THRESHOLD = 95;
@@ -32036,10 +32144,10 @@ router20.post("/api/internet-health-monitor", requireAuth2, async (req, res) => 
     if (Array.isArray(allStates)) {
       for (const s3 of allStates) states[s3.entity_id] = { state: s3.state, attributes: s3.attributes || {} };
     }
-    const wanEntity = FORTIGATE_WAN_ENTITIES.find((e) => states[e]);
+    const wanEntity = findWanEntity(states);
     const wanState = wanEntity ? states[wanEntity].state : null;
     const wanAttributes = wanEntity ? states[wanEntity].attributes || {} : {};
-    const speedtestEntities = await getEffectiveSpeedtestEntities();
+    const speedtestEntities = await getEffectiveSpeedtestEntities(states);
     const download = states[speedtestEntities.download] ? parseFloat(states[speedtestEntities.download].state) : NaN;
     const upload = states[speedtestEntities.upload] ? parseFloat(states[speedtestEntities.upload].state) : NaN;
     const ping = states[speedtestEntities.ping] ? parseFloat(states[speedtestEntities.ping].state) : NaN;
@@ -32124,7 +32232,7 @@ router20.post("/api/speedtest-pull-from-ha", requireAuth2, async (req, res) => {
     if (Array.isArray(allStates)) {
       for (const s3 of allStates) states[s3.entity_id] = s3;
     }
-    const speedtestEntities = await getEffectiveSpeedtestEntities();
+    const speedtestEntities = await getEffectiveSpeedtestEntities(states);
     const dl = states[speedtestEntities.download];
     const ul = states[speedtestEntities.upload];
     const pg3 = states[speedtestEntities.ping];
@@ -32270,7 +32378,7 @@ router20.post("/api/printer-health-monitor", requireAuth2, async (req, res) => {
     }
     const issues = [];
     const printerSummaries = [];
-    const availablePrinters = PRINTERS.filter((p) => states[p.statusEntity] || p.cartridges.some((c) => states[c.entity]));
+    const availablePrinters = discoverPrintersFromStates(states);
     for (const printer of availablePrinters) {
       const statusVal = states[printer.statusEntity]?.state ?? "unavailable";
       const isNotConnected = statusVal === "unavailable" || statusVal === "unknown";
@@ -32404,11 +32512,16 @@ router20.post("/api/ha-server-health-monitor", requireAuth2, async (req, res) =>
       const n3 = parseFloat(val);
       return isNaN(n3) ? NaN : n3;
     };
-    const cpu = parseF(stateMap[HA_ENTITIES.cpu]);
-    const ram = parseF(stateMap[HA_ENTITIES.ram]);
-    const swap = parseF(stateMap[HA_ENTITIES.swap]);
-    const load = parseF(stateMap[HA_ENTITIES.load]);
-    const temp = parseF(stateMap[HA_ENTITIES.temp]);
+    const cpuKey = findSystemEntity(stateMap, ["processor_use"]) || findSystemEntity(stateMap, ["cpu_percent"]);
+    const ramKey = findSystemEntity(stateMap, ["memory_usage"]) || findSystemEntity(stateMap, ["memory_use_percent"]);
+    const swapKey = findSystemEntity(stateMap, ["swap_usage"]) || findSystemEntity(stateMap, ["swap_use_percent"]);
+    const loadKey = findSystemEntity(stateMap, ["load_1_min"]) || findSystemEntity(stateMap, ["load_1"]);
+    const tempKey = findSystemEntity(stateMap, ["processor_temp"]) || findSystemEntity(stateMap, ["cpu_temp"]);
+    const cpu = parseF(cpuKey ? stateMap[cpuKey] : void 0);
+    const ram = parseF(ramKey ? stateMap[ramKey] : void 0);
+    const swap = parseF(swapKey ? stateMap[swapKey] : void 0);
+    const load = parseF(loadKey ? stateMap[loadKey] : void 0);
+    const temp = parseF(tempKey ? stateMap[tempKey] : void 0);
     const metrics = { cpu, ram, swap, load, temp };
     const cpuCritical = !isNaN(cpu) && cpu > CRITICAL_THRESHOLD;
     const ramCritical = !isNaN(ram) && ram > CRITICAL_THRESHOLD;
@@ -32815,8 +32928,8 @@ router20.post("/api/ha-update-checker", requireAuth2, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-var GYM_ENTITY_ID = process.env.GYM_THERMOSTAT_ENTITY || "climate.gym_gym";
-var THEATER_ENTITY_ID = process.env.THEATER_THERMOSTAT_ENTITY || "climate.theater_theater";
+var GYM_ENTITY_ID = process.env.GYM_THERMOSTAT_ENTITY || "";
+var THEATER_ENTITY_ID = process.env.THEATER_THERMOSTAT_ENTITY || "";
 var THERMOSTAT_DEDUP_HOURS = 2;
 var THEATER_STARTUP_GRACE_MINUTES = 30;
 var POOL_SPA_KEYWORDS = ["pool", "spa"];
@@ -32897,7 +33010,7 @@ router20.post("/api/thermostat-monitor", requireAuth2, async (req, res) => {
     );
     const avReading = await getAvClosetReading();
     if (avReading && Number.isFinite(avReading.tempF)) {
-      const avEntityId = avSensor?.entity_id ?? "sensor.av_closet_govee";
+      const avEntityId = avSensor?.entity_id ?? (process.env.AV_CLOSET_TEMP_ENTITY || "av_closet_temperature");
       const avName = avSensor?.attributes?.friendly_name ?? "AV Closet";
       const avTemp = avReading.tempF;
       await db2.query(
@@ -32907,7 +33020,7 @@ router20.post("/api/thermostat-monitor", requireAuth2, async (req, res) => {
       );
       logged.push({ entityId: avEntityId, friendlyName: avName, currentTemp: avTemp, targetTemp: null, hvacMode: null });
     }
-    const nowPT = new Date((/* @__PURE__ */ new Date()).toLocaleString("en-US", { timeZone: "America/Los_Angeles" }));
+    const nowPT = new Date((/* @__PURE__ */ new Date()).toLocaleString("en-US", { timeZone: getEstateTimezone() }));
     const scheduleState = getGymScheduleState(nowPT);
     const gymEntity = stateMap[GYM_ENTITY_ID];
     if (gymEntity) {
@@ -32949,7 +33062,7 @@ Please check the thermostat.`,
           gymActions.push(`Turned off Gym AC (outside 6 AM\u20133 PM window)`);
         }
       }
-    } else {
+    } else if (GYM_ENTITY_ID) {
       gymActions.push(`Gym entity ${GYM_ENTITY_ID} not found in HA states`);
     }
     const theaterActions = [];
@@ -33003,7 +33116,7 @@ Please check the thermostat.`,
           theaterActions.push(`Turned off Theater HVAC (outside 10 AM\u201311 PM window)`);
         }
       }
-    } else {
+    } else if (THEATER_ENTITY_ID) {
       theaterActions.push(`Theater entity ${THEATER_ENTITY_ID} not found in HA states`);
     }
     const output = {
@@ -33135,7 +33248,7 @@ Temperature monitoring for the AV equipment closet is blind until the sensor is 
       const output2 = {
         found: true,
         offline: true,
-        entity_id: avSensor?.entity_id ?? "sensor.av_closet_govee",
+        entity_id: avSensor?.entity_id ?? (process.env.AV_CLOSET_TEMP_ENTITY || "av_closet_temperature"),
         online: avReading.online,
         actions
       };
@@ -33212,7 +33325,7 @@ Please check ventilation/cooling for the AV equipment closet.`,
     }
     const output = {
       found: true,
-      entity_id: avSensor?.entity_id ?? "sensor.av_closet_govee",
+      entity_id: avSensor?.entity_id ?? (process.env.AV_CLOSET_TEMP_ENTITY || "av_closet_temperature"),
       temperature: Number.isFinite(temp) ? temp : null,
       unit,
       warn_threshold: AV_CLOSET_WARN_TEMP,
@@ -33282,10 +33395,10 @@ var THERMOSTAT_FRESHNESS_ALERT_KEY = "thermostat_freshness_stale";
 router20.post("/api/thermostat-freshness-monitor", requireAuth2, async (req, res) => {
   const db2 = storage;
   try {
-    const nowPT = new Date((/* @__PURE__ */ new Date()).toLocaleString("en-US", { timeZone: "America/Los_Angeles" }));
+    const nowPT = new Date((/* @__PURE__ */ new Date()).toLocaleString("en-US", { timeZone: getEstateTimezone() }));
     const hourPT = nowPT.getHours();
     if (hourPT < 6) {
-      return res.json({ skipped: true, reason: "Outside operating hours (before 6 AM PT)" });
+      return res.json({ skipped: true, reason: "Outside operating hours (before 6 AM local)" });
     }
     const { rows: latestRows } = await db2.query(
       `SELECT MAX(logged_at) AS latest FROM thermostat_logs`
@@ -33330,7 +33443,7 @@ router20.post("/api/thermostat-freshness-monitor", requireAuth2, async (req, res
 
 No thermostat readings have been recorded in the last *${ageMinutes ?? "\u221E"} minutes*.
 
-Last reading: ${latestAt ? new Date(latestAt).toLocaleString("en-US", { timeZone: "America/Los_Angeles", dateStyle: "short", timeStyle: "short" }) + " PT" : "never"}
+Last reading: ${latestAt ? new Date(latestAt).toLocaleString("en-US", { timeZone: getEstateTimezone(), dateStyle: "short", timeStyle: "short" }) : "never"}
 
 The thermostat-monitor cron may have stopped or the deployed server may be down. Check the audit log and deployment status.`;
         let waSent = false;
@@ -33400,10 +33513,10 @@ var POOL_TEMP_FRESHNESS_ALERT_KEY = "pool_temp_freshness_stale";
 router20.post("/api/pool-temp-freshness-monitor", requireAuth2, async (req, res) => {
   const db2 = storage;
   try {
-    const nowPT = new Date((/* @__PURE__ */ new Date()).toLocaleString("en-US", { timeZone: "America/Los_Angeles" }));
+    const nowPT = new Date((/* @__PURE__ */ new Date()).toLocaleString("en-US", { timeZone: getEstateTimezone() }));
     const hourPT = nowPT.getHours();
     if (hourPT < 6 || hourPT >= 23) {
-      return res.json({ skipped: true, reason: "Outside pool hours (6 AM \u2013 11 PM PT)" });
+      return res.json({ skipped: true, reason: "Outside pool hours (6 AM \u2013 11 PM local)" });
     }
     const { rows: latestRows } = await db2.query(
       `SELECT MAX(created_at) AS latest FROM system_audit_log
@@ -33449,7 +33562,7 @@ router20.post("/api/pool-temp-freshness-monitor", requireAuth2, async (req, res)
 
 No pool temperature readings have been recorded in the last *${ageMinutes ?? "\u221E"} minutes*.
 
-Last reading: ${latestAt ? new Date(latestAt).toLocaleString("en-US", { timeZone: "America/Los_Angeles", dateStyle: "short", timeStyle: "short" }) + " PT" : "never"}
+Last reading: ${latestAt ? new Date(latestAt).toLocaleString("en-US", { timeZone: getEstateTimezone(), dateStyle: "short", timeStyle: "short" }) : "never"}
 
 The pool-temp-monitor cron may have stopped or the deployed server may be down. Check the audit log and deployment status.`;
         let waSent = false;
@@ -33667,9 +33780,9 @@ router20.post("/api/speed-test-freshness-monitor", requireAuth2, async (req, res
 
 No speed test rows have been written in the last *${ageMinutes ?? "\u221E"} minutes*.
 
-Last reading: ${latestAt ? new Date(latestAt).toLocaleString("en-US", { timeZone: "America/Los_Angeles", dateStyle: "short", timeStyle: "short" }) + " PT" : "never"}
+Last reading: ${latestAt ? new Date(latestAt).toLocaleString("en-US", { timeZone: getEstateTimezone(), dateStyle: "short", timeStyle: "short" }) : "never"}
 
-The server-side HA speedtest pull (/api/speedtest-pull-from-ha) may be failing, or the underlying sensor.speedtest_* entities in Home Assistant have stopped updating. Check the audit log and HA's speedtest.net integration.`;
+The server-side HA speedtest pull (/api/speedtest-pull-from-ha) may be failing, or the underlying speedtest entities in Home Assistant have stopped updating. Check the audit log and HA's speedtest.net integration.`;
         let waSent = false;
         try {
           await sendWhatsApp(msg);
@@ -34726,9 +34839,9 @@ router23.post("/api/client-error", async (req, res) => {
     const userAgent = typeof body.userAgent === "string" ? body.userAgent.slice(0, 300) : "";
     const timestamp2 = typeof body.timestamp === "string" ? body.timestamp.slice(0, 30) : "";
     const source = typeof body.source === "string" ? body.source.slice(0, 100) : "unknown";
-    const sanitizedMessage = sanitizeErrorMessage2(message);
-    const sanitizedStack = stack ? sanitizeErrorMessage2(stack) : void 0;
-    const sanitizedComponentStack = componentStack ? sanitizeErrorMessage2(componentStack) : void 0;
+    const sanitizedMessage = sanitizeErrorMessage(message);
+    const sanitizedStack = stack ? sanitizeErrorMessage(stack) : void 0;
+    const sanitizedComponentStack = componentStack ? sanitizeErrorMessage(componentStack) : void 0;
     console.error(`[FRONTEND ERROR] [${source}] ${sanitizedMessage} | URL: ${url}`);
     await logAudit("client-error-reporter", {
       category: "config",
@@ -37748,6 +37861,11 @@ function stateOf(entityId) {
   if (e.state == null || UNAVAILABLE.has(String(e.state).trim().toLowerCase())) return null;
   return { state: e.state, attributes: e.attributes ?? {} };
 }
+var FG_DOMAIN = "sensor";
+var FG_PREFIX = "fortigate";
+function fgEntity(suffix) {
+  return `${FG_DOMAIN}.${FG_PREFIX}_${suffix}`;
+}
 function numOf(entityId) {
   const s3 = stateOf(entityId);
   if (!s3) return null;
@@ -37761,8 +37879,8 @@ function entityExists(entityId) {
 }
 function haFortiViewSensorsPresent() {
   const cacheReady2 = isCacheReady();
-  const talkersPresent = entityExists("sensor.fortigate_top_talkers");
-  const sitesPresent = entityExists("sensor.fortigate_top_sites");
+  const talkersPresent = entityExists(fgEntity("top_talkers"));
+  const sitesPresent = entityExists(fgEntity("top_sites"));
   return {
     cache_ready: cacheReady2,
     top_talkers: { present: talkersPresent, has_data: haTopTalkers() !== null },
@@ -37771,21 +37889,21 @@ function haFortiViewSensorsPresent() {
   };
 }
 function haSystemHealth() {
-  const cpu = numOf("sensor.fortigate_cpu_usage");
-  const mem = numOf("sensor.fortigate_memory_usage");
+  const cpu = numOf(fgEntity("cpu_usage"));
+  const mem = numOf(fgEntity("memory_usage"));
   if (cpu === null && mem === null) return null;
   return {
     cpu_usage: cpu,
     memory_usage: mem,
     // HA does not currently expose an active-session count sensor.
-    active_sessions: numOf("sensor.fortigate_active_sessions")
+    active_sessions: numOf(fgEntity("active_sessions"))
   };
 }
 function haWanStats() {
-  const status = stateOf("sensor.fortigate_wan_status");
-  const rxGb = numOf("sensor.fortigate_wan_rx");
-  const txGb = numOf("sensor.fortigate_wan_tx");
-  const speed = numOf("sensor.fortigate_wan_speed");
+  const status = stateOf(fgEntity("wan_status"));
+  const rxGb = numOf(fgEntity("wan_rx"));
+  const txGb = numOf(fgEntity("wan_tx"));
+  const speed = numOf(fgEntity("wan_speed"));
   if (!status && rxGb === null && txGb === null) return null;
   const link = status ? /up|online|connected/i.test(status.state) : null;
   const gbToBytes = (gb) => gb !== null ? Math.round(gb * 1073741824) : null;
@@ -37800,10 +37918,10 @@ function haWanStats() {
   };
 }
 function haIpsAnomalyCount() {
-  return numOf("sensor.fortigate_ips_anomaly_count");
+  return numOf(fgEntity("ips_anomaly_count"));
 }
 function haTopTalkers() {
-  const s3 = stateOf("sensor.fortigate_top_talkers");
+  const s3 = stateOf(fgEntity("top_talkers"));
   if (!s3) return null;
   const consumers = s3.attributes["consumers"];
   if (!Array.isArray(consumers) || consumers.length === 0) return null;
@@ -37822,7 +37940,7 @@ function haTopTalkers() {
   return result.length > 0 ? result : null;
 }
 function haTopSites() {
-  const s3 = stateOf("sensor.fortigate_top_sites");
+  const s3 = stateOf(fgEntity("top_sites"));
   if (!s3) return null;
   const sites = s3.attributes["sites"];
   if (!Array.isArray(sites) || sites.length === 0) return null;
@@ -42436,121 +42554,80 @@ function measurementScopeForFinding(finding2, canonicalLeafIds, circuitMetadata)
 init_haWebSocket();
 init_db2();
 init_estateConfig();
-var ENERGY_CIRCUITS = [
-  { entityId: "sensor.av_room_panel_energy_today", powerEntityId: "sensor.av_room_panel_power_minute_average", label: "AV Room Panel", category: "Panels", panel: "av_room" },
-  { entityId: "sensor.balance_energy_today", powerEntityId: "sensor.balance_power_minute_average", label: "Balance (GP1)", category: "Panels", panel: "garage1" },
-  { entityId: "sensor.balance_energy_today_2", powerEntityId: "sensor.balance_power_minute_average_2", label: "Balance (GP2)", category: "Panels", panel: "garage2" },
-  { entityId: "sensor.balance_energy_today_3", powerEntityId: "sensor.balance_power_minute_average_3", label: "Balance (AV)", category: "Panels", panel: "av_room" },
-  { entityId: "sensor.balance_energy_today_4", powerEntityId: "sensor.balance_power_minute_average_4", label: "Balance (GH)", category: "Panels", panel: "guest_house" },
-  { entityId: "sensor.balance_energy_today_5", powerEntityId: "sensor.balance_power_minute_average_5", label: "Balance (ERC)", category: "Panels", panel: "equipment_room" },
-  { entityId: "sensor.garage_panel_1_energy_today", powerEntityId: "sensor.garage_panel_1_power_minute_average", label: "Garage Panel #1", category: "Panels", panel: "garage1" },
-  { entityId: "sensor.garage_panel_2_energy_today", powerEntityId: "sensor.garage_panel_2_power_minute_average", label: "Garage Panel #2", category: "Panels", panel: "garage2" },
-  // GP2 Slot 2-8: raw Emporia Vue 2 internal bus-channel readings for Garage Panel #2.
-  // These are NOT separate circuit loads — each slot corresponds to one of the named
-  // GP2 circuits already listed in the panel catalog (ac_primary_bedroom, etc.).
-  // Kept here for backend historical-query compatibility only; they are intentionally
-  // excluded from the frontend circuit list and panel-breakdown panel catalog to
-  // avoid double-counting.  The PANEL_CATALOG uses the named circuit entities.
-  { entityId: "sensor.garage_panel_2_energy_today_2", powerEntityId: "sensor.garage_panel_2_power_minute_average_2", label: "GP2 Slot 2", category: "Panels", panel: "garage2" },
-  { entityId: "sensor.garage_panel_2_energy_today_3", powerEntityId: "sensor.garage_panel_2_power_minute_average_3", label: "GP2 Slot 3", category: "Panels", panel: "garage2" },
-  { entityId: "sensor.garage_panel_2_energy_today_4", powerEntityId: "sensor.garage_panel_2_power_minute_average_4", label: "GP2 Slot 4", category: "Panels", panel: "garage2" },
-  { entityId: "sensor.garage_panel_2_energy_today_5", powerEntityId: "sensor.garage_panel_2_power_minute_average_5", label: "GP2 Slot 5", category: "Panels", panel: "garage2" },
-  { entityId: "sensor.garage_panel_2_energy_today_6", powerEntityId: "sensor.garage_panel_2_power_minute_average_6", label: "GP2 Slot 6", category: "Panels", panel: "garage2" },
-  { entityId: "sensor.garage_panel_2_energy_today_7", powerEntityId: "sensor.garage_panel_2_power_minute_average_7", label: "GP2 Slot 7", category: "Panels", panel: "garage2" },
-  { entityId: "sensor.garage_panel_2_energy_today_8", powerEntityId: "sensor.garage_panel_2_power_minute_average_8", label: "GP2 Slot 8", category: "Panels", panel: "garage2" },
-  { entityId: "sensor.guest_house_sub_panel_energy_today", powerEntityId: "sensor.guest_house_sub_panel_power_minute_average", label: "Guest House Panel", category: "Panels", panel: "guest_house" },
-  { entityId: "sensor.ac_package_unit_energy_today", powerEntityId: "sensor.ac_package_unit_power_minute_average", label: "AC Package Unit", category: "HVAC", panel: "garage2" },
-  { entityId: "sensor.ac_package_unit_join_cir_1_energy_today", powerEntityId: "sensor.ac_package_unit_join_cir_1_power_minute_average", label: "AC Package Unit (Cir1)", category: "HVAC", panel: "garage2" },
-  { entityId: "sensor.ac_primary_bedroom_energy_today", powerEntityId: "sensor.ac_primary_bedroom_power_minute_average", label: "AC Primary Bedroom", category: "HVAC", panel: "garage2" },
-  { entityId: "sensor.ac_compressor_rooftop_30amp_energy_today", powerEntityId: "sensor.ac_compressor_rooftop_30amp_power_minute_average", label: "AC Compressor Rooftop 30amp", category: "HVAC", panel: "garage2" },
-  { entityId: "sensor.ac_compressor_rooftop_50amp_energy_today", powerEntityId: "sensor.ac_compressor_rooftop_50amp_power_minute_average", label: "AC Compressor Rooftop 50amp", category: "HVAC", panel: "garage2" },
-  { entityId: "sensor.ac_unit_40amp_energy_today", powerEntityId: "sensor.ac_unit_40amp_power_minute_average", label: "AC Unit (40amp)", category: "HVAC", panel: "garage2" },
-  { entityId: "sensor.ac_wine_cellar_energy_today", powerEntityId: "sensor.ac_wine_cellar_power_minute_average", label: "AC Wine Cellar", category: "HVAC", panel: "av_room" },
-  { entityId: "sensor.gh_ac_energy_today", powerEntityId: "sensor.gh_ac_power_minute_average", label: "GH AC", category: "HVAC", panel: "guest_house" },
-  { entityId: "sensor.gh_furnace_energy_today", powerEntityId: "sensor.gh_furnace_power_minute_average", label: "GH Furnace", category: "HVAC", panel: "guest_house" },
-  { entityId: "sensor.gym_ac_energy_today", powerEntityId: "sensor.gym_ac_power_minute_average", label: "Gym AC", category: "HVAC", panel: "guest_house" },
-  { entityId: "sensor.gym_furnace_energy_today", powerEntityId: "sensor.gym_furnace_power_minute_average", label: "Gym Furnace", category: "HVAC", panel: "guest_house" },
-  { entityId: "sensor.ev_charger_1_energy_today", powerEntityId: "sensor.ev_charger_1_power_minute_average", label: "EV Charger 1", category: "Vehicles", panel: "guest_house" },
-  { entityId: "sensor.ev_charger_2_energy_today", powerEntityId: "sensor.ev_charger_2_power_minute_average", label: "EV Charger 2", category: "Vehicles", panel: "guest_house" },
-  { entityId: "sensor.equipment_room_cabana_energy_today", powerEntityId: "sensor.equipment_room_cabana_power_minute_average", label: "ERC Panel (Main)", category: "Outdoor", panel: "equipment_room" },
-  { entityId: "sensor.equipment_room_cabana_energy_today_2", powerEntityId: "sensor.equipment_room_cabana_power_minute_average_2", label: "ERC Breaker 2", category: "Outdoor", panel: "equipment_room" },
-  { entityId: "sensor.equipment_room_cabana_energy_today_3", powerEntityId: "sensor.equipment_room_cabana_power_minute_average_3", label: "ERC Breaker 3", category: "Outdoor", panel: "equipment_room" },
-  { entityId: "sensor.equipment_room_cabana_energy_today_4", powerEntityId: "sensor.equipment_room_cabana_power_minute_average_4", label: "ERC Breaker 4", category: "Outdoor", panel: "equipment_room" },
-  { entityId: "sensor.equipment_room_cabana_energy_today_5", powerEntityId: "sensor.equipment_room_cabana_power_minute_average_5", label: "ERC Breaker 5", category: "Outdoor", panel: "equipment_room" },
-  { entityId: "sensor.equipment_room_cabana_energy_today_6", powerEntityId: "sensor.equipment_room_cabana_power_minute_average_6", label: "ERC Breaker 6", category: "Outdoor", panel: "equipment_room" },
-  { entityId: "sensor.equipment_room_cabana_energy_today_7", powerEntityId: "sensor.equipment_room_cabana_power_minute_average_7", label: "ERC Breaker 7", category: "Outdoor", panel: "equipment_room" },
-  { entityId: "sensor.equipment_room_cabana_energy_today_8", powerEntityId: "sensor.equipment_room_cabana_power_minute_average_8", label: "ERC Breaker 8", category: "Outdoor", panel: "equipment_room" },
-  { entityId: "sensor.equipment_room_cabana_energy_today_9", powerEntityId: "sensor.equipment_room_cabana_power_minute_average_9", label: "ERC Breaker 9", category: "Outdoor", panel: "equipment_room" },
-  { entityId: "sensor.equipment_room_cabana_energy_today_10", powerEntityId: "sensor.equipment_room_cabana_power_minute_average_10", label: "ERC Breaker 10", category: "Outdoor", panel: "equipment_room" },
-  { entityId: "sensor.equipment_room_cabana_energy_today_11", powerEntityId: "sensor.equipment_room_cabana_power_minute_average_11", label: "ERC Breaker 11", category: "Outdoor", panel: "equipment_room" },
-  { entityId: "sensor.equipment_room_cabana_energy_today_12", powerEntityId: "sensor.equipment_room_cabana_power_minute_average_12", label: "ERC Breaker 12", category: "Outdoor", panel: "equipment_room" },
-  { entityId: "sensor.equipment_room_cabana_energy_today_13", powerEntityId: "sensor.equipment_room_cabana_power_minute_average_13", label: "ERC Breaker 13", category: "Outdoor", panel: "equipment_room" },
-  { entityId: "sensor.equipment_room_cabana_energy_today_14", powerEntityId: "sensor.equipment_room_cabana_power_minute_average_14", label: "ERC Breaker 14", category: "Outdoor", panel: "equipment_room" },
-  { entityId: "sensor.equipment_room_cabana_energy_today_15", powerEntityId: "sensor.equipment_room_cabana_power_minute_average_15", label: "ERC Breaker 15", category: "Outdoor", panel: "equipment_room" },
-  { entityId: "sensor.equipment_room_cabana_energy_today_16", powerEntityId: "sensor.equipment_room_cabana_power_minute_average_16", label: "ERC Breaker 16", category: "Outdoor", panel: "equipment_room" },
-  { entityId: "sensor.equipment_room_cabana_energy_today_17", powerEntityId: "sensor.equipment_room_cabana_power_minute_average_17", label: "ERC Breaker 17", category: "Outdoor", panel: "equipment_room" },
-  { entityId: "sensor.ext_gate_motors_energy_today", powerEntityId: "sensor.ext_gate_motors_power_minute_average", label: "Ext Gate Motors", category: "Outdoor", panel: "av_room" },
-  { entityId: "sensor.roof_top_receptacle_energy_today", powerEntityId: "sensor.roof_top_receptacle_power_minute_average", label: "Roof Top Receptacle", category: "Outdoor", panel: "garage2" },
-  { entityId: "sensor.sauna_energy_today", powerEntityId: "sensor.sauna_power_minute_average", label: "Sauna", category: "Outdoor", panel: "guest_house" },
-  { entityId: "sensor.sauna_energy_today_2", powerEntityId: "sensor.sauna_power_minute_average_2", label: "Sauna", category: "Outdoor", panel: "guest_house" },
-  { entityId: "sensor.sump_pump_energy_today", powerEntityId: "sensor.sump_pump_power_minute_average", label: "Sump Pump", category: "Outdoor", panel: "av_room" },
-  { entityId: "sensor.sump_pump_energy_today_2", powerEntityId: "sensor.sump_pump_power_minute_average_2", label: "Sump Pump", category: "Outdoor", panel: "av_room" },
-  { entityId: "sensor.bar_refrigerator_energy_today", powerEntityId: "sensor.bar_refrigerator_power_minute_average", label: "Bar Refrigerator", category: "Kitchen", panel: "garage1" },
-  { entityId: "sensor.dishwashers_energy_today", powerEntityId: "sensor.dishwashers_power_minute_average", label: "Dishwashers", category: "Kitchen", panel: "garage1" },
-  { entityId: "sensor.gh_counter_outlets_energy_today", powerEntityId: "sensor.gh_counter_outlets_power_minute_average", label: "GH Counter Outlets", category: "Kitchen", panel: "guest_house" },
-  { entityId: "sensor.gh_kitchen_outlets_energy_today", powerEntityId: "sensor.gh_kitchen_outlets_power_minute_average", label: "GH Kitchen Outlets", category: "Kitchen", panel: "guest_house" },
-  { entityId: "sensor.gh_refrigerator_energy_today", powerEntityId: "sensor.gh_refrigerator_power_minute_average", label: "GH Refrigerator", category: "Kitchen", panel: "guest_house" },
-  { entityId: "sensor.garbage_disposal_energy_today", powerEntityId: "sensor.garbage_disposal_power_minute_average", label: "Garbage Disposal", category: "Kitchen", panel: "garage1" },
-  { entityId: "sensor.kitchen_counter_gfcis_energy_today", powerEntityId: "sensor.kitchen_counter_gfcis_power_minute_average", label: "Kitchen Counter GFCIs", category: "Kitchen", panel: "garage1" },
-  { entityId: "sensor.kitchen_double_oven_energy_today", powerEntityId: "sensor.kitchen_double_oven_power_minute_average", label: "Kitchen Double Oven", category: "Kitchen", panel: "garage1" },
-  { entityId: "sensor.kitchen_island_sub_zeros_energy_today", powerEntityId: "sensor.kitchen_island_sub_zeros_power_minute_average", label: "Kitchen Island Sub Zeros", category: "Kitchen", panel: "garage1" },
-  { entityId: "sensor.kitchen_sub_zero_energy_today", powerEntityId: "sensor.kitchen_sub_zero_power_minute_average", label: "Kitchen Sub Zero", category: "Kitchen", panel: "garage1" },
-  { entityId: "sensor.kitchen_sub_zero_freezer_energy_today", powerEntityId: "sensor.kitchen_sub_zero_freezer_power_minute_average", label: "Kitchen Sub Zero Freezer", category: "Kitchen", panel: "garage1" },
-  { entityId: "sensor.stove_hood_energy_today", powerEntityId: "sensor.stove_hood_power_minute_average", label: "Stove Hood", category: "Kitchen", panel: "garage1" },
-  { entityId: "sensor.crestron_lighting_energy_today", powerEntityId: "sensor.crestron_lighting_power_minute_average", label: "Crestron Lighting", category: "Lighting", panel: "av_room" },
-  { entityId: "sensor.crestron_lighting_energy_today_2", powerEntityId: "sensor.crestron_lighting_power_minute_average_2", label: "Crestron Lighting 2", category: "Lighting", panel: "av_room" },
-  { entityId: "sensor.crestron_lighting_energy_today_3", powerEntityId: "sensor.crestron_lighting_power_minute_average_3", label: "Crestron Lighting 3", category: "Lighting", panel: "av_room" },
-  { entityId: "sensor.crestron_lighting_energy_today_4", powerEntityId: "sensor.crestron_lighting_power_minute_average_4", label: "Crestron Lighting 4", category: "Lighting", panel: "av_room" },
-  { entityId: "sensor.crestron_lighting_energy_today_5", powerEntityId: "sensor.crestron_lighting_power_minute_average_5", label: "Crestron Lighting 5", category: "Lighting", panel: "av_room" },
-  { entityId: "sensor.crestron_lighting_panel_energy_today", powerEntityId: "sensor.crestron_lighting_panel_power_minute_average", label: "Crestron Lighting Panel", category: "Lighting", panel: "av_room" },
-  { entityId: "sensor.first_floor_lighting_energy_today", powerEntityId: "sensor.first_floor_lighting_power_minute_average", label: "First Floor Lighting", category: "Lighting", panel: "av_room" },
-  { entityId: "sensor.second_floor_lighting_energy_today", powerEntityId: "sensor.second_floor_lighting_power_minute_average", label: "Second Floor Lighting", category: "Lighting", panel: "av_room" },
-  { entityId: "sensor.av_rack_energy_today", powerEntityId: "sensor.av_rack_power_minute_average", label: "AV Rack", category: "Other", panel: "av_room" },
-  { entityId: "sensor.av_rack_energy_today_2", powerEntityId: "sensor.av_rack_power_minute_average_2", label: "AV Rack 2", category: "Other", panel: "av_room" },
-  { entityId: "sensor.av_rack_energy_today_3", powerEntityId: "sensor.av_rack_power_minute_average_3", label: "AV Rack 3", category: "Other", panel: "av_room" },
-  { entityId: "sensor.elevator_energy_today", powerEntityId: "sensor.elevator_power_minute_average", label: "Elevator", category: "Other", panel: "av_room" },
-  { entityId: "sensor.gh_garage_opener_energy_today", powerEntityId: "sensor.gh_garage_opener_power_minute_average", label: "GH Garage Opener", category: "Other", panel: "guest_house" },
-  { entityId: "sensor.gh_garage_outlets_energy_today", powerEntityId: "sensor.gh_garage_outlets_power_minute_average", label: "GH Garage Outlets", category: "Other", panel: "guest_house" },
-  { entityId: "sensor.gh_washer_dryer_energy_today", powerEntityId: "sensor.gh_washer_dryer_power_minute_average", label: "GH Washer Dryer", category: "Other", panel: "guest_house" },
-  { entityId: "sensor.garage_ceiling_cord_plugs_energy_today", powerEntityId: "sensor.garage_ceiling_cord_plugs_power_minute_average", label: "Garage Ceiling Cord Plugs", category: "Other", panel: "garage1" },
-  { entityId: "sensor.garage_doors_energy_today", powerEntityId: "sensor.garage_doors_power_minute_average", label: "Garage Doors", category: "Other", panel: "garage1" },
-  { entityId: "sensor.garage_gfcis_energy_today", powerEntityId: "sensor.garage_gfcis_power_minute_average", label: "Garage GFCIs", category: "Other", panel: "garage1" },
-  { entityId: "sensor.table_saw_energy_today", powerEntityId: "sensor.table_saw_power_minute_average", label: "Table Saw", category: "Other", panel: "garage1" },
-  { entityId: "sensor.garage_wall_plugs_energy_today", powerEntityId: "sensor.garage_wall_plugs_power_minute_average", label: "Garage Wall Plugs", category: "Other", panel: "garage2" },
-  { entityId: "sensor.garage_wall_plugs_energy_today_2", powerEntityId: "sensor.garage_wall_plugs_power_minute_average_2", label: "Garage Wall Plugs", category: "Other", panel: "garage2" },
-  { entityId: "sensor.gym_outlets_energy_today", powerEntityId: "sensor.gym_outlets_power_minute_average", label: "Gym Outlets", category: "Other", panel: "guest_house" },
-  { entityId: "sensor.gym_outlets_energy_today_2", powerEntityId: "sensor.gym_outlets_power_minute_average_2", label: "Gym Outlets", category: "Other", panel: "guest_house" },
-  { entityId: "sensor.washer_dryer_1_energy_today", powerEntityId: "sensor.washer_dryer_1_power_minute_average", label: "Washer & Dryer (1)", category: "Other", panel: "garage1" },
-  { entityId: "sensor.washer_dryer_2_energy_today", powerEntityId: "sensor.washer_dryer_2_power_minute_average", label: "Washer & Dryer (2)", category: "Other", panel: "garage1" },
-  { entityId: "sensor.wen_air_purifier_energy_today", powerEntityId: "sensor.wen_air_purifier_power_minute_average", label: "Wen Air Purifier", category: "Other", panel: "garage1" }
-];
-var PANEL_MAIN_ENERGY_ENTITY_IDS = [
-  "sensor.garage_panel_1_energy_today",
-  "sensor.garage_panel_2_energy_today",
-  "sensor.av_room_panel_energy_today",
-  "sensor.guest_house_sub_panel_energy_today",
-  "sensor.equipment_room_cabana_energy_today"
-];
-var CANONICAL_NON_LEAF_ENERGY_IDS = /* @__PURE__ */ new Set([
-  ...PANEL_MAIN_ENERGY_ENTITY_IDS,
-  "sensor.crestron_lighting_panel_energy_today",
-  ...Array.from({ length: 7 }, (_, i) => `sensor.garage_panel_2_energy_today_${i + 2}`)
-]);
-var CANONICAL_LEAF_ENERGY_ENTITY_IDS = ENERGY_CIRCUITS.map((circuit) => circuit.entityId).filter((entityId) => !CANONICAL_NON_LEAF_ENERGY_IDS.has(entityId));
-var CANONICAL_ENERGY_HIERARCHY_IDS = [
-  ...PANEL_MAIN_ENERGY_ENTITY_IDS,
-  ...CANONICAL_LEAF_ENERGY_ENTITY_IDS
-];
+function discoverEnergyCircuitsFromEntities(entities) {
+  const discovered = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const e of entities) {
+    if (!e.entity_id || !e.entity_id.startsWith("sensor.")) continue;
+    if (seen.has(e.entity_id)) continue;
+    const isEnergy = e.entity_id.includes("_energy_today") || e.entity_id.endsWith("_energy") || e.attributes?.device_class === "energy" || e.attributes?.unit_of_measurement === "kWh";
+    if (!isEnergy) continue;
+    const powerEntityId = e.entity_id.replace("_energy_today", "_power_minute_average").replace("_energy", "_power");
+    const friendlyName = e.attributes?.friendly_name || e.entity_id.replace(/^sensor\./, "").replace(/_/g, " ");
+    const lower = (e.entity_id + " " + friendlyName).toLowerCase();
+    const category = lower.includes("panel") ? "Panels" : lower.includes("ac") || lower.includes("hvac") || lower.includes("furnace") || lower.includes("climate") ? "HVAC" : lower.includes("charger") || lower.includes("tesla") || lower.includes("ev") || lower.includes("car") ? "Vehicles" : lower.includes("kitchen") || lower.includes("fridge") || lower.includes("oven") || lower.includes("dishwasher") ? "Kitchen" : lower.includes("light") ? "Lighting" : lower.includes("outdoor") || lower.includes("pool") || lower.includes("pump") || lower.includes("gate") || lower.includes("sauna") ? "Outdoor" : "Other";
+    discovered.push({
+      entityId: e.entity_id,
+      powerEntityId,
+      label: friendlyName,
+      category
+    });
+    seen.add(e.entity_id);
+  }
+  return discovered;
+}
+var ENERGY_CIRCUITS = [];
+function getEnergyCircuits() {
+  if (ENERGY_CIRCUITS.length > 0) return ENERGY_CIRCUITS;
+  try {
+    const cache3 = getEntityCache();
+    if (cache3 && cache3.length > 0) {
+      const discovered = discoverEnergyCircuitsFromEntities(cache3);
+      if (discovered.length > 0) {
+        ENERGY_CIRCUITS = discovered;
+        return discovered;
+      }
+    }
+  } catch {
+  }
+  return ENERGY_CIRCUITS;
+}
+function getPanelMainEnergyEntityIds() {
+  const circuits2 = getEnergyCircuits();
+  return circuits2.filter((c) => c.category === "Panels" && !c.entityId.includes("balance") && !c.entityId.match(/slot_\d+/)).map((c) => c.entityId);
+}
+function getCanonicalLeafEnergyEntityIds() {
+  const circuits2 = getEnergyCircuits();
+  const mains = new Set(getPanelMainEnergyEntityIds());
+  return circuits2.map((c) => c.entityId).filter((id) => !mains.has(id));
+}
+var PANEL_MAIN_ENERGY_ENTITY_IDS = new Proxy([], {
+  get(target, prop) {
+    const ids = getPanelMainEnergyEntityIds();
+    if (prop === "length") return ids.length;
+    if (prop === Symbol.iterator) return ids[Symbol.iterator].bind(ids);
+    if (typeof prop === "string" && !isNaN(Number(prop))) return ids[Number(prop)];
+    return ids[prop];
+  }
+});
+var CANONICAL_LEAF_ENERGY_ENTITY_IDS = new Proxy([], {
+  get(target, prop) {
+    const ids = getCanonicalLeafEnergyEntityIds();
+    if (prop === "length") return ids.length;
+    if (prop === Symbol.iterator) return ids[Symbol.iterator].bind(ids);
+    if (typeof prop === "string" && !isNaN(Number(prop))) return ids[Number(prop)];
+    return ids[prop];
+  }
+});
+var CANONICAL_ENERGY_HIERARCHY_IDS = new Proxy([], {
+  get(target, prop) {
+    const ids = [...getPanelMainEnergyEntityIds(), ...getCanonicalLeafEnergyEntityIds()];
+    if (prop === "length") return ids.length;
+    if (prop === Symbol.iterator) return ids[Symbol.iterator].bind(ids);
+    if (typeof prop === "string" && !isNaN(Number(prop))) return ids[Number(prop)];
+    return ids[prop];
+  }
+});
 async function getEnergyStatistics(entityIds, startTime, endTime, period = "hour") {
   const start = startTime instanceof Date ? startTime.toISOString() : startTime;
   const end = endTime ? endTime instanceof Date ? endTime.toISOString() : endTime : (/* @__PURE__ */ new Date()).toISOString();
@@ -42607,11 +42684,12 @@ function validateCompleteDailyEnergyStatistics(stats, usageDate, requiredEntityI
   };
 }
 async function getGridConsumption(startTime, endTime, period = "day") {
-  const entityIds = ENERGY_CIRCUITS.map((c) => c.entityId);
+  const circuitsList = getEnergyCircuits();
+  const entityIds = circuitsList.map((c) => c.entityId);
   const stats = await getEnergyStatistics(entityIds, startTime, endTime, period);
   const circuits2 = [];
   let totalKwh = 0;
-  for (const circuit of ENERGY_CIRCUITS) {
+  for (const circuit of circuitsList) {
     const points = stats[circuit.entityId] ?? [];
     const circuitKwh = points.reduce((sum, p) => sum + (p.change || 0), 0);
     totalKwh += circuitKwh;
@@ -42667,7 +42745,8 @@ function getTodayConsumptionFromStates() {
   const byId = new Map(cache3.map((e) => [e.entity_id, e]));
   const circuits2 = [];
   let totalKwh = 0;
-  for (const circuit of ENERGY_CIRCUITS) {
+  const circuitsList = getEnergyCircuits();
+  for (const circuit of circuitsList) {
     const entity = byId.get(circuit.entityId);
     const raw = entity ? parseFloat(entity.state) : NaN;
     const kwh = Number.isFinite(raw) && raw >= 0 ? raw : 0;
@@ -42683,14 +42762,15 @@ function getTodayConsumptionFromStates() {
 }
 async function getCycleConsumptionFromDb(cycleStart) {
   const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Los_Angeles",
+    timeZone: getEstateTimezone(),
     year: "numeric",
     month: "2-digit",
     day: "2-digit"
   });
   const cycleStartDate = fmt.format(cycleStart);
   const todayDate = fmt.format(/* @__PURE__ */ new Date());
-  const labelById = new Map(ENERGY_CIRCUITS.map((c) => [c.entityId, c]));
+  const circuitsList = getEnergyCircuits();
+  const labelById = new Map(circuitsList.map((c) => [c.entityId, c]));
   const circuits2 = [];
   let totalKwh = 0;
   let daysWithData = 0;
@@ -42735,7 +42815,7 @@ async function getCycleConsumptionFromDb(cycleStart) {
 }
 function laDateString(iso) {
   const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Los_Angeles",
+    timeZone: getEstateTimezone(),
     year: "numeric",
     month: "2-digit",
     day: "2-digit"
@@ -42743,13 +42823,14 @@ function laDateString(iso) {
   return fmt.format(new Date(iso));
 }
 async function getCycleConsumptionFromStats(cycleStart, excludeDates, excludeToday) {
-  const labelById = new Map(ENERGY_CIRCUITS.map((c) => [c.entityId, c]));
+  const circuitsList = getEnergyCircuits();
+  const labelById = new Map(circuitsList.map((c) => [c.entityId, c]));
   const perCircuit = /* @__PURE__ */ new Map();
   const filled = /* @__PURE__ */ new Set();
   try {
-    const entityIds = ENERGY_CIRCUITS.map((c) => c.entityId);
+    const entityIds = circuitsList.map((c) => c.entityId);
     const stats = await getEnergyStatistics(entityIds, cycleStart, /* @__PURE__ */ new Date(), "day");
-    for (const circuit of ENERGY_CIRCUITS) {
+    for (const circuit of circuitsList) {
       const points = stats[circuit.entityId] ?? [];
       let kwh = 0;
       for (const p of points) {
@@ -42783,7 +42864,7 @@ async function getCycleConsumptionRobust(cycleStart) {
   const db2 = await getCycleConsumptionFromDb(cycleStart);
   const today = getTodayConsumptionFromStates();
   const todayDate = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Los_Angeles",
+    timeZone: getEstateTimezone(),
     year: "numeric",
     month: "2-digit",
     day: "2-digit"
@@ -42799,7 +42880,8 @@ async function getCycleConsumptionRobust(cycleStart) {
   for (const c of db2.circuits) add(c);
   for (const c of stats.circuits) add(c);
   for (const t of today.circuits) add(t);
-  for (const circuit of ENERGY_CIRCUITS) {
+  const allCircuits = getEnergyCircuits();
+  for (const circuit of allCircuits) {
     if (!merged.has(circuit.entityId)) {
       merged.set(circuit.entityId, {
         entityId: circuit.entityId,
@@ -42826,6 +42908,7 @@ async function getCycleConsumptionRobust(cycleStart) {
 // server/routes/electricity.ts
 init_haWebSocket();
 init_storage();
+init_estateConfig();
 var router34 = Router35();
 var LA_UTILITY_TAX = 0.1;
 var STATE_SURCHARGE = 3e-4;
@@ -42863,18 +42946,18 @@ function asRecord(value) {
   }
   return {};
 }
-var PANEL_MAIN_POWER_ENTITIES = [
-  "sensor.garage_panel_1_power_minute_average",
-  "sensor.garage_panel_2_power_minute_average",
-  "sensor.av_room_panel_power_minute_average",
-  "sensor.guest_house_sub_panel_power_minute_average",
-  "sensor.equipment_room_cabana_power_minute_average"
-];
+function getPanelMainPowerEntities() {
+  const cache3 = getEntityCache();
+  return cache3.filter(
+    (e) => e.entity_id.startsWith("sensor.") && e.entity_id.includes("panel") && !e.entity_id.includes("circuit") && (e.entity_id.includes("power_minute_average") || e.entity_id.endsWith("_power"))
+  ).map((e) => e.entity_id);
+}
 function getLiveTotalWatts() {
   const cache3 = getEntityCache();
   const byId = new Map(cache3.map((e) => [e.entity_id, e]));
+  const mains = getPanelMainPowerEntities();
   let watts = 0;
-  for (const entityId of PANEL_MAIN_POWER_ENTITIES) {
+  for (const entityId of mains) {
     const e = byId.get(entityId);
     const raw = e ? parseFloat(e.state) : NaN;
     if (Number.isFinite(raw) && raw > 0) watts += raw;
@@ -42891,7 +42974,8 @@ function isCronAuthorized2(req) {
 }
 function laDayBounds(dayOffsetBack) {
   const now = /* @__PURE__ */ new Date();
-  const laNow = new Date(now.toLocaleString("en-US", { timeZone: "America/Los_Angeles" }));
+  const tz = getEstateTimezone();
+  const laNow = new Date(now.toLocaleString("en-US", { timeZone: tz }));
   const offsetMs = now.getTime() - laNow.getTime();
   const startLocal = new Date(laNow.getFullYear(), laNow.getMonth(), laNow.getDate() - dayOffsetBack, 0, 0, 0, 0);
   const endLocal = new Date(laNow.getFullYear(), laNow.getMonth(), laNow.getDate() - dayOffsetBack + 1, 0, 0, 0, 0);
@@ -43058,8 +43142,9 @@ router34.get("/breakdown", requireAuth2, async (req, res) => {
     } else if (range === "today") {
       const today = getTodayConsumptionFromStates();
       perCircuit = today.circuits;
+      const tz = getEstateTimezone();
       const laFormatter = new Intl.DateTimeFormat("en-US", {
-        timeZone: "America/Los_Angeles",
+        timeZone: tz,
         year: "numeric",
         month: "2-digit",
         day: "2-digit"
@@ -43068,7 +43153,7 @@ router34.get("/breakdown", requireAuth2, async (req, res) => {
       const y = parts.find((p) => p.type === "year").value;
       const m = parts.find((p) => p.type === "month").value;
       const d = parts.find((p) => p.type === "day").value;
-      startTime = /* @__PURE__ */ new Date(`${y}-${m}-${d}T00:00:00-07:00`);
+      startTime = /* @__PURE__ */ new Date(`${y}-${m}-${d}T00:00:00Z`);
     } else if (range === "week") {
       startTime = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1e3);
       const { circuits: circuits2 } = await getGridConsumption(startTime, now, "day");
@@ -43079,8 +43164,9 @@ router34.get("/breakdown", requireAuth2, async (req, res) => {
         kwh: +c.totalKwh.toFixed(3)
       }));
     } else if (range === "month") {
+      const tz = getEstateTimezone();
       const laFormatter = new Intl.DateTimeFormat("en-US", {
-        timeZone: "America/Los_Angeles",
+        timeZone: tz,
         year: "numeric",
         month: "2-digit",
         day: "2-digit"
@@ -43444,7 +43530,8 @@ router34.get("/rates", requireAuth2, async (_req, res) => {
 function laDayBoundsForDate(dateStr) {
   const [y, m, d] = dateStr.split("-").map(Number);
   const now = /* @__PURE__ */ new Date();
-  const laNow = new Date(now.toLocaleString("en-US", { timeZone: "America/Los_Angeles" }));
+  const tz = getEstateTimezone();
+  const laNow = new Date(now.toLocaleString("en-US", { timeZone: tz }));
   const offsetMs = now.getTime() - laNow.getTime();
   const startLocal = new Date(y, m - 1, d, 0, 0, 0, 0);
   const endLocal = new Date(y, m - 1, d + 1, 0, 0, 0, 0);
@@ -43513,7 +43600,7 @@ router34.post("/backfill", async (req, res) => {
       return res.status(403).json({ error: "Unauthorized. Admin access or valid cron secret required." });
     }
     const fmt = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "America/Los_Angeles",
+      timeZone: getEstateTimezone(),
       year: "numeric",
       month: "2-digit",
       day: "2-digit"
@@ -43638,7 +43725,8 @@ router34.get("/circuit-history", requireAuth2, async (req, res) => {
       params.push(from, to);
     } else {
       const months = Math.min(Math.max(parseInt(req.query.months) || 6, 1), 36);
-      where = `WHERE usage_date >= (date_trunc('month', (now() AT TIME ZONE 'America/Los_Angeles')) - (($1)::text || ' months')::interval)`;
+      const tz = getEstateTimezone();
+      where = `WHERE usage_date >= (date_trunc('month', (now() AT TIME ZONE '${tz}')) - (($1)::text || ' months')::interval)`;
       params.push(months - 1);
     }
     const { rows } = await storage.query(
@@ -43810,16 +43898,15 @@ router34.get("/live-rate", requireAuth2, async (_req, res) => {
 var INSIGHTS_MIN_DAYS = 14;
 var INSIGHTS_TARGET_DAYS = 30;
 var INSIGHTS_CONTEXT_CACHE_MS = 30 * 60 * 1e3;
-var HOME_LAT4 = Number(process.env.HOME_LAT) || 34.0522;
-var HOME_LNG4 = Number(process.env.HOME_LNG) || -118.2437;
 var insightsContextCache = null;
 function addIsoDays(date2, days) {
   return new Date((/* @__PURE__ */ new Date(`${date2}T00:00:00Z`)).getTime() + days * 864e5).toISOString().slice(0, 10);
 }
 function laMidnight(date2) {
   const noonUtc = /* @__PURE__ */ new Date(`${date2}T12:00:00Z`);
+  const tz = getEstateTimezone();
   const offsetPart = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Los_Angeles",
+    timeZone: tz,
     timeZoneName: "longOffset"
   }).formatToParts(noonUtc).find((part) => part.type === "timeZoneName")?.value;
   const offset = offsetPart?.replace("GMT", "") || "-08:00";
@@ -43830,15 +43917,16 @@ async function fetchInsightsContext(startDate, endDate) {
   if (insightsContextCache?.key === key && insightsContextCache.expiresAt > Date.now()) {
     return insightsContextCache.rows;
   }
+  const estateConfig = await getEstateConfig();
   const byDate = /* @__PURE__ */ new Map();
   const weatherUrl = new URL("https://archive-api.open-meteo.com/v1/archive");
-  weatherUrl.searchParams.set("latitude", String(HOME_LAT4));
-  weatherUrl.searchParams.set("longitude", String(HOME_LNG4));
+  weatherUrl.searchParams.set("latitude", String(estateConfig.latitude));
+  weatherUrl.searchParams.set("longitude", String(estateConfig.longitude));
   weatherUrl.searchParams.set("start_date", startDate);
   weatherUrl.searchParams.set("end_date", endDate);
   weatherUrl.searchParams.set("daily", "temperature_2m_mean");
   weatherUrl.searchParams.set("temperature_unit", "fahrenheit");
-  weatherUrl.searchParams.set("timezone", "America/Los_Angeles");
+  weatherUrl.searchParams.set("timezone", estateConfig.timeZone);
   const weatherPromise = fetch(weatherUrl, { signal: AbortSignal.timeout(8e3) }).then(async (response) => {
     if (!response.ok) throw new Error(`weather history returned ${response.status}`);
     const body = await response.json();
@@ -43873,7 +43961,7 @@ async function fetchInsightsContext(startDate, endDate) {
       let cursor = from;
       while (cursor < to) {
         const date2 = new Intl.DateTimeFormat("en-CA", {
-          timeZone: "America/Los_Angeles",
+          timeZone: getEstateTimezone(),
           year: "numeric",
           month: "2-digit",
           day: "2-digit"
@@ -43916,7 +44004,7 @@ router34.get("/insights", requireAuth2, async (_req, res) => {
     );
     const cycleStart = estimateBillingCycleStart();
     const dateFormatter = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "America/Los_Angeles",
+      timeZone: getEstateTimezone(),
       year: "numeric",
       month: "2-digit",
       day: "2-digit"
@@ -44127,6 +44215,7 @@ init_errorSanitizer();
 init_fetchWithTimeout();
 init_haWebSocket();
 init_storage();
+init_estateConfig();
 import { Router as Router36 } from "express";
 
 // server/lib/ladwpWater.ts
@@ -44281,7 +44370,8 @@ function isCronAuthorized3(req) {
 }
 function laDayBounds2(dayOffsetBack) {
   const now = /* @__PURE__ */ new Date();
-  const laNow = new Date(now.toLocaleString("en-US", { timeZone: "America/Los_Angeles" }));
+  const tz = getEstateTimezone();
+  const laNow = new Date(now.toLocaleString("en-US", { timeZone: tz }));
   const offsetMs = now.getTime() - laNow.getTime();
   const startLocal = new Date(laNow.getFullYear(), laNow.getMonth(), laNow.getDate() - dayOffsetBack, 0, 0, 0, 0);
   const endLocal = new Date(laNow.getFullYear(), laNow.getMonth(), laNow.getDate() - dayOffsetBack + 1, 0, 0, 0, 0);
@@ -44293,7 +44383,8 @@ function laDayBounds2(dayOffsetBack) {
 function laDayBoundsForDate2(dateStr) {
   const [y, m, d] = dateStr.split("-").map(Number);
   const now = /* @__PURE__ */ new Date();
-  const laNow = new Date(now.toLocaleString("en-US", { timeZone: "America/Los_Angeles" }));
+  const tz = getEstateTimezone();
+  const laNow = new Date(now.toLocaleString("en-US", { timeZone: tz }));
   const offsetMs = now.getTime() - laNow.getTime();
   const startLocal = new Date(y, m - 1, d, 0, 0, 0, 0);
   const endLocal = new Date(y, m - 1, d + 1, 0, 0, 0, 0);
@@ -44412,9 +44503,10 @@ router35.get("/breakdown", requireAuth2, async (req, res) => {
   try {
     const t0 = Date.now();
     const range = req.query.range === "today" ? "today" : "cycle";
-    const where = range === "today" ? `WHERE usage_date = (now() AT TIME ZONE 'America/Los_Angeles')::date` : `WHERE usage_date > COALESCE(
+    const tz = getEstateTimezone();
+    const where = range === "today" ? `WHERE usage_date = (now() AT TIME ZONE '${tz}')::date` : `WHERE usage_date > COALESCE(
            (SELECT MAX(billing_period_end) FROM water_bills),
-           (now() AT TIME ZONE 'America/Los_Angeles')::date - interval '60 days'
+           (now() AT TIME ZONE '${tz}')::date - interval '60 days'
          )`;
     let rows = [];
     try {
@@ -44483,7 +44575,7 @@ router35.get("/history", requireAuth2, async (req, res) => {
                 ROUND(SUM(dollars)::numeric, 2) AS dollars,
                 COUNT(DISTINCT usage_date) AS days
          FROM water_usage_daily
-         WHERE usage_date >= (date_trunc('month', (now() AT TIME ZONE 'America/Los_Angeles')) - (($1)::text || ' months')::interval)
+         WHERE usage_date >= (date_trunc('month', (now() AT TIME ZONE '${getEstateTimezone()}')) - (($1)::text || ' months')::interval)
          GROUP BY period, key
          ORDER BY period DESC, dollars DESC`,
         [months - 1]
@@ -44531,21 +44623,22 @@ router35.get("/insights", requireAuth2, async (_req, res) => {
     let previousGallons = 0;
     let previousDays = 0;
     try {
+      const tz = getEstateTimezone();
       const { rows } = await storage.query(
         `SELECT
            COALESCE(SUM(gallons) FILTER (
-             WHERE usage_date >= (now() AT TIME ZONE 'America/Los_Angeles')::date - interval '7 days'
+             WHERE usage_date >= (now() AT TIME ZONE '${tz}')::date - interval '7 days'
            ), 0) AS recent_gallons,
            COUNT(DISTINCT usage_date) FILTER (
-             WHERE usage_date >= (now() AT TIME ZONE 'America/Los_Angeles')::date - interval '7 days'
+             WHERE usage_date >= (now() AT TIME ZONE '${tz}')::date - interval '7 days'
            ) AS recent_days,
            COALESCE(SUM(gallons) FILTER (
-             WHERE usage_date >= (now() AT TIME ZONE 'America/Los_Angeles')::date - interval '14 days'
-               AND usage_date < (now() AT TIME ZONE 'America/Los_Angeles')::date - interval '7 days'
+             WHERE usage_date >= (now() AT TIME ZONE '${tz}')::date - interval '14 days'
+               AND usage_date < (now() AT TIME ZONE '${tz}')::date - interval '7 days'
            ), 0) AS previous_gallons,
            COUNT(DISTINCT usage_date) FILTER (
-             WHERE usage_date >= (now() AT TIME ZONE 'America/Los_Angeles')::date - interval '14 days'
-               AND usage_date < (now() AT TIME ZONE 'America/Los_Angeles')::date - interval '7 days'
+             WHERE usage_date >= (now() AT TIME ZONE '${tz}')::date - interval '14 days'
+               AND usage_date < (now() AT TIME ZONE '${tz}')::date - interval '7 days'
            ) AS previous_days
          FROM water_usage_daily`,
         []
@@ -44741,7 +44834,7 @@ async function getCycleHcf(uptoDate) {
     const params = [];
     let dateClause = `usage_date > COALESCE(
       (SELECT MAX(billing_period_end) FROM water_bills),
-      (now() AT TIME ZONE 'America/Los_Angeles')::date - interval '60 days'
+      (now() AT TIME ZONE '${getEstateTimezone()}')::date - interval '60 days'
     )`;
     if (uptoDate && /^\d{4}-\d{2}-\d{2}$/.test(uptoDate)) {
       params.push(uptoDate);
@@ -45312,12 +45405,12 @@ init_auth();
 init_auditLog();
 init_db2();
 init_db();
+init_estateConfig();
 import { Router as Router40 } from "express";
 import ExcelJS from "exceljs";
 var router39 = Router40();
-var PT = "America/Los_Angeles";
 function getTodayPT() {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: PT }).format(/* @__PURE__ */ new Date());
+  return new Intl.DateTimeFormat("en-CA", { timeZone: getEstateTimezone() }).format(/* @__PURE__ */ new Date());
 }
 function getWeekStartPT(dateStr) {
   const [y, m, d] = dateStr.split("-").map(Number);
@@ -48511,7 +48604,7 @@ function captureException(err) {
 
 // server/index.ts
 import pg2 from "pg";
-process.env.TZ = process.env.TZ || "America/Los_Angeles";
+process.env.TZ = process.env.TZ || process.env.TIME_ZONE || "UTC";
 for (const s6Dir of ["/var/run/s6/container_environment", "/run/s6/container_environment"]) {
   try {
     if (fs9.existsSync(s6Dir)) {

@@ -172,11 +172,12 @@ interface Props {
   panel: PanelHistoryTarget | null;
 }
 
-// Format an ISO hour-bucket to an LA-local "h a" label (e.g. "3 PM").
+// Format an ISO hour-bucket to a local "h a" label (e.g. "3 PM").
 function formatHour(iso: string): string {
   try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
     return new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/Los_Angeles',
+      timeZone: tz,
       hour: 'numeric',
       hour12: true,
     }).format(new Date(iso));
@@ -185,11 +186,12 @@ function formatHour(iso: string): string {
   }
 }
 
-// Format an ISO day-bucket to an LA-local "M/D" label (e.g. "6/21").
+// Format an ISO day-bucket to a local "M/D" label (e.g. "6/21").
 function formatDay(iso: string): string {
   try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
     return new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/Los_Angeles',
+      timeZone: tz,
       month: 'numeric',
       day: 'numeric',
     }).format(new Date(iso));

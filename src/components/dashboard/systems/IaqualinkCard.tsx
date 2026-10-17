@@ -196,7 +196,7 @@ function TempValue({ value, type, loading }: { value: string | null; type: strin
 }
 
 export function IaqualinkCard() {
-  const { loading, connected, entities, temperatures, freezeProtection, refetch } = useIaqualinkHA();
+  const { loading, connected, entities, entityIds, temperatures, freezeProtection, refetch } = useIaqualinkHA();
 
   const getEntity = (id: string) => entities.get(id);
   const isOn = (id: string) => getEntity(id)?.state === 'on';
@@ -248,24 +248,40 @@ export function IaqualinkCard() {
             </div>
           )}
 
-          <SectionLabel>Pumps</SectionLabel>
-          <ToggleRow label="Pool Pump" entityId="switch.pool_pump" isOn={isOn('switch.pool_pump')} onRefresh={doRefresh} />
-          <ToggleRow label="Spa Pump" entityId="switch.spa_pump" isOn={isOn('switch.spa_pump')} onRefresh={doRefresh} />
-          <ToggleRow label="Booster Pump" entityId="switch.booster_pump" isOn={isOn('switch.booster_pump')} onRefresh={doRefresh} />
+          {(entityIds.poolPump || entityIds.spaPump || entityIds.boosterPump) && (
+            <>
+              <SectionLabel>Pumps</SectionLabel>
+              {entityIds.poolPump && <ToggleRow label="Pool Pump" entityId={entityIds.poolPump} isOn={isOn(entityIds.poolPump)} onRefresh={doRefresh} />}
+              {entityIds.spaPump && <ToggleRow label="Spa Pump" entityId={entityIds.spaPump} isOn={isOn(entityIds.spaPump)} onRefresh={doRefresh} />}
+              {entityIds.boosterPump && <ToggleRow label="Booster Pump" entityId={entityIds.boosterPump} isOn={isOn(entityIds.boosterPump)} onRefresh={doRefresh} />}
+            </>
+          )}
 
-          <SectionLabel>Heaters</SectionLabel>
-          <HeaterRow label="Pool Heater" switchId="switch.pool_heater" climateId="climate.pool" isOn={isOn('switch.pool_heater')} setPoint={temperatures.poolSetPoint} onRefresh={doRefresh} />
-          <HeaterRow label="Spa Heater" switchId="switch.spa_heater" climateId="climate.spa" isOn={isOn('switch.spa_heater')} setPoint={temperatures.spaSetPoint} onRefresh={doRefresh} />
-          <HeaterRow label="Solar Heater" switchId="switch.solar_heater" isOn={isOn('switch.solar_heater')} onRefresh={doRefresh} />
+          {(entityIds.poolHeater || entityIds.spaHeater || entityIds.solarHeater) && (
+            <>
+              <SectionLabel>Heaters</SectionLabel>
+              {entityIds.poolHeater && <HeaterRow label="Pool Heater" switchId={entityIds.poolHeater} climateId={entityIds.poolClimate} isOn={isOn(entityIds.poolHeater)} setPoint={temperatures.poolSetPoint} onRefresh={doRefresh} />}
+              {entityIds.spaHeater && <HeaterRow label="Spa Heater" switchId={entityIds.spaHeater} climateId={entityIds.spaClimate} isOn={isOn(entityIds.spaHeater)} setPoint={temperatures.spaSetPoint} onRefresh={doRefresh} />}
+              {entityIds.solarHeater && <HeaterRow label="Solar Heater" switchId={entityIds.solarHeater} isOn={isOn(entityIds.solarHeater)} onRefresh={doRefresh} />}
+            </>
+          )}
 
-          <SectionLabel>Lights</SectionLabel>
-          <LightRow label="Pool Light" entityId="light.pool_light" isOn={isOn('light.pool_light')} currentEffect={lightEffect('light.pool_light')} onRefresh={doRefresh} />
-          <LightRow label="Spa Light" entityId="light.spa_light" isOn={isOn('light.spa_light')} currentEffect={lightEffect('light.spa_light')} onRefresh={doRefresh} />
-          <LightRow label="Laminar LED" entityId="light.laminar_led_lt" isOn={isOn('light.laminar_led_lt')} currentEffect={lightEffect('light.laminar_led_lt')} onRefresh={doRefresh} />
+          {(entityIds.poolLight || entityIds.spaLight || entityIds.laminarLed) && (
+            <>
+              <SectionLabel>Lights</SectionLabel>
+              {entityIds.poolLight && <LightRow label="Pool Light" entityId={entityIds.poolLight} isOn={isOn(entityIds.poolLight)} currentEffect={lightEffect(entityIds.poolLight)} onRefresh={doRefresh} />}
+              {entityIds.spaLight && <LightRow label="Spa Light" entityId={entityIds.spaLight} isOn={isOn(entityIds.spaLight)} currentEffect={lightEffect(entityIds.spaLight)} onRefresh={doRefresh} />}
+              {entityIds.laminarLed && <LightRow label="Laminar LED" entityId={entityIds.laminarLed} isOn={isOn(entityIds.laminarLed)} currentEffect={lightEffect(entityIds.laminarLed)} onRefresh={doRefresh} />}
+            </>
+          )}
 
-          <SectionLabel>Water Features</SectionLabel>
-          <ToggleRow label="Laminar Jets" entityId="switch.laminar_jets" isOn={isOn('switch.laminar_jets')} onRefresh={doRefresh} />
-          <ToggleRow label="Bubbler" entityId="switch.bubbler" isOn={isOn('switch.bubbler')} onRefresh={doRefresh} />
+          {(entityIds.laminarJets || entityIds.bubbler) && (
+            <>
+              <SectionLabel>Water Features</SectionLabel>
+              {entityIds.laminarJets && <ToggleRow label="Laminar Jets" entityId={entityIds.laminarJets} isOn={isOn(entityIds.laminarJets)} onRefresh={doRefresh} />}
+              {entityIds.bubbler && <ToggleRow label="Bubbler" entityId={entityIds.bubbler} isOn={isOn(entityIds.bubbler)} onRefresh={doRefresh} />}
+            </>
+          )}
 
           {!freezeProtection && (
             <div className="flex items-center gap-2 pt-3 text-xs text-muted-foreground">

@@ -15,41 +15,8 @@ interface PrinterConfig {
   drumEntity?: string;
 }
 
-// IPP-based laser printers (HP color + Brother mono). The Brother HL-L2460DW is a
-// mono laser added to HA via the IPP integration, which exposes only two entities:
-// sensor.brother_hl_l2460dw (status: idle/printing/stopped) and
-// sensor.brother_hl_l2460dw_bk (black toner %). No drum sensor exists — Brother's
-// IPP implementation does not surface drum life on this model.
-const OFFICE_PRINTERS: PrinterConfig[] = [
-  {
-    name: "Office Printer 2",
-    statusEntity: 'sensor.hp_color_laserjet_pro_mfp_3301_2',
-    cartridges: [
-      { label: 'Black', entity: 'sensor.hp_color_laserjet_pro_mfp_3301_black_cartridge_2', color: '#374151' },
-      { label: 'Cyan', entity: 'sensor.hp_color_laserjet_pro_mfp_3301_cyan_cartridge_2', color: '#06b6d4' },
-      { label: 'Magenta', entity: 'sensor.hp_color_laserjet_pro_mfp_3301_magenta_cartridge_2', color: '#ec4899' },
-      { label: 'Yellow', entity: 'sensor.hp_color_laserjet_pro_mfp_3301_yellow_cartridge_2', color: '#eab308' },
-    ],
-  },
-  {
-    name: 'Office Color Printer 1',
-    statusEntity: 'sensor.hp_color_laserjet_pro_mfp_3301',
-    cartridges: [
-      { label: 'Black', entity: 'sensor.hp_color_laserjet_pro_mfp_3301_black_cartridge', color: '#374151' },
-      { label: 'Cyan', entity: 'sensor.hp_color_laserjet_pro_mfp_3301_cyan_cartridge', color: '#06b6d4' },
-      { label: 'Magenta', entity: 'sensor.hp_color_laserjet_pro_mfp_3301_magenta_cartridge', color: '#ec4899' },
-      { label: 'Yellow', entity: 'sensor.hp_color_laserjet_pro_mfp_3301_yellow_cartridge', color: '#eab308' },
-    ],
-  },
-  {
-    name: "Main Office",
-    statusEntity: 'sensor.brother_hl_l2460dw',
-    cartridges: [
-      { label: 'Black Toner', entity: 'sensor.brother_hl_l2460dw_bk', color: '#374151' },
-    ],
-    // No drumEntity: IPP does not expose a drum-life marker for the HL-L2460DW.
-  },
-];
+// IPP-based laser printers discovered dynamically via Home Assistant IPP integration.
+const OFFICE_PRINTERS: PrinterConfig[] = [];
 
 const LOW_THRESHOLD = 20;
 const LOW_DRUM_THRESHOLD = 20;

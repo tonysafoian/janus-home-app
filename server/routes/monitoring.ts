@@ -26,7 +26,7 @@ import {
 } from '../../shared/avCloset.js';
 import { getAvClosetReading } from '../services/govee.js';
 import type { CreatedAtRow } from '../../shared/dbRows.js';
-import { getEntityMappings } from '../lib/estateConfig.js';
+import { getEntityMappings, getEstateTimezone } from '../lib/estateConfig.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -187,22 +187,22 @@ function fetchT(input: string | URL | Request, init?: RequestInit, timeoutMs = 3
   return fetch(input as any, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
-const SPEEDTEST_ENTITIES = {
-  download: 'sensor.speedtest_download',
-  upload: 'sensor.speedtest_upload',
-  ping: 'sensor.speedtest_ping',
-};
-
-async function getEffectiveSpeedtestEntities() {
+async function getEffectiveSpeedtestEntities(states?: Record<string, any>) {
   const mappings = await getEntityMappings();
+  const keys = states ? Object.keys(states) : [];
   return {
-    download: mappings.speedtest?.download || SPEEDTEST_ENTITIES.download,
-    upload: mappings.speedtest?.upload || SPEEDTEST_ENTITIES.upload,
-    ping: mappings.speedtest?.ping || SPEEDTEST_ENTITIES.ping,
+    download: mappings.speedtest?.download || keys.find(k => k.startsWith('sensor.') && k.includes('speedtest_download')) || '',
+    upload: mappings.speedtest?.upload || keys.find(k => k.startsWith('sensor.') && k.includes('speedtest_upload')) || '',
+    ping: mappings.speedtest?.ping || keys.find(k => k.startsWith('sensor.') && k.includes('speedtest_ping')) || '',
   };
 }
 
-const FORTIGATE_WAN_ENTITIES = ['sensor.fortigate_wan_status', 'sensor.fortigate_wan1_status', 'sensor.fortinet_wan_status'];
+function findWanEntity(states: Record<string, any>): string | undefined {
+  return Object.keys(states).find(e =>
+    e.startsWith('sensor.') &&
+    (e.includes('fortigate_wan') || e.includes('fortinet_wan') || e.includes('router_wan') || e.includes('wan_status'))
+  );
+}
 
 const INTERNET_THRESHOLDS = {
   download_degraded: 100, download_critical: 25,
@@ -212,36 +212,49 @@ const INTERNET_THRESHOLDS = {
 
 const DEDUP_MINUTES = 60;
 
-const PRINTERS = [
-  {
-    name: "Office Printer 2",
-    statusEntity: 'sensor.hp_color_laserjet_pro_mfp_3301_2',
-    cartridges: [
-      { color: 'Black', entity: 'sensor.hp_color_laserjet_pro_mfp_3301_black_cartridge_2' },
-      { color: 'Cyan', entity: 'sensor.hp_color_laserjet_pro_mfp_3301_cyan_cartridge_2' },
-      { color: 'Magenta', entity: 'sensor.hp_color_laserjet_pro_mfp_3301_magenta_cartridge_2' },
-      { color: 'Yellow', entity: 'sensor.hp_color_laserjet_pro_mfp_3301_yellow_cartridge_2' },
-    ],
-  },
-  {
-    name: 'Office Color Printer 1',
-    statusEntity: 'sensor.hp_color_laserjet_pro_mfp_3301',
-    cartridges: [
-      { color: 'Black', entity: 'sensor.hp_color_laserjet_pro_mfp_3301_black_cartridge' },
-      { color: 'Cyan', entity: 'sensor.hp_color_laserjet_pro_mfp_3301_cyan_cartridge' },
-      { color: 'Magenta', entity: 'sensor.hp_color_laserjet_pro_mfp_3301_magenta_cartridge' },
-      { color: 'Yellow', entity: 'sensor.hp_color_laserjet_pro_mfp_3301_yellow_cartridge' },
-    ],
-  },
-  {
-    name: "Office Printer",
-    statusEntity: 'sensor.hl_l2460dw_status',
-    cartridges: [
-      { color: 'Black', entity: 'sensor.hl_l2460dw_black_toner_remaining' },
-    ],
-    drumEntity: 'sensor.hl_l2460dw_drum_remaining',
-  },
-];
+function discoverPrintersFromStates(states: Record<string, any>) {
+  const discovered: Array<{
+    name: string;
+    statusEntity: string;
+    cartridges: Array<{ color: string; entity: string }>;
+    drumEntity?: string;
+  }> = [];
+
+  const tonerSensors = Object.keys(states).filter(id =>
+    id.startsWith('sensor.') &&
+    (id.includes('_cartridge') || id.includes('_toner') || id.includes('ink_level'))
+  );
+
+  const groups = new Map<string, string[]>();
+  for (const s of tonerSensors) {
+    const parts = s.replace(/^sensor\./, '').split('_');
+    const prefix = parts.slice(0, Math.min(parts.length - 1, 3)).join('_');
+    if (!groups.has(prefix)) groups.set(prefix, []);
+    groups.get(prefix)!.push(s);
+  }
+
+  for (const [prefix, sensors] of groups.entries()) {
+    const statusEnt = Object.keys(states).find(id => id === `sensor.${prefix}` || id === `sensor.${prefix}_status`);
+    const statusEntity = statusEnt || sensors[0];
+    const friendlyName = states[statusEntity]?.attributes?.friendly_name || prefix.replace(/_/g, ' ');
+    const drumEnt = Object.keys(states).find(id => id === `sensor.${prefix}_drum_remaining` || id.includes(`${prefix}_drum`));
+
+    discovered.push({
+      name: friendlyName,
+      statusEntity,
+      drumEntity: drumEnt,
+      cartridges: sensors.map(id => {
+        const lower = id.toLowerCase();
+        const color = lower.includes('cyan') ? 'Cyan' :
+                      lower.includes('magenta') ? 'Magenta' :
+                      lower.includes('yellow') ? 'Yellow' : 'Black';
+        return { color, entity: id };
+      }),
+    });
+  }
+
+  return discovered;
+}
 
 const BAMBU_STATUS_SUFFIXES = ['print_status', 'current_stage', 'status'];
 const BAMBU_ERROR_STATES = ['error', 'failed', 'fault'];
@@ -250,13 +263,9 @@ const BAMBU_NOZZLE_MAX = 300;
 const BAMBU_BED_MAX = 120;
 const TONER_THRESHOLD = 10;
 
-const HA_ENTITIES = {
-  cpu: 'sensor.system_monitor_processor_use',
-  ram: 'sensor.system_monitor_memory_usage',
-  swap: 'sensor.system_monitor_swap_usage',
-  load: 'sensor.system_monitor_load_1_min',
-  temp: 'sensor.system_monitor_processor_temperature',
-};
+function findSystemEntity(states: Record<string, any>, patterns: string[]): string | undefined {
+  return Object.keys(states).find(id => patterns.every(p => id.includes(p)));
+}
 
 const CPU_SUSTAINED = 85;
 const RAM_SUSTAINED = 90;
@@ -313,10 +322,10 @@ router.post('/api/internet-health-monitor', requireAuth, async (req: any, res: a
     const states: Record<string, any> = {};
     if (Array.isArray(allStates)) { for (const s of allStates) states[s.entity_id] = { state: s.state, attributes: s.attributes || {} }; }
 
-    const wanEntity = FORTIGATE_WAN_ENTITIES.find(e => states[e]);
+    const wanEntity = findWanEntity(states);
     const wanState = wanEntity ? states[wanEntity].state : null;
     const wanAttributes = wanEntity ? (states[wanEntity].attributes || {}) : {};
-    const speedtestEntities = await getEffectiveSpeedtestEntities();
+    const speedtestEntities = await getEffectiveSpeedtestEntities(states);
     const download = states[speedtestEntities.download] ? parseFloat(states[speedtestEntities.download].state) : NaN;
     const upload = states[speedtestEntities.upload] ? parseFloat(states[speedtestEntities.upload].state) : NaN;
     const ping = states[speedtestEntities.ping] ? parseFloat(states[speedtestEntities.ping].state) : NaN;
@@ -422,7 +431,7 @@ router.post('/api/speedtest-pull-from-ha', requireAuth, async (req: any, res: an
     if (Array.isArray(allStates)) {
       for (const s of allStates) states[s.entity_id] = s;
     }
-    const speedtestEntities = await getEffectiveSpeedtestEntities();
+    const speedtestEntities = await getEffectiveSpeedtestEntities(states);
     const dl = states[speedtestEntities.download];
     const ul = states[speedtestEntities.upload];
     const pg = states[speedtestEntities.ping];
@@ -579,8 +588,8 @@ router.post('/api/printer-health-monitor', requireAuth, async (req: any, res: an
     const issues: any[] = [];
     const printerSummaries: any[] = [];
 
-    // Filter to only printers that exist in this Home Assistant instance
-    const availablePrinters = PRINTERS.filter(p => states[p.statusEntity] || p.cartridges.some(c => states[c.entity]));
+    // Dynamically discover available printers in this Home Assistant instance
+    const availablePrinters = discoverPrintersFromStates(states);
 
     for (const printer of availablePrinters) {
       const statusVal = states[printer.statusEntity]?.state ?? 'unavailable';
@@ -710,11 +719,17 @@ router.post('/api/ha-server-health-monitor', requireAuth, async (req: any, res: 
     if (Array.isArray(allStates)) { for (const s of allStates) stateMap[s.entity_id] = s.state; }
 
     const parseF = (val: string | undefined) => { if (!val) return NaN; const n = parseFloat(val); return isNaN(n) ? NaN : n; };
-    const cpu = parseF(stateMap[HA_ENTITIES.cpu]);
-    const ram = parseF(stateMap[HA_ENTITIES.ram]);
-    const swap = parseF(stateMap[HA_ENTITIES.swap]);
-    const load = parseF(stateMap[HA_ENTITIES.load]);
-    const temp = parseF(stateMap[HA_ENTITIES.temp]);
+    const cpuKey = findSystemEntity(stateMap, ['processor_use']) || findSystemEntity(stateMap, ['cpu_percent']);
+    const ramKey = findSystemEntity(stateMap, ['memory_usage']) || findSystemEntity(stateMap, ['memory_use_percent']);
+    const swapKey = findSystemEntity(stateMap, ['swap_usage']) || findSystemEntity(stateMap, ['swap_use_percent']);
+    const loadKey = findSystemEntity(stateMap, ['load_1_min']) || findSystemEntity(stateMap, ['load_1']);
+    const tempKey = findSystemEntity(stateMap, ['processor_temp']) || findSystemEntity(stateMap, ['cpu_temp']);
+
+    const cpu = parseF(cpuKey ? stateMap[cpuKey] : undefined);
+    const ram = parseF(ramKey ? stateMap[ramKey] : undefined);
+    const swap = parseF(swapKey ? stateMap[swapKey] : undefined);
+    const load = parseF(loadKey ? stateMap[loadKey] : undefined);
+    const temp = parseF(tempKey ? stateMap[tempKey] : undefined);
     const metrics = { cpu, ram, swap, load, temp };
 
     const cpuCritical = !isNaN(cpu) && cpu > CRITICAL_THRESHOLD;
@@ -1178,8 +1193,8 @@ router.post('/api/ha-update-checker', requireAuth, async (req: any, res: any) =>
 // Polls all HA climate entities every 15 min, logs readings to thermostat_logs,
 // and for the Gym entity enforces a 6 AM–3 PM PT schedule.
 
-const GYM_ENTITY_ID = process.env.GYM_THERMOSTAT_ENTITY || 'climate.gym_gym';
-const THEATER_ENTITY_ID = process.env.THEATER_THERMOSTAT_ENTITY || 'climate.theater_theater';
+const GYM_ENTITY_ID = process.env.GYM_THERMOSTAT_ENTITY || '';
+const THEATER_ENTITY_ID = process.env.THEATER_THERMOSTAT_ENTITY || '';
 
 const THERMOSTAT_DEDUP_HOURS = 2;
 const THEATER_STARTUP_GRACE_MINUTES = 30;
@@ -1299,7 +1314,7 @@ router.post('/api/thermostat-monitor', requireAuth, async (req: any, res: any) =
     );
     const avReading = await getAvClosetReading();
     if (avReading && Number.isFinite(avReading.tempF as number)) {
-      const avEntityId = avSensor?.entity_id ?? 'sensor.av_closet_govee';
+      const avEntityId = avSensor?.entity_id ?? (process.env.AV_CLOSET_TEMP_ENTITY || 'av_closet_temperature');
       const avName = (avSensor?.attributes?.friendly_name ?? 'AV Closet') as string;
       const avTemp = avReading.tempF as number;
       await db.query(
@@ -1311,8 +1326,8 @@ router.post('/api/thermostat-monitor', requireAuth, async (req: any, res: any) =
     }
 
     // Gym-specific schedule enforcement
-    // Get current PT time
-    const nowPT = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+    // Get current local time
+    const nowPT = new Date(new Date().toLocaleString('en-US', { timeZone: getEstateTimezone() }));
     const scheduleState = getGymScheduleState(nowPT);
     const gymEntity = stateMap[GYM_ENTITY_ID];
 
@@ -1361,7 +1376,7 @@ router.post('/api/thermostat-monitor', requireAuth, async (req: any, res: any) =
           gymActions.push(`Turned off Gym AC (outside 6 AM–3 PM window)`);
         }
       }
-    } else {
+    } else if (GYM_ENTITY_ID) {
       gymActions.push(`Gym entity ${GYM_ENTITY_ID} not found in HA states`);
     }
 
@@ -1431,7 +1446,7 @@ router.post('/api/thermostat-monitor', requireAuth, async (req: any, res: any) =
           theaterActions.push(`Turned off Theater HVAC (outside 10 AM–11 PM window)`);
         }
       }
-    } else {
+    } else if (THEATER_ENTITY_ID) {
       theaterActions.push(`Theater entity ${THEATER_ENTITY_ID} not found in HA states`);
     }
 
@@ -1599,7 +1614,7 @@ router.post('/api/av-closet-temp-monitor', requireAuth, async (req: any, res: an
       const output = {
         found: true,
         offline: true,
-        entity_id: avSensor?.entity_id ?? 'sensor.av_closet_govee',
+        entity_id: avSensor?.entity_id ?? (process.env.AV_CLOSET_TEMP_ENTITY || 'av_closet_temperature'),
         online: avReading.online,
         actions,
       };
@@ -1683,7 +1698,7 @@ router.post('/api/av-closet-temp-monitor', requireAuth, async (req: any, res: an
 
     const output = {
       found: true,
-      entity_id: avSensor?.entity_id ?? 'sensor.av_closet_govee',
+      entity_id: avSensor?.entity_id ?? (process.env.AV_CLOSET_TEMP_ENTITY || 'av_closet_temperature'),
       temperature: Number.isFinite(temp) ? temp : null,
       unit,
       warn_threshold: AV_CLOSET_WARN_TEMP,
@@ -1768,11 +1783,11 @@ const THERMOSTAT_FRESHNESS_ALERT_KEY = 'thermostat_freshness_stale';
 router.post('/api/thermostat-freshness-monitor', requireAuth, async (req: any, res: any) => {
   const db = storage;
   try {
-    // Only run between 6 AM and midnight Pacific time
-    const nowPT = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+    // Only run between 6 AM and midnight local time
+    const nowPT = new Date(new Date().toLocaleString('en-US', { timeZone: getEstateTimezone() }));
     const hourPT = nowPT.getHours();
     if (hourPT < 6) {
-      return res.json({ skipped: true, reason: 'Outside operating hours (before 6 AM PT)' });
+      return res.json({ skipped: true, reason: 'Outside operating hours (before 6 AM local)' });
     }
 
     // Find the most recent thermostat log entry
@@ -1832,7 +1847,7 @@ router.post('/api/thermostat-freshness-monitor', requireAuth, async (req: any, r
         const msg =
           `⚠️ *Thermostat Logger Alert*\n\n` +
           `No thermostat readings have been recorded in the last *${ageMinutes ?? '∞'} minutes*.\n\n` +
-          `Last reading: ${latestAt ? new Date(latestAt).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', dateStyle: 'short', timeStyle: 'short' }) + ' PT' : 'never'}\n\n` +
+          `Last reading: ${latestAt ? new Date(latestAt).toLocaleString('en-US', { timeZone: getEstateTimezone(), dateStyle: 'short', timeStyle: 'short' }) : 'never'}\n\n` +
           `The thermostat-monitor cron may have stopped or the deployed server may be down. ` +
           `Check the audit log and deployment status.`;
 
@@ -1923,11 +1938,11 @@ const POOL_TEMP_FRESHNESS_ALERT_KEY = 'pool_temp_freshness_stale';
 router.post('/api/pool-temp-freshness-monitor', requireAuth, async (req: any, res: any) => {
   const db = storage;
   try {
-    // Only run during pool hours (6 AM – 11 PM PT)
-    const nowPT = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+    // Only run during pool hours (6 AM – 11 PM local)
+    const nowPT = new Date(new Date().toLocaleString('en-US', { timeZone: getEstateTimezone() }));
     const hourPT = nowPT.getHours();
     if (hourPT < 6 || hourPT >= 23) {
-      return res.json({ skipped: true, reason: 'Outside pool hours (6 AM – 11 PM PT)' });
+      return res.json({ skipped: true, reason: 'Outside pool hours (6 AM – 11 PM local)' });
     }
 
     // Find the most recent successful pool_temp_check audit entry
@@ -1983,7 +1998,7 @@ router.post('/api/pool-temp-freshness-monitor', requireAuth, async (req: any, re
         const msg =
           `⚠️ *Pool Temperature Logger Alert*\n\n` +
           `No pool temperature readings have been recorded in the last *${ageMinutes ?? '∞'} minutes*.\n\n` +
-          `Last reading: ${latestAt ? new Date(latestAt).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', dateStyle: 'short', timeStyle: 'short' }) + ' PT' : 'never'}\n\n` +
+          `Last reading: ${latestAt ? new Date(latestAt).toLocaleString('en-US', { timeZone: getEstateTimezone(), dateStyle: 'short', timeStyle: 'short' }) : 'never'}\n\n` +
           `The pool-temp-monitor cron may have stopped or the deployed server may be down. ` +
           `Check the audit log and deployment status.`;
 
@@ -2199,7 +2214,7 @@ router.post('/api/wireless-snapshot-watchdog', requireAuth, async (_req: Request
 
 // ── Speed Test Data Freshness Monitor ────────────────────────────────────────
 // Speed test rows are written by the server-side pull cron at
-// /api/speedtest-pull-from-ha, which reads sensor.speedtest_{download,upload,
+// /api/speedtest-pull-from-ha, which reads speedtest_{download,upload,
 // ping} from Home Assistant every 15 min. If no rows have appeared in the last
 // threshold window the pull endpoint is failing, the cron isn't firing, or
 // HA's speedtest.net integration has stopped updating its sensors. Sends a
@@ -2269,9 +2284,9 @@ router.post('/api/speed-test-freshness-monitor', requireAuth, async (req: any, r
         const msg =
           `⚠️ *Speed Test Logger Alert*\n\n` +
           `No speed test rows have been written in the last *${ageMinutes ?? '∞'} minutes*.\n\n` +
-          `Last reading: ${latestAt ? new Date(latestAt).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', dateStyle: 'short', timeStyle: 'short' }) + ' PT' : 'never'}\n\n` +
+          `Last reading: ${latestAt ? new Date(latestAt).toLocaleString('en-US', { timeZone: getEstateTimezone(), dateStyle: 'short', timeStyle: 'short' }) : 'never'}\n\n` +
           `The server-side HA speedtest pull (/api/speedtest-pull-from-ha) may be failing, ` +
-          `or the underlying sensor.speedtest_* entities in Home Assistant have stopped updating. ` +
+          `or the underlying speedtest entities in Home Assistant have stopped updating. ` +
           `Check the audit log and HA's speedtest.net integration.`;
 
         let waSent = false;

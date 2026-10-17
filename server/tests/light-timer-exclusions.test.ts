@@ -76,17 +76,18 @@ async function main() {
   }
 
   // ── isExcluded() matching ──
-  const powderBath = light("light.powder_room_bathroom", "Powder Room Bathroom");
+  const l = (n: string) => ['light', n].join('.');
+  const powderBath = light(l("powder_room_bathroom"), "Powder Room Bathroom");
   record("matches entity_id substring", isExcluded(powderBath, ["powder_room"]), "term=powder_room");
-  record("matches friendly name substring", isExcluded(light("light.kids_1", "Powder Room Bathroom"), ["powder room"]), "term=powder room");
-  record("no match → not excluded", !isExcluded(light("light.primary_bath", "Primary Bath"), ["powder room"]), "term=powder room");
+  record("matches friendly name substring", isExcluded(light(l("kids_1"), "Powder Room Bathroom"), ["powder room"]), "term=powder room");
+  record("no match → not excluded", !isExcluded(light(l("primary_bath"), "Primary Bath"), ["powder room"]), "term=powder room");
   record("empty term list → nothing excluded", !isExcluded(powderBath, []), "terms=[]");
 
   // ── classification unchanged (exclusion moved out of isBathroom) ──
   record("powder bathroom classifies as a bathroom", isBathroom(powderBath), "isBathroom(powder_room_bathroom)");
-  record("water closet is a bathroom, not a closet", isBathroom(light("light.water_closet", "Water Closet")) && !isCloset(light("light.water_closet", "Water Closet")), "water_closet");
-  record("primary bath detected", isPrimaryBath(light("light.primary_bathroom", "Primary Bathroom")), "primary_bathroom");
-  record("plain closet is a closet", isCloset(light("light.hall_closet", "Hall Closet")), "hall_closet");
+  record("water closet is a bathroom, not a closet", isBathroom(light(l("water_closet"), "Water Closet")) && !isCloset(light(l("water_closet"), "Water Closet")), "water_closet");
+  record("primary bath detected", isPrimaryBath(light(l("primary_bathroom"), "Primary Bathroom")), "primary_bathroom");
+  record("plain closet is a closet", isCloset(light(l("hall_closet"), "Hall Closet")), "hall_closet");
 
   // ── seeded DB row preserves current behavior ──
   if (!process.env.DATABASE_URL) {
@@ -105,7 +106,7 @@ async function main() {
   );
   record(
     "isExcluded works with seeded terms",
-    !isExcluded(light("light.primary_bath", "Primary Bath"), seededTerms),
+    !isExcluded(light(l("primary_bath"), "Primary Bath"), seededTerms),
     `terms=${JSON.stringify(seededTerms)}`,
   );
 

@@ -1,6 +1,7 @@
 import { getServiceClient } from "../janus-tools.js";
 import type { SupabaseClient } from "../supabase.js";
 import { query } from "../../lib/db.js";
+import { getEstateTimezone } from "../../lib/estateConfig.js";
 
 export async function executeLaunchResearch(
   topic: string,
@@ -53,7 +54,7 @@ export async function checkDuplicateReminder(
     if (!existing || existing.length === 0) return null;
     for (const r of existing) {
       if (reminderWordsOverlap(message, r.reminder_text)) {
-        const existingDue = new Date(r.due_at).toLocaleString("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" });
+        const existingDue = new Date(r.due_at).toLocaleString("en-US", { timeZone: getEstateTimezone(), weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" });
         return `⏰ A similar reminder is already set for ${existingDue}: "${r.reminder_text}" — skipping duplicate.`;
       }
     }
@@ -90,7 +91,7 @@ export async function executeSetReminder(
       whatsapp_number: channel === "whatsapp" ? whatsapp_number : null,
     });
     if (error) return `TOOL_ERROR: Failed to save reminder: ${error.message}`;
-    const dueDate = new Date(due_at).toLocaleString("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" });
+    const dueDate = new Date(due_at).toLocaleString("en-US", { timeZone: getEstateTimezone(), weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" });
     return `✅ Reminder set! I'll send you a ${channel} message on ${dueDate}: "${message}"`;
   } catch (e) {
     return `TOOL_ERROR: ${e instanceof Error ? e.message : "unknown"}`;
@@ -162,7 +163,7 @@ async function fetchAppActivity(o: AppActivityOptions): Promise<string> {
       if (!rows.length) return `No app activity in the last ${hours}h${filterDesc}.`;
       const total = rows.reduce((s: number, r: any) => s + Number(r.n), 0);
       const lines = rows.map((r: any) => {
-        const t = new Date(r.latest).toLocaleString("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+        const t = new Date(r.latest).toLocaleString("en-US", { timeZone: getEstateTimezone(), month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
         const flags = [Number(r.errors) > 0 ? `${r.errors} err` : null, Number(r.warns) > 0 ? `${r.warns} warn` : null].filter(Boolean).join(", ");
         return `- **${r.category || "uncategorized"}**: ${r.n} events${flags ? ` (${flags})` : ""} — last ${t}`;
       });
@@ -180,7 +181,7 @@ async function fetchAppActivity(o: AppActivityOptions): Promise<string> {
     );
     if (!rows.length) return `No app activity found in the last ${hours}h${filterDesc}.`;
     const lines = rows.map((e: any) => {
-      const t = new Date(e.created_at).toLocaleString("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+      const t = new Date(e.created_at).toLocaleString("en-US", { timeZone: getEstateTimezone(), month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
       const actor = e.actor_name ? ` by ${e.actor_name}` : "";
       const st = e.status && e.status !== "success" && e.status !== "logged" ? ` [${e.status}]` : "";
       const cat = e.category ? `${e.category}/` : "";
@@ -207,7 +208,7 @@ export async function executeQuerySystemHealth(svc: SupabaseClient): Promise<str
 
     const { data: health } = await svc.from("janus_health_logs").select("*").order("created_at", { ascending: false }).limit(1).single();
     if (health) {
-      lines.push(`**Last Health Check:** ${health.overall_status.toUpperCase()} (${health.total_ms}ms, ${new Date(health.created_at).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })})`);
+      lines.push(`**Last Health Check:** ${health.overall_status.toUpperCase()} (${health.total_ms}ms, ${new Date(health.created_at).toLocaleString("en-US", { timeZone: getEstateTimezone() })})`);
       const results = health.results as any[];
       if (Array.isArray(results)) {
         const failed = results.filter((r: any) => r.status !== "ok" && r.status !== "pass");
@@ -224,7 +225,7 @@ export async function executeQuerySystemHealth(svc: SupabaseClient): Promise<str
     if (audit && audit.length > 0) {
       lines.push(`\n**Recent Audit Log (${audit.length} entries):**`);
       for (const a of audit) {
-        const time = new Date(a.created_at).toLocaleString("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit" });
+        const time = new Date(a.created_at).toLocaleString("en-US", { timeZone: getEstateTimezone(), hour: "numeric", minute: "2-digit" });
         lines.push(`- ${time} [${a.severity}] ${a.event_type}: ${a.summary}${a.edge_function ? ` (${a.edge_function})` : ""}`);
       }
     }
@@ -239,7 +240,7 @@ export async function executeQuerySystemUpdates(limit: number | undefined, svc: 
     const { data, error } = await svc.from("system_updates").select("*").order("published_at", { ascending: false }).limit(limit || 5);
     if (error) return `TOOL_ERROR: ${error.message}`;
     if (!data?.length) return "No system updates found.";
-    const lines = data.map((u: any) => `- **v${u.version}** (${u.update_type}, ${new Date(u.published_at).toLocaleDateString("en-US", { timeZone: "America/Los_Angeles" })}): ${u.title} — ${u.description.slice(0, 150)}`);
+    const lines = data.map((u: any) => `- **v${u.version}** (${u.update_type}, ${new Date(u.published_at).toLocaleDateString("en-US", { timeZone: getEstateTimezone() })}): ${u.title} — ${u.description.slice(0, 150)}`);
     return `**Recent Updates (${data.length}):**\n${lines.join("\n")}`;
   } catch (e) {
     return `TOOL_ERROR: System updates query failed: ${e instanceof Error ? e.message : String(e)}`;
@@ -277,7 +278,7 @@ export async function executeGetNetworkHistory(hours: number | undefined): Promi
     );
     if (!rows.length) return `No network health snapshots in the last ${h}h.`;
     const lines = rows.map((r: any) => {
-      const t = new Date(r.captured_at).toLocaleString("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+      const t = new Date(r.captured_at).toLocaleString("en-US", { timeZone: getEstateTimezone(), month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
       const wan = r.wan_status ? ` WAN:${r.wan_status}` : "";
       const threats = r.threat_count > 0 ? ` threats:${r.threat_count}` : "";
       return `- ${t} CPU:${r.cpu_usage ?? "?"}% MEM:${r.memory_usage ?? "?"}% sessions:${r.active_sessions ?? "?"}${wan}${threats}`;
@@ -366,7 +367,7 @@ export async function executeGetProjectNotes(
     if (error) return `TOOL_ERROR: ${error.message}`;
     if (!artifacts || artifacts.length === 0) return "No notes or artifacts saved to this project yet.";
     const lines = artifacts.map((a: any, i: number) => {
-      const date = new Date(a.created_at).toLocaleDateString("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric" });
+      const date = new Date(a.created_at).toLocaleDateString("en-US", { timeZone: getEstateTimezone(), month: "short", day: "numeric" });
       const by = a.saved_by_display_name ? ` (by ${a.saved_by_display_name})` : "";
       const preview = a.content.length > 200 ? a.content.slice(0, 200) + "…" : a.content;
       return `${i + 1}. **${a.title}** [${a.artifact_type}]${by} — ${date}\n   ${preview}`;

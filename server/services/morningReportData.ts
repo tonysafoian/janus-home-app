@@ -1,6 +1,5 @@
 import { googleTypeToWMO } from "../utils/google-weather.js";
-
-const LA_TIME_ZONE = "America/Los_Angeles";
+import { getEstateTimezone } from "../lib/estateConfig.js";
 const CNBC_QUOTE_URL =
   "https://quote.cnbc.com/quote-html-webservice/restQuote/symbolType/symbol";
 const CNBC_SYMBOLS = [".DJI", ".SPX", ".IXIC", "@GC.1", "@CL.1", "EUR=", "GBP=", "JPY="] as const;
@@ -113,7 +112,7 @@ function laDateHour(value: string | Date): { date: string; hour: number } | null
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return null;
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: LA_TIME_ZONE,
+    timeZone: getEstateTimezone(),
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -210,7 +209,7 @@ export async function fetchOpenMeteoWeather(
         "temperature_2m,apparent_temperature,precipitation_probability,weather_code,wind_speed_10m,uv_index",
       temperature_unit: "fahrenheit",
       wind_speed_unit: "mph",
-      timezone: LA_TIME_ZONE,
+      timezone: getEstateTimezone(),
       forecast_days: "2",
     });
     const response = await fetchImpl(`https://api.open-meteo.com/v1/forecast?${params}`, {
@@ -404,7 +403,7 @@ export async function fetchMarketSnapshot(
     const latestTime = allTimes.length ? Math.max(...allTimes) : NaN;
     const asOf = Number.isFinite(latestTime)
       ? new Date(latestTime).toLocaleTimeString("en-US", {
-          timeZone: LA_TIME_ZONE,
+          timeZone: getEstateTimezone(),
           hour: "numeric",
           minute: "2-digit",
           timeZoneName: "short",

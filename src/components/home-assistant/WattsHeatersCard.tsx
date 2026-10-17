@@ -10,18 +10,10 @@ import { cn } from '@/lib/utils';
 
 import { sanitizeDeviceName } from '@/lib/nameSanitizer';
 
-// Exact entity IDs confirmed from Home Assistant Watts Home integration
-const WATTS_ENTITY_IDS = [
-  'climate.floors',
-  'climate.primary_bench_1',
-  'climate.primary_bench_2',
-];
+// Dynamic entity discovery for radiant floor & bench heaters
+const WATTS_ENTITY_IDS: string[] = [];
 
-const DISPLAY_NAMES: Record<string, string> = {
-  'climate.floors':          'Floors',
-  'climate.primary_bench_1': 'Primary Bench 1',
-  'climate.primary_bench_2': 'Primary Bench 2',
-};
+const DISPLAY_NAMES: Record<string, string> = {};
 
 type HvacMode = 'heat' | 'off';
 

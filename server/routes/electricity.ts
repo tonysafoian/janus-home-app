@@ -43,6 +43,7 @@ import {
 } from '../lib/haStatistics.js';
 import { getEntityCache } from '../lib/haWebSocket.js';
 import { storage } from '../storage.js';
+import { getEstateTimezone, getEstateConfig } from '../lib/estateConfig.js';
 
 const router = Router();
 
@@ -88,25 +89,30 @@ function asRecord(value: unknown): Record<string, unknown> {
   return {};
 }
 
-// The 5 panel-main power entities. These mains already include their child
-// circuits, so the whole-house live total is the sum of ONLY these — summing
-// all 89 circuits would double-count every child against its parent main.
-const PANEL_MAIN_POWER_ENTITIES = [
-  'sensor.garage_panel_1_power_minute_average',
-  'sensor.garage_panel_2_power_minute_average',
-  'sensor.av_room_panel_power_minute_average',
-  'sensor.guest_house_sub_panel_power_minute_average',
-  'sensor.equipment_room_cabana_power_minute_average',
-];
+// Panel-main power entities dynamically discovered from the HA entity cache.
+// These mains already include their child circuits, so the whole-house live total
+// is the sum of ONLY these — summing all circuits would double-count children.
+function getPanelMainPowerEntities(): string[] {
+  const cache = getEntityCache();
+  return cache
+    .filter(e =>
+      e.entity_id.startsWith('sensor.') &&
+      e.entity_id.includes('panel') &&
+      !e.entity_id.includes('circuit') &&
+      (e.entity_id.includes('power_minute_average') || e.entity_id.endsWith('_power'))
+    )
+    .map(e => e.entity_id);
+}
 
-// Whole-house live watts from the HA entity cache — sums only the 5 panel
+// Whole-house live watts from the HA entity cache — sums only the panel
 // mains (used for the live kW / $-per-hour hero). Per-circuit breakdowns and
 // Top Consumers continue to use individual child circuits elsewhere.
 function getLiveTotalWatts(): number {
   const cache = getEntityCache();
   const byId = new Map(cache.map(e => [e.entity_id, e]));
+  const mains = getPanelMainPowerEntities();
   let watts = 0;
-  for (const entityId of PANEL_MAIN_POWER_ENTITIES) {
+  for (const entityId of mains) {
     const e = byId.get(entityId);
     const raw = e ? parseFloat(e.state) : NaN;
     if (Number.isFinite(raw) && raw > 0) watts += raw;
@@ -130,11 +136,12 @@ function isCronAuthorized(req: AuthenticatedRequest): boolean {
   );
 }
 
-// LA-local midnight for a given offset of days back from "now". dayOffsetBack=1
-// returns [startOfYesterday, startOfToday) in America/Los_Angeles.
+// Local midnight for a given offset of days back from "now". dayOffsetBack=1
+// returns [startOfYesterday, startOfToday) in estate timezone.
 function laDayBounds(dayOffsetBack: number): { start: Date; end: Date; usageDate: string } {
   const now = new Date();
-  const laNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+  const tz = getEstateTimezone();
+  const laNow = new Date(now.toLocaleString('en-US', { timeZone: tz }));
   const offsetMs = now.getTime() - laNow.getTime();
   const startLocal = new Date(laNow.getFullYear(), laNow.getMonth(), laNow.getDate() - dayOffsetBack, 0, 0, 0, 0);
   const endLocal = new Date(laNow.getFullYear(), laNow.getMonth(), laNow.getDate() - dayOffsetBack + 1, 0, 0, 0, 0);
@@ -348,14 +355,15 @@ router.get('/breakdown', requireAuth, async (req: AuthenticatedRequest, res: Res
     } else if (range === 'today') {
       const today = getTodayConsumptionFromStates();
       perCircuit = today.circuits;
+      const tz = getEstateTimezone();
       const laFormatter = new Intl.DateTimeFormat('en-US', {
-        timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit',
+        timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
       });
       const parts = laFormatter.formatToParts(now);
       const y = parts.find(p => p.type === 'year')!.value;
       const m = parts.find(p => p.type === 'month')!.value;
       const d = parts.find(p => p.type === 'day')!.value;
-      startTime = new Date(`${y}-${m}-${d}T00:00:00-07:00`);
+      startTime = new Date(`${y}-${m}-${d}T00:00:00Z`);
     } else if (range === 'week') {
       startTime = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
       const { circuits } = await getGridConsumption(startTime, now, 'day');
@@ -364,8 +372,9 @@ router.get('/breakdown', requireAuth, async (req: AuthenticatedRequest, res: Res
       }));
     } else if (range === 'month') {
       // Current calendar month (1st → now) via HA daily statistics.
+      const tz = getEstateTimezone();
       const laFormatter = new Intl.DateTimeFormat('en-US', {
-        timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit',
+        timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
       });
       const laParts = laFormatter.formatToParts(now);
       const laY = laParts.find(p => p.type === 'year')!.value;
@@ -816,7 +825,8 @@ router.get('/rates', requireAuth, async (_req: AuthenticatedRequest, res: Respon
 function laDayBoundsForDate(dateStr: string): { start: Date; end: Date; usageDate: string } {
   const [y, m, d] = dateStr.split('-').map(Number);
   const now = new Date();
-  const laNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+  const tz = getEstateTimezone();
+  const laNow = new Date(now.toLocaleString('en-US', { timeZone: tz }));
   const offsetMs = now.getTime() - laNow.getTime();
   const startLocal = new Date(y, m - 1, d, 0, 0, 0, 0);
   const endLocal = new Date(y, m - 1, d + 1, 0, 0, 0, 0);
@@ -906,7 +916,7 @@ router.post('/backfill', async (req: AuthenticatedRequest, res: Response) => {
     }
 
     const fmt = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit',
+      timeZone: getEstateTimezone(), year: 'numeric', month: '2-digit', day: '2-digit',
     });
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const yesterdayStr = fmt.format(yesterday);
@@ -1057,7 +1067,8 @@ router.get('/circuit-history', requireAuth, async (req: AuthenticatedRequest, re
       params.push(from, to);
     } else {
       const months = Math.min(Math.max(parseInt(req.query.months as string) || 6, 1), 36);
-      where = `WHERE usage_date >= (date_trunc('month', (now() AT TIME ZONE 'America/Los_Angeles')) - (($1)::text || ' months')::interval)`;
+      const tz = getEstateTimezone();
+      where = `WHERE usage_date >= (date_trunc('month', (now() AT TIME ZONE '${tz}')) - (($1)::text || ' months')::interval)`;
       params.push(months - 1);
     }
 
@@ -1101,7 +1112,7 @@ const PANEL_MAIN_ENERGY_ENTITIES = [...PANEL_MAIN_ENERGY_ENTITY_IDS];
 // the last N hours, via HA recorder/statistics_during_period (period='hour').
 // Mirrors the native Emporia app "History" tab. Falls back gracefully to an
 // empty points array when HA statistics aren't available for the entity.
-//   ?entityId=sensor.garage_panel_1_energy_today   (single, must be known)
+//   ?entityId=energy_entity_id                     (single, must be known)
 //   ?entityIds=a,b,c                               (multiple; summed per bucket)
 //   ?target=house                                  (sums the 5 panel mains)
 //   ?hours=24                                        (default 24)
@@ -1305,8 +1316,6 @@ router.get('/live-rate', requireAuth, async (_req: AuthenticatedRequest, res: Re
 const INSIGHTS_MIN_DAYS = 14;
 const INSIGHTS_TARGET_DAYS = 30;
 const INSIGHTS_CONTEXT_CACHE_MS = 30 * 60 * 1000;
-const HOME_LAT = Number(process.env.HOME_LAT) || 34.0522;
-const HOME_LNG = Number(process.env.HOME_LNG) || -118.2437;
 let insightsContextCache: { key: string; expiresAt: number; rows: EnergyDailyContextRow[] } | null = null;
 
 function addIsoDays(date: string, days: number): string {
@@ -1315,8 +1324,9 @@ function addIsoDays(date: string, days: number): string {
 
 function laMidnight(date: string): Date {
   const noonUtc = new Date(`${date}T12:00:00Z`);
+  const tz = getEstateTimezone();
   const offsetPart = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Los_Angeles',
+    timeZone: tz,
     timeZoneName: 'longOffset',
   }).formatToParts(noonUtc).find(part => part.type === 'timeZoneName')?.value;
   const offset = offsetPart?.replace('GMT', '') || '-08:00';
@@ -1328,15 +1338,16 @@ async function fetchInsightsContext(startDate: string, endDate: string): Promise
   if (insightsContextCache?.key === key && insightsContextCache.expiresAt > Date.now()) {
     return insightsContextCache.rows;
   }
+  const estateConfig = await getEstateConfig();
   const byDate = new Map<string, EnergyDailyContextRow>();
   const weatherUrl = new URL('https://archive-api.open-meteo.com/v1/archive');
-  weatherUrl.searchParams.set('latitude', String(HOME_LAT));
-  weatherUrl.searchParams.set('longitude', String(HOME_LNG));
+  weatherUrl.searchParams.set('latitude', String(estateConfig.latitude));
+  weatherUrl.searchParams.set('longitude', String(estateConfig.longitude));
   weatherUrl.searchParams.set('start_date', startDate);
   weatherUrl.searchParams.set('end_date', endDate);
   weatherUrl.searchParams.set('daily', 'temperature_2m_mean');
   weatherUrl.searchParams.set('temperature_unit', 'fahrenheit');
-  weatherUrl.searchParams.set('timezone', 'America/Los_Angeles');
+  weatherUrl.searchParams.set('timezone', estateConfig.timeZone);
 
   const weatherPromise = fetch(weatherUrl, { signal: AbortSignal.timeout(8_000) })
     .then(async response => {
@@ -1377,7 +1388,7 @@ async function fetchInsightsContext(startDate: string, endDate: string): Promise
       let cursor = from;
       while (cursor < to) {
         const date = new Intl.DateTimeFormat('en-CA', {
-          timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit',
+          timeZone: getEstateTimezone(), year: 'numeric', month: '2-digit', day: '2-digit',
         }).format(cursor);
         const nextDay = laMidnight(addIsoDays(date, 1));
         const segmentEnd = nextDay < to ? nextDay : to;
@@ -1425,7 +1436,7 @@ router.get('/insights', requireAuth, async (_req: AuthenticatedRequest, res: Res
 
     const cycleStart = estimateBillingCycleStart();
     const dateFormatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit',
+      timeZone: getEstateTimezone(), year: 'numeric', month: '2-digit', day: '2-digit',
     });
     const cycleStartDate = dateFormatter.format(cycleStart);
     const todayDate = dateFormatter.format(new Date());

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 
 /**
  * Returns today's Date, refreshing automatically when the day changes.
- * Sets a timeout until midnight (America/Los_Angeles) so the value
+ * Sets a timeout until local midnight so the value
  * updates without requiring a page reload.
  */
 export function useToday(): Date {
@@ -11,9 +11,9 @@ export function useToday(): Date {
   useEffect(() => {
     const scheduleNextMidnight = () => {
       const now = new Date();
-      // Calculate ms until next midnight in LA timezone
-      const laDateStr = now.toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-      const laTimeStr = now.toLocaleTimeString('en-GB', { timeZone: 'America/Los_Angeles', hour12: false });
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      const laDateStr = now.toLocaleDateString('en-CA', { timeZone: tz });
+      const laTimeStr = now.toLocaleTimeString('en-GB', { timeZone: tz, hour12: false });
       const [h, m, s] = laTimeStr.split(':').map(Number);
       const msUntilMidnight = ((24 - h - 1) * 3600 + (60 - m - 1) * 60 + (60 - s)) * 1000;
       // Add a small buffer (2s) to ensure we're past midnight

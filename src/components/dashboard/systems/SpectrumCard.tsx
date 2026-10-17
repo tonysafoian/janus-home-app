@@ -35,17 +35,12 @@ interface WanStats extends WanLinkStats {
   wan2?: WanLinkStats | null;
 }
 
-const SPEEDTEST_ENTITIES = [
-  'sensor.speedtest_download',
-  'sensor.speedtest_upload',
-  'sensor.speedtest_ping',
-];
-
-const SPEEDTEST_SET = new Set(SPEEDTEST_ENTITIES);
-
-function numVal(entities: Record<string, HAEntity>, id: string): number {
-  const v = parseFloat(entities[id]?.state ?? '');
-  return isNaN(v) ? 0 : v;
+function findSpeedtestEntity(allEntities: HAEntity[], pattern: string): HAEntity | undefined {
+  return allEntities.find(e =>
+    e.entity_id.startsWith('sensor.') &&
+    (e.entity_id.includes('speedtest_') || e.entity_id.includes('_speed')) &&
+    e.entity_id.includes(pattern)
+  );
 }
 
 function trendIcon(current: number, previous: number | null) {
@@ -181,15 +176,9 @@ export function SpectrumCard() {
   const [wanStats, setWanStats] = useState<WanStats | null>(null);
   const [wanLoading, setWanLoading] = useState(true);
 
-  const haEntities = useMemo(() => {
-    const map: Record<string, HAEntity> = {};
-    for (const e of allEntities) {
-      if (SPEEDTEST_SET.has(e.entity_id) || e.entity_id.includes('speedtest')) {
-        map[e.entity_id] = e;
-      }
-    }
-    return map;
-  }, [allEntities]);
+  const dlEntity = useMemo(() => findSpeedtestEntity(allEntities, 'download'), [allEntities]);
+  const ulEntity = useMemo(() => findSpeedtestEntity(allEntities, 'upload'), [allEntities]);
+  const pingEntity = useMemo(() => findSpeedtestEntity(allEntities, 'ping'), [allEntities]);
 
   const fetchHistory = useCallback(async (silent = false) => {
     try {
@@ -256,12 +245,12 @@ export function SpectrumCard() {
   const hasFgData = wanStats !== null && wan1 != null;
   const hasSpeedTests = results.length > 0;
 
-  const haSpeedtestDown = numVal(haEntities, 'sensor.speedtest_download');
-  const haSpeedtestUp = numVal(haEntities, 'sensor.speedtest_upload');
-  const haSpeedtestPing = numVal(haEntities, 'sensor.speedtest_ping');
-  const hasHASpeedtest = haEntities['sensor.speedtest_download'] && haEntities['sensor.speedtest_download'].state !== 'unavailable' && haEntities['sensor.speedtest_download'].state !== 'unknown';
-  const haSpeedtestLastChanged = haEntities['sensor.speedtest_download']?.last_changed;
-  const haSpeedtestServerName = haEntities['sensor.speedtest_download']?.attributes?.server_name as string | undefined;
+  const haSpeedtestDown = dlEntity ? (parseFloat(dlEntity.state) || 0) : 0;
+  const haSpeedtestUp = ulEntity ? (parseFloat(ulEntity.state) || 0) : 0;
+  const haSpeedtestPing = pingEntity ? (parseFloat(pingEntity.state) || 0) : 0;
+  const hasHASpeedtest = Boolean(dlEntity && dlEntity.state !== 'unavailable' && dlEntity.state !== 'unknown');
+  const haSpeedtestLastChanged = dlEntity?.last_changed;
+  const haSpeedtestServerName = dlEntity?.attributes?.server_name as string | undefined;
 
   const liveDownload = hasHASpeedtest ? haSpeedtestDown : (latest?.download_mbps ?? 0);
   const liveUpload = hasHASpeedtest ? haSpeedtestUp : (latest?.upload_mbps ?? 0);

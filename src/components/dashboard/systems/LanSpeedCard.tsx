@@ -7,15 +7,13 @@ import { useSharedHAAllEntities } from '@/hooks/useHAEntitiesContext';
 import { apiClient } from '@/lib/apiClient';
 import { cn } from '@/lib/utils';
 
-const LAN_ENTITIES = [
-  'sensor.system_monitor_network_throughput_in_end0',
-  'sensor.system_monitor_network_throughput_out_end0',
-  'sensor.system_monitor_network_in_end0',
-  'sensor.system_monitor_network_out_end0',
-  'sensor.system_monitor_ipv4_address_end0',
-];
-
-const LAN_SET = new Set(LAN_ENTITIES);
+function findLanEntity(allEntities: HAEntity[], pattern: string): HAEntity | undefined {
+  return allEntities.find(e =>
+    e.entity_id.startsWith('sensor.') &&
+    e.entity_id.includes('system_monitor_') &&
+    e.entity_id.includes(pattern)
+  );
+}
 
 interface WanStats {
   rx_bytes: number | null;
@@ -26,9 +24,6 @@ interface WanStats {
   wan_status: string;
 }
 
-function val(entities: Record<string, HAEntity>, id: string): string {
-  return entities[id]?.state ?? '—';
-}
 
 function throughputColor(mbps: number): string {
   if (mbps >= 50) return 'text-emerald-400';
@@ -55,13 +50,11 @@ export function LanSpeedCard() {
   const [wanStats, setWanStats] = useState<WanStats | null>(null);
   const [wanLoading, setWanLoading] = useState(true);
 
-  const entities = useMemo(() => {
-    const map: Record<string, HAEntity> = {};
-    for (const e of allEntities) {
-      if (LAN_SET.has(e.entity_id)) map[e.entity_id] = e;
-    }
-    return map;
-  }, [allEntities]);
+  const throughputInEnt = useMemo(() => findLanEntity(allEntities, 'network_throughput_in'), [allEntities]);
+  const throughputOutEnt = useMemo(() => findLanEntity(allEntities, 'network_throughput_out'), [allEntities]);
+  const totalInEnt = useMemo(() => findLanEntity(allEntities, 'network_in_'), [allEntities]);
+  const totalOutEnt = useMemo(() => findLanEntity(allEntities, 'network_out_'), [allEntities]);
+  const ipEnt = useMemo(() => findLanEntity(allEntities, 'ipv4_address'), [allEntities]);
 
   const fetchWanStats = useCallback(async (silent = false) => {
     if (!silent) setWanLoading(true);
@@ -82,14 +75,14 @@ export function LanSpeedCard() {
   }, [fetchWanStats]);
 
   const loading = haLoading || wanLoading;
-  const hasLanData = Object.keys(entities).length > 0;
+  const hasLanData = Boolean(throughputInEnt || totalInEnt || ipEnt);
   const hasData = hasLanData || wanStats !== null;
 
-  const throughputIn = parseFloat(val(entities, 'sensor.system_monitor_network_throughput_in_end0'));
-  const throughputOut = parseFloat(val(entities, 'sensor.system_monitor_network_throughput_out_end0'));
-  const totalIn = parseFloat(val(entities, 'sensor.system_monitor_network_in_end0'));
-  const totalOut = parseFloat(val(entities, 'sensor.system_monitor_network_out_end0'));
-  const ip = val(entities, 'sensor.system_monitor_ipv4_address_end0');
+  const throughputIn = parseFloat(throughputInEnt?.state ?? 'NaN');
+  const throughputOut = parseFloat(throughputOutEnt?.state ?? 'NaN');
+  const totalIn = parseFloat(totalInEnt?.state ?? 'NaN');
+  const totalOut = parseFloat(totalOutEnt?.state ?? 'NaN');
+  const ip = ipEnt?.state ?? '—';
 
   const wanRx = wanStats?.rx_gb ?? null;
   const wanTx = wanStats?.tx_gb ?? null;

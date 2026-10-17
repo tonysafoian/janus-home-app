@@ -24,108 +24,21 @@ function energyIdFor(powerId: string): string {
   return powerId.replace('_power_minute_average', '_energy_today');
 }
 
-const RAW_CIRCUITS: Array<Omit<CircuitConfig, 'energyEntityId'>> = [
-  { entityId: 'sensor.av_room_panel_power_minute_average', label: 'AV Room Panel', category: 'Panels', color: 'text-violet-400' },
-  { entityId: 'sensor.balance_power_minute_average', label: 'Balance (GP1)', category: 'Panels', color: 'text-violet-400' },
-  { entityId: 'sensor.balance_power_minute_average_2', label: 'Balance (GP2)', category: 'Panels', color: 'text-violet-400' },
-  { entityId: 'sensor.balance_power_minute_average_3', label: 'Balance (AV)', category: 'Panels', color: 'text-violet-400' },
-  { entityId: 'sensor.balance_power_minute_average_4', label: 'Balance (GH)', category: 'Panels', color: 'text-violet-400' },
-  { entityId: 'sensor.balance_power_minute_average_5', label: 'Balance (ERC)', category: 'Panels', color: 'text-violet-400' },
-  { entityId: 'sensor.garage_panel_1_power_minute_average', label: 'Garage Panel #1', category: 'Panels', color: 'text-violet-400' },
-  { entityId: 'sensor.garage_panel_2_power_minute_average', label: 'Garage Panel #2', category: 'Panels', color: 'text-violet-400' },
-  { entityId: 'sensor.guest_house_sub_panel_power_minute_average', label: 'Guest House Panel', category: 'Panels', color: 'text-violet-400' },
-  { entityId: 'sensor.ac_package_unit_power_minute_average', label: 'AC Package Unit', category: 'HVAC', color: 'text-blue-400' },
-  { entityId: 'sensor.ac_package_unit_join_cir_1_power_minute_average', label: 'AC Package Unit (Cir1)', category: 'HVAC', color: 'text-blue-400' },
-  { entityId: 'sensor.ac_primary_bedroom_power_minute_average', label: 'AC Primary Bedroom', category: 'HVAC', color: 'text-blue-400' },
-  { entityId: 'sensor.ac_compressor_rooftop_30amp_power_minute_average', label: 'AC Compressor Rooftop 30amp', category: 'HVAC', color: 'text-blue-400' },
-  { entityId: 'sensor.ac_compressor_rooftop_50amp_power_minute_average', label: 'AC Compressor Rooftop 50amp', category: 'HVAC', color: 'text-blue-400' },
-  { entityId: 'sensor.ac_unit_40amp_power_minute_average', label: 'AC Unit (40amp)', category: 'HVAC', color: 'text-blue-400' },
-  { entityId: 'sensor.ac_wine_cellar_power_minute_average', label: 'AC Wine Cellar', category: 'HVAC', color: 'text-blue-400' },
-  { entityId: 'sensor.gh_ac_power_minute_average', label: 'GH AC', category: 'HVAC', color: 'text-blue-400' },
-  { entityId: 'sensor.gh_furnace_power_minute_average', label: 'GH Furnace', category: 'HVAC', color: 'text-blue-400' },
-  { entityId: 'sensor.gym_ac_power_minute_average', label: 'Gym AC', category: 'HVAC', color: 'text-blue-400' },
-  { entityId: 'sensor.gym_furnace_power_minute_average', label: 'Gym Furnace', category: 'HVAC', color: 'text-blue-400' },
-  { entityId: 'sensor.ev_charger_1_power_minute_average', label: 'EV Charger 1', category: 'Vehicles', color: 'text-green-400' },
-  { entityId: 'sensor.ev_charger_2_power_minute_average', label: 'EV Charger 2', category: 'Vehicles', color: 'text-green-400' },
-  { entityId: 'sensor.equipment_room_cabana_power_minute_average', label: 'ERC Panel (Main)', category: 'Outdoor', color: 'text-cyan-400' },
-  { entityId: 'sensor.equipment_room_cabana_power_minute_average_2',  label: 'ERC Breaker 2',  category: 'Outdoor', color: 'text-cyan-400' },
-  { entityId: 'sensor.equipment_room_cabana_power_minute_average_3',  label: 'ERC Breaker 3',  category: 'Outdoor', color: 'text-cyan-400' },
-  { entityId: 'sensor.equipment_room_cabana_power_minute_average_4',  label: 'ERC Breaker 4',  category: 'Outdoor', color: 'text-cyan-400' },
-  { entityId: 'sensor.equipment_room_cabana_power_minute_average_5',  label: 'ERC Breaker 5',  category: 'Outdoor', color: 'text-cyan-400' },
-  { entityId: 'sensor.equipment_room_cabana_power_minute_average_6',  label: 'ERC Breaker 6',  category: 'Outdoor', color: 'text-cyan-400' },
-  { entityId: 'sensor.equipment_room_cabana_power_minute_average_7',  label: 'ERC Breaker 7',  category: 'Outdoor', color: 'text-cyan-400' },
-  { entityId: 'sensor.equipment_room_cabana_power_minute_average_8',  label: 'ERC Breaker 8',  category: 'Outdoor', color: 'text-cyan-400' },
-  { entityId: 'sensor.equipment_room_cabana_power_minute_average_9',  label: 'ERC Breaker 9',  category: 'Outdoor', color: 'text-cyan-400' },
-  { entityId: 'sensor.equipment_room_cabana_power_minute_average_10', label: 'ERC Breaker 10', category: 'Outdoor', color: 'text-cyan-400' },
-  { entityId: 'sensor.equipment_room_cabana_power_minute_average_11', label: 'ERC Breaker 11', category: 'Outdoor', color: 'text-cyan-400' },
-  { entityId: 'sensor.equipment_room_cabana_power_minute_average_12', label: 'ERC Breaker 12', category: 'Outdoor', color: 'text-cyan-400' },
-  { entityId: 'sensor.equipment_room_cabana_power_minute_average_13', label: 'ERC Breaker 13', category: 'Outdoor', color: 'text-cyan-400' },
-  { entityId: 'sensor.equipment_room_cabana_power_minute_average_14', label: 'ERC Breaker 14', category: 'Outdoor', color: 'text-cyan-400' },
-  { entityId: 'sensor.equipment_room_cabana_power_minute_average_15', label: 'ERC Breaker 15', category: 'Outdoor', color: 'text-cyan-400' },
-  { entityId: 'sensor.equipment_room_cabana_power_minute_average_16', label: 'ERC Breaker 16', category: 'Outdoor', color: 'text-cyan-400' },
-  { entityId: 'sensor.equipment_room_cabana_power_minute_average_17', label: 'ERC Breaker 17', category: 'Outdoor', color: 'text-cyan-400' },
-  { entityId: 'sensor.ext_gate_motors_power_minute_average', label: 'Ext Gate Motors', category: 'Outdoor', color: 'text-cyan-400' },
-  { entityId: 'sensor.roof_top_receptacle_power_minute_average', label: 'Roof Top Receptacle', category: 'Outdoor', color: 'text-cyan-400' },
-  { entityId: 'sensor.sauna_power_minute_average', label: 'Sauna', category: 'Outdoor', color: 'text-orange-400' },
-  { entityId: 'sensor.sauna_power_minute_average_2', label: 'Sauna', category: 'Outdoor', color: 'text-orange-400' },
-  { entityId: 'sensor.sump_pump_power_minute_average', label: 'Sump Pump', category: 'Outdoor', color: 'text-cyan-400' },
-  { entityId: 'sensor.sump_pump_power_minute_average_2', label: 'Sump Pump', category: 'Outdoor', color: 'text-cyan-400' },
-  { entityId: 'sensor.bar_refrigerator_power_minute_average', label: 'Bar Refrigerator', category: 'Kitchen', color: 'text-amber-400' },
-  { entityId: 'sensor.dishwashers_power_minute_average', label: 'Dishwashers', category: 'Kitchen', color: 'text-amber-400' },
-  { entityId: 'sensor.gh_counter_outlets_power_minute_average', label: 'GH Counter Outlets', category: 'Kitchen', color: 'text-amber-400' },
-  { entityId: 'sensor.gh_kitchen_outlets_power_minute_average', label: 'GH Kitchen Outlets', category: 'Kitchen', color: 'text-amber-400' },
-  { entityId: 'sensor.gh_refrigerator_power_minute_average', label: 'GH Refrigerator', category: 'Kitchen', color: 'text-amber-400' },
-  { entityId: 'sensor.garbage_disposal_power_minute_average', label: 'Garbage Disposal', category: 'Kitchen', color: 'text-amber-400' },
-  { entityId: 'sensor.kitchen_counter_gfcis_power_minute_average', label: 'Kitchen Counter GFCIs', category: 'Kitchen', color: 'text-amber-400' },
-  { entityId: 'sensor.kitchen_double_oven_power_minute_average', label: 'Kitchen Double Oven', category: 'Kitchen', color: 'text-amber-400' },
-  { entityId: 'sensor.kitchen_island_sub_zeros_power_minute_average', label: 'Kitchen Island Sub Zeros', category: 'Kitchen', color: 'text-amber-400' },
-  { entityId: 'sensor.kitchen_sub_zero_power_minute_average', label: 'Kitchen Sub Zero', category: 'Kitchen', color: 'text-amber-400' },
-  { entityId: 'sensor.kitchen_sub_zero_freezer_power_minute_average', label: 'Kitchen Sub Zero Freezer', category: 'Kitchen', color: 'text-amber-400' },
-  { entityId: 'sensor.stove_hood_power_minute_average', label: 'Stove Hood', category: 'Kitchen', color: 'text-amber-400' },
-  { entityId: 'sensor.crestron_lighting_power_minute_average', label: 'Crestron Lighting', category: 'Lighting', color: 'text-yellow-400' },
-  { entityId: 'sensor.crestron_lighting_power_minute_average_2', label: 'Crestron Lighting 2', category: 'Lighting', color: 'text-yellow-400' },
-  { entityId: 'sensor.crestron_lighting_power_minute_average_3', label: 'Crestron Lighting 3', category: 'Lighting', color: 'text-yellow-400' },
-  { entityId: 'sensor.crestron_lighting_power_minute_average_4', label: 'Crestron Lighting 4', category: 'Lighting', color: 'text-yellow-400' },
-  { entityId: 'sensor.crestron_lighting_power_minute_average_5', label: 'Crestron Lighting 5', category: 'Lighting', color: 'text-yellow-400' },
-  { entityId: 'sensor.crestron_lighting_panel_power_minute_average', label: 'Crestron Lighting Panel', category: 'Lighting', color: 'text-yellow-400' },
-  { entityId: 'sensor.first_floor_lighting_power_minute_average', label: 'First Floor Lighting', category: 'Lighting', color: 'text-yellow-400' },
-  { entityId: 'sensor.second_floor_lighting_power_minute_average', label: 'Second Floor Lighting', category: 'Lighting', color: 'text-yellow-400' },
-  { entityId: 'sensor.av_rack_power_minute_average', label: 'AV Rack', category: 'Other', color: 'text-slate-400' },
-  { entityId: 'sensor.av_rack_power_minute_average_2', label: 'AV Rack 2', category: 'Other', color: 'text-slate-400' },
-  { entityId: 'sensor.av_rack_power_minute_average_3', label: 'AV Rack 3', category: 'Other', color: 'text-slate-400' },
-  { entityId: 'sensor.elevator_power_minute_average', label: 'Elevator', category: 'Other', color: 'text-slate-400' },
-  { entityId: 'sensor.gh_garage_opener_power_minute_average', label: 'GH Garage Opener', category: 'Other', color: 'text-slate-400' },
-  { entityId: 'sensor.gh_garage_outlets_power_minute_average', label: 'GH Garage Outlets', category: 'Other', color: 'text-slate-400' },
-  { entityId: 'sensor.gh_washer_dryer_power_minute_average', label: 'GH Washer Dryer', category: 'Other', color: 'text-slate-400' },
-  { entityId: 'sensor.garage_ceiling_cord_plugs_power_minute_average', label: 'Garage Ceiling Cord Plugs', category: 'Other', color: 'text-slate-400' },
-  { entityId: 'sensor.garage_doors_power_minute_average', label: 'Garage Doors', category: 'Other', color: 'text-slate-400' },
-  { entityId: 'sensor.garage_gfcis_power_minute_average', label: 'Garage GFCIs', category: 'Other', color: 'text-slate-400' },
-  { entityId: 'sensor.table_saw_power_minute_average', label: 'Table Saw', category: 'Other', color: 'text-slate-400' },
-  { entityId: 'sensor.garage_wall_plugs_power_minute_average', label: 'Garage Wall Plugs', category: 'Other', color: 'text-slate-400' },
-  { entityId: 'sensor.garage_wall_plugs_power_minute_average_2', label: 'Garage Wall Plugs', category: 'Other', color: 'text-slate-400' },
-  { entityId: 'sensor.gym_outlets_power_minute_average', label: 'Gym Outlets', category: 'Other', color: 'text-slate-400' },
-  { entityId: 'sensor.gym_outlets_power_minute_average_2', label: 'Gym Outlets', category: 'Other', color: 'text-slate-400' },
-  { entityId: 'sensor.washer_dryer_1_power_minute_average', label: 'Washer & Dryer (1)', category: 'Other', color: 'text-slate-400' },
-  { entityId: 'sensor.washer_dryer_2_power_minute_average', label: 'Washer & Dryer (2)', category: 'Other', color: 'text-slate-400' },
-  { entityId: 'sensor.wen_air_purifier_power_minute_average', label: 'Wen Air Purifier', category: 'Other', color: 'text-slate-400' },
-];
-
 function discoverCircuits(entities: Array<{ entity_id: string; attributes?: Record<string, unknown> }>): CircuitConfig[] {
-  // First, check matching known circuit configurations that actually exist in this HA instance
-  const matched = RAW_CIRCUITS.filter(c => entities.some(e => e.entity_id === c.entityId))
-    .map(c => ({ ...c, energyEntityId: energyIdFor(c.entityId) }));
+  const discovered: CircuitConfig[] = [];
+  const knownIds = new Set<string>();
 
-  const knownIds = new Set(matched.map(c => c.entityId));
-
-  // Second, auto-discover any other power sensors in HA
   for (const e of entities) {
+    if (!e.entity_id.startsWith('sensor.')) continue;
     if (knownIds.has(e.entity_id)) continue;
+
     const isPower =
-      e.entity_id.startsWith('sensor.') &&
-      (e.entity_id.includes('_power_minute_average') ||
-       e.entity_id.endsWith('_power') ||
-       e.attributes?.device_class === 'power' ||
-       e.attributes?.unit_of_measurement === 'W');
+      e.entity_id.includes('_power_minute_average') ||
+      e.entity_id.endsWith('_power') ||
+      e.attributes?.device_class === 'power' ||
+      e.attributes?.unit_of_measurement === 'W' ||
+      e.attributes?.unit_of_measurement === 'kW';
+
     if (!isPower) continue;
 
     const friendlyName = (e.attributes?.friendly_name as string) || e.entity_id.replace(/^sensor\./, '').replace(/_/g, ' ');
@@ -148,7 +61,7 @@ function discoverCircuits(entities: Array<{ entity_id: string; attributes?: Reco
       category === 'Outdoor' ? 'text-cyan-400' :
       'text-slate-400';
 
-    matched.push({
+    discovered.push({
       entityId: e.entity_id,
       energyEntityId: energyIdFor(e.entity_id),
       label: friendlyName,
@@ -158,175 +71,81 @@ function discoverCircuits(entities: Array<{ entity_id: string; attributes?: Reco
     knownIds.add(e.entity_id);
   }
 
-  return matched;
+  return discovered;
 }
 
-// ── Panel Catalog ─────────────────────────────────────────────────────
-// Authoritative mapping of each panel → its named child circuits.
-// Panel mains are NOT included in their own child list (they include children by definition).
-// The Balance row is computed: panel_main - sum(measured_children), matching the native Emporia app.
-// Whole-house totals ALWAYS sum only the 5 panel mains to avoid double-counting.
-
+// ── Panel Catalog & Dynamic Discovery ──────────────────────────────────
 interface PanelDef {
   id: string;
   label: string;
-  mainEntityId: string;        // power (W) entity for the panel main
-  childEntityIds: string[];    // ordered child power entity IDs (named circuits from native app)
-  /** Optional display-name overrides for specific child entity IDs (e.g. temporary labels
-   *  for Emporia channels whose native-app names aren't yet reflected in HA entity friendly_names).
-   *  Used by PanelCard; falls back to circuit.label from the main circuit catalog. */
+  mainEntityId: string;
+  childEntityIds: string[];
   childLabelMap?: Record<string, string>;
-  color: string;               // text color for the panel header value
-  borderColor: string;         // border accent
-  bgColor: string;             // header bg accent
+  color: string;
+  borderColor: string;
+  bgColor: string;
 }
 
-const PANEL_CATALOG: PanelDef[] = [
-  {
-    id: 'garage1',
-    label: 'Garage Panel #1',
-    mainEntityId: 'sensor.garage_panel_1_power_minute_average',
-    color: 'text-orange-400',
-    borderColor: 'border-orange-500/40',
-    bgColor: 'bg-orange-500/8',
-    childEntityIds: [
-      'sensor.garage_ceiling_cord_plugs_power_minute_average',
-      'sensor.garage_doors_power_minute_average',
-      'sensor.kitchen_sub_zero_freezer_power_minute_average',
-      'sensor.kitchen_sub_zero_power_minute_average',
-      'sensor.kitchen_counter_gfcis_power_minute_average',
-      'sensor.bar_refrigerator_power_minute_average',
-      'sensor.garage_gfcis_power_minute_average',
-      'sensor.table_saw_power_minute_average',
-      'sensor.kitchen_double_oven_power_minute_average',
-      'sensor.kitchen_island_sub_zeros_power_minute_average',
-      'sensor.washer_dryer_1_power_minute_average',
-      'sensor.washer_dryer_2_power_minute_average',
-      'sensor.wen_air_purifier_power_minute_average',
-      'sensor.dishwashers_power_minute_average',
-      'sensor.garbage_disposal_power_minute_average',
-      'sensor.stove_hood_power_minute_average',
-    ],
-  },
-  {
-    id: 'garage2',
-    label: 'Garage Panel #2',
-    mainEntityId: 'sensor.garage_panel_2_power_minute_average',
-    color: 'text-blue-400',
-    borderColor: 'border-blue-500/40',
-    bgColor: 'bg-blue-500/8',
-    childEntityIds: [
-      'sensor.ac_primary_bedroom_power_minute_average',
-      'sensor.ac_unit_40amp_power_minute_average',
-      'sensor.garage_wall_plugs_power_minute_average',
-      'sensor.ac_compressor_rooftop_30amp_power_minute_average',
-      'sensor.roof_top_receptacle_power_minute_average',
-      'sensor.ac_compressor_rooftop_50amp_power_minute_average',
-      'sensor.ac_package_unit_power_minute_average',
-      'sensor.ac_package_unit_join_cir_1_power_minute_average',
-      'sensor.garage_wall_plugs_power_minute_average_2',
-    ],
-  },
-  {
-    id: 'guest_house',
-    label: 'Guest House Sub Panel',
-    mainEntityId: 'sensor.guest_house_sub_panel_power_minute_average',
-    color: 'text-green-400',
-    borderColor: 'border-green-500/40',
-    bgColor: 'bg-green-500/8',
-    childEntityIds: [
-      'sensor.gh_refrigerator_power_minute_average',
-      'sensor.gym_outlets_power_minute_average',
-      'sensor.gym_furnace_power_minute_average',
-      'sensor.gym_outlets_power_minute_average_2',
-      'sensor.gh_furnace_power_minute_average',
-      'sensor.gh_counter_outlets_power_minute_average',
-      'sensor.gh_washer_dryer_power_minute_average',
-      'sensor.gh_ac_power_minute_average',
-      'sensor.ev_charger_2_power_minute_average',
-      'sensor.gym_ac_power_minute_average',
-      'sensor.sauna_power_minute_average',
-      'sensor.sauna_power_minute_average_2',
-      'sensor.gh_garage_opener_power_minute_average',
-      'sensor.ev_charger_1_power_minute_average',
-      'sensor.gh_garage_outlets_power_minute_average',
-      'sensor.gh_kitchen_outlets_power_minute_average',
-    ],
-  },
-  {
-    id: 'av_room',
-    label: 'AV Room Panel',
-    mainEntityId: 'sensor.av_room_panel_power_minute_average',
-    color: 'text-violet-400',
-    borderColor: 'border-violet-500/40',
-    bgColor: 'bg-violet-500/8',
-    childEntityIds: [
-      'sensor.av_rack_power_minute_average',
-      'sensor.ac_wine_cellar_power_minute_average',
-      'sensor.av_rack_power_minute_average_2',
-      'sensor.crestron_lighting_power_minute_average',
-      'sensor.ext_gate_motors_power_minute_average',
-      'sensor.crestron_lighting_power_minute_average_2',
-      'sensor.av_rack_power_minute_average_3',
-      'sensor.first_floor_lighting_power_minute_average',
-      'sensor.elevator_power_minute_average',
-      'sensor.crestron_lighting_panel_power_minute_average',
-      'sensor.second_floor_lighting_power_minute_average',
-      'sensor.sump_pump_power_minute_average',
-      'sensor.sump_pump_power_minute_average_2',
-      'sensor.crestron_lighting_power_minute_average_3',
-      'sensor.crestron_lighting_power_minute_average_4',
-      'sensor.crestron_lighting_power_minute_average_5',
-    ],
-  },
-  {
-    id: 'equipment_room',
-    label: 'Equipment Room & Cabana',
-    mainEntityId: 'sensor.equipment_room_cabana_power_minute_average',
-    color: 'text-cyan-400',
-    borderColor: 'border-cyan-500/40',
-    bgColor: 'bg-cyan-500/8',
-    // The ERC Emporia Vue 2 device exposes 16 numbered channel sensors in HA (channels 2-17).
-    // childLabelMap labels them by channel number; update entries here once the Emporia
-    // app's native ERC circuit names are confirmed from the native Emporia app.
-    childLabelMap: {
-      'sensor.equipment_room_cabana_power_minute_average_2':  'ERC Breaker 2',
-      'sensor.equipment_room_cabana_power_minute_average_3':  'ERC Breaker 3',
-      'sensor.equipment_room_cabana_power_minute_average_4':  'ERC Breaker 4',
-      'sensor.equipment_room_cabana_power_minute_average_5':  'ERC Breaker 5',
-      'sensor.equipment_room_cabana_power_minute_average_6':  'ERC Breaker 6',
-      'sensor.equipment_room_cabana_power_minute_average_7':  'ERC Breaker 7',
-      'sensor.equipment_room_cabana_power_minute_average_8':  'ERC Breaker 8',
-      'sensor.equipment_room_cabana_power_minute_average_9':  'ERC Breaker 9',
-      'sensor.equipment_room_cabana_power_minute_average_10': 'ERC Breaker 10',
-      'sensor.equipment_room_cabana_power_minute_average_11': 'ERC Breaker 11',
-      'sensor.equipment_room_cabana_power_minute_average_12': 'ERC Breaker 12',
-      'sensor.equipment_room_cabana_power_minute_average_13': 'ERC Breaker 13',
-      'sensor.equipment_room_cabana_power_minute_average_14': 'ERC Breaker 14',
-      'sensor.equipment_room_cabana_power_minute_average_15': 'ERC Breaker 15',
-      'sensor.equipment_room_cabana_power_minute_average_16': 'ERC Breaker 16',
-      'sensor.equipment_room_cabana_power_minute_average_17': 'ERC Breaker 17',
-    },
-    childEntityIds: [
-      'sensor.equipment_room_cabana_power_minute_average_2',
-      'sensor.equipment_room_cabana_power_minute_average_3',
-      'sensor.equipment_room_cabana_power_minute_average_4',
-      'sensor.equipment_room_cabana_power_minute_average_5',
-      'sensor.equipment_room_cabana_power_minute_average_6',
-      'sensor.equipment_room_cabana_power_minute_average_7',
-      'sensor.equipment_room_cabana_power_minute_average_8',
-      'sensor.equipment_room_cabana_power_minute_average_9',
-      'sensor.equipment_room_cabana_power_minute_average_10',
-      'sensor.equipment_room_cabana_power_minute_average_11',
-      'sensor.equipment_room_cabana_power_minute_average_12',
-      'sensor.equipment_room_cabana_power_minute_average_13',
-      'sensor.equipment_room_cabana_power_minute_average_14',
-      'sensor.equipment_room_cabana_power_minute_average_15',
-      'sensor.equipment_room_cabana_power_minute_average_16',
-      'sensor.equipment_room_cabana_power_minute_average_17',
-    ],
-  },
-];
+function discoverPanels(
+  circuits: CircuitConfig[],
+  entities: Array<{ entity_id: string; attributes?: Record<string, unknown> }>,
+): PanelDef[] {
+  // Identify panel mains (entities labeled as Panels or matching panel naming)
+  const panelMains = circuits.filter(c =>
+    c.category === 'Panels' &&
+    !c.entityId.includes('balance') &&
+    !c.entityId.match(/slot_\d+/)
+  );
+
+  const palette = [
+    { color: 'text-orange-400', borderColor: 'border-orange-500/40', bgColor: 'bg-orange-500/8' },
+    { color: 'text-blue-400', borderColor: 'border-blue-500/40', bgColor: 'bg-blue-500/8' },
+    { color: 'text-green-400', borderColor: 'border-green-500/40', bgColor: 'bg-green-500/8' },
+    { color: 'text-violet-400', borderColor: 'border-violet-500/40', bgColor: 'bg-violet-500/8' },
+    { color: 'text-cyan-400', borderColor: 'border-cyan-500/40', bgColor: 'bg-cyan-500/8' },
+  ];
+
+  if (panelMains.length === 0) {
+    if (circuits.length > 0) {
+      return [{
+        id: 'main_panel',
+        label: 'Main Electrical Panel',
+        mainEntityId: circuits[0].entityId,
+        childEntityIds: circuits.map(c => c.entityId),
+        color: 'text-violet-400',
+        borderColor: 'border-violet-500/40',
+        bgColor: 'bg-violet-500/8',
+      }];
+    }
+    return [];
+  }
+
+  // Assign child circuits to each panel based on common name tokens
+  return panelMains.map((panel, idx) => {
+    const style = palette[idx % palette.length];
+    const panelKey = panel.entityId.replace(/^sensor\./, '').replace(/_power.*$/, '').replace(/_panel.*$/, '');
+    const tokens = panelKey.split('_').filter(t => t.length > 2 && t !== 'panel');
+
+    const children = circuits.filter(c => {
+      if (c.entityId === panel.entityId) return false;
+      if (c.category === 'Panels' && !c.entityId.includes('balance')) return false;
+      const lower = c.entityId.toLowerCase();
+      return tokens.some(t => lower.includes(t));
+    });
+
+    const childEntityIds = children.length > 0
+      ? children.map(c => c.entityId)
+      : circuits.filter(c => c.entityId !== panel.entityId && c.category !== 'Panels').map(c => c.entityId);
+
+    return {
+      id: panel.entityId.replace(/^sensor\./, ''),
+      label: panel.label,
+      mainEntityId: panel.entityId,
+      childEntityIds,
+      ...style,
+    };
+  });
+}
 
 // Category display order (for circuit view)
 const CATEGORY_ORDER = ['Panels', 'HVAC', 'Vehicles', 'Outdoor', 'Kitchen', 'Lighting', 'Other'];
@@ -824,30 +643,8 @@ export function EmporiaEnergyCard() {
   }, [entities]);
 
   const activePanels = useMemo(() => {
-    const matched = PANEL_CATALOG.filter(p =>
-      entities.some(e => e.entity_id === p.mainEntityId || p.childEntityIds.some(cid => e.entity_id === cid))
-    );
-    if (matched.length > 0) return matched;
-    const powerSensors = entities.filter(e =>
-      e.entity_id.startsWith('sensor.') &&
-      (e.entity_id.includes('_power_minute_average') ||
-       e.entity_id.endsWith('_power') ||
-       e.attributes?.device_class === 'power' ||
-       e.attributes?.unit_of_measurement === 'W')
-    );
-    if (powerSensors.length > 0) {
-      return [{
-        id: 'main_panel',
-        label: 'Main Energy Panel',
-        mainEntityId: powerSensors[0].entity_id,
-        childEntityIds: powerSensors.map(s => s.entity_id),
-        color: 'text-violet-400',
-        borderColor: 'border-violet-500/40',
-        bgColor: 'bg-violet-500/8',
-      }];
-    }
-    return [];
-  }, [entities]);
+    return discoverPanels(discoveredCircuits, entities);
+  }, [discoveredCircuits, entities]);
 
   const circuitData: CircuitData[] = useMemo(() => {
     return discoveredCircuits.map(cfg => {

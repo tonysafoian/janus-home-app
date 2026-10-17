@@ -12,6 +12,7 @@ import { fetchT } from '../lib/fetchWithTimeout.js';
 import { query } from '../lib/db.js';
 import { runTeslaBatteryMonitor } from '../scheduledTasks.js';
 import { callHA, resolveHACreds } from './homeAssistant.js';
+import { getEstateConfig } from '../lib/estateConfig.js';
 
 const router = Router();
 
@@ -517,8 +518,9 @@ router.get('/map', requireAuth, async (req: AuthenticatedRequest, res: Response)
     return;
   }
 
-  const HOME_LAT = Number(process.env.HOME_LAT) || 34.0522;
-  const HOME_LNG = Number(process.env.HOME_LNG) || -118.2437;
+  const estateConfig = await getEstateConfig();
+  const HOME_LAT = estateConfig.latitude;
+  const HOME_LNG = estateConfig.longitude;
   const action = req.query.action as string;
 
   if (action === "api-key") {

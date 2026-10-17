@@ -1,5 +1,6 @@
 import { requireAuth } from '../middleware/auth.js';
 import { Router, type Request, type Response } from "express";
+import { getEstateTimezone } from "../lib/estateConfig.js";
 import { createClient } from "../utils/supabase.js";
 import {
   getServiceToken,
@@ -498,7 +499,7 @@ router.post("/meeting-prep", async (_req: Request, res: Response) => {
 function getLAOffset(forDate?: Date): string {
   const d = forDate || new Date();
   const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Los_Angeles",
+    timeZone: getEstateTimezone(),
     timeZoneName: "shortOffset",
   });
   const parts = formatter.formatToParts(d);
@@ -535,7 +536,7 @@ async function fetchTodaysCalendar(
     );
     const now = new Date();
     const laDate = now.toLocaleDateString("en-CA", {
-      timeZone: "America/Los_Angeles",
+      timeZone: getEstateTimezone(),
     });
     const offset = getLAOffset();
     const timeMin = `${laDate}T00:00:00${offset}`;
@@ -553,7 +554,7 @@ async function fetchTodaysCalendar(
           ? new Date(e.start.dateTime).toLocaleTimeString("en-US", {
               hour: "numeric",
               minute: "2-digit",
-              timeZone: "America/Los_Angeles",
+              timeZone: getEstateTimezone(),
             })
           : "All day";
         return `• ${time} — ${e.summary || "Busy"}`;
@@ -576,7 +577,7 @@ async function fetchTomorrowsCalendar(
     const now = new Date();
     const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
     const laDate = tomorrow.toLocaleDateString("en-CA", {
-      timeZone: "America/Los_Angeles",
+      timeZone: getEstateTimezone(),
     });
     const offset = getLAOffset(tomorrow);
     const timeMin = `${laDate}T00:00:00${offset}`;
@@ -594,7 +595,7 @@ async function fetchTomorrowsCalendar(
           ? new Date(e.start.dateTime).toLocaleTimeString("en-US", {
               hour: "numeric",
               minute: "2-digit",
-              timeZone: "America/Los_Angeles",
+              timeZone: getEstateTimezone(),
             })
           : "All day";
         return `• ${time} — ${e.summary || "Busy"}`;
@@ -618,7 +619,7 @@ router.post("/eod-summary", requireAuth, async (_req: Request, res: Response) =>
   try {
     const { query: dbQuery } = await import('../lib/db.js');
     const laDate = new Date().toLocaleDateString("en-CA", {
-      timeZone: "America/Los_Angeles",
+      timeZone: getEstateTimezone(),
     });
     try {
       await dbQuery(
@@ -641,7 +642,7 @@ router.post("/eod-summary", requireAuth, async (_req: Request, res: Response) =>
       weekday: "long",
       month: "long",
       day: "numeric",
-      timeZone: "America/Los_Angeles",
+      timeZone: getEstateTimezone(),
     });
 
     const [todayCal, tomorrowCal] = await Promise.all([
@@ -776,20 +777,20 @@ router.post("/eod-summary", requireAuth, async (_req: Request, res: Response) =>
 function getThisWeekMondayLA(): string {
   const now = new Date();
   const laDate = new Date(
-    now.toLocaleString("en-US", { timeZone: "America/Los_Angeles" }),
+    now.toLocaleString("en-US", { timeZone: getEstateTimezone() }),
   );
   const day = laDate.getDay();
   const diffToMonday = day === 0 ? -6 : 1 - day;
   laDate.setDate(laDate.getDate() + diffToMonday);
   return laDate.toLocaleDateString("en-CA", {
-    timeZone: "America/Los_Angeles",
+    timeZone: getEstateTimezone(),
   });
 }
 
 function getNextWeekRange(): { monday: string; friday: string } {
   const now = new Date();
   const laDate = new Date(
-    now.toLocaleString("en-US", { timeZone: "America/Los_Angeles" }),
+    now.toLocaleString("en-US", { timeZone: getEstateTimezone() }),
   );
   const day = laDate.getDay();
   const daysToNextMonday = day === 0 ? 1 : 8 - day;
@@ -830,7 +831,7 @@ router.post("/weekly-planning", requireAuth, async (_req: Request, res: Response
       weekday: "long",
       month: "long",
       day: "numeric",
-      timeZone: "America/Los_Angeles",
+      timeZone: getEstateTimezone(),
     });
     const nextWeekLabel = `${new Date(monday + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${new Date(friday + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
 
@@ -850,14 +851,14 @@ router.post("/weekly-planning", requireAuth, async (_req: Request, res: Response
         const day = e.start?.dateTime
           ? new Date(e.start.dateTime).toLocaleDateString("en-US", {
               weekday: "short",
-              timeZone: "America/Los_Angeles",
+              timeZone: getEstateTimezone(),
             })
           : "All day";
         const time = e.start?.dateTime
           ? new Date(e.start.dateTime).toLocaleTimeString("en-US", {
               hour: "numeric",
               minute: "2-digit",
-              timeZone: "America/Los_Angeles",
+              timeZone: getEstateTimezone(),
             })
           : "";
         return `• ${day} ${time} — ${e.summary || "Busy"}`;
@@ -1135,7 +1136,7 @@ function buildStatusHtml(
 router.post("/executive-status", requireAuth, async (_req: Request, res: Response) => {
   const startTime = Date.now();
   const { query: dbQuery } = await import('../lib/db.js');
-  const execStatusDate = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+  const execStatusDate = new Date().toLocaleDateString("en-CA", { timeZone: getEstateTimezone() });
   try {
     await dbQuery(
       `INSERT INTO report_email_dedup (report_type, period_key)
@@ -1158,7 +1159,7 @@ router.post("/executive-status", requireAuth, async (_req: Request, res: Respons
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
-    timeZone: "America/Los_Angeles",
+    timeZone: getEstateTimezone(),
   });
 
   const results = await Promise.all([
@@ -1267,7 +1268,7 @@ router.post("/executive-status", requireAuth, async (_req: Request, res: Respons
   const warnCount = results.filter((r) => r.status === "degraded").length;
   const emoji =
     overall === "ok" ? "✅" : overall === "degraded" ? "⚠️" : "🚨";
-  const subject = `${emoji} Janus Status — ${errCount > 0 ? `${errCount} FAILED` : warnCount > 0 ? `${warnCount} DEGRADED` : "All Systems Go"} · ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Los_Angeles" })}`;
+  const subject = `${emoji} Janus Status — ${errCount > 0 ? `${errCount} FAILED` : warnCount > 0 ? `${warnCount} DEGRADED` : "All Systems Go"} · ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: getEstateTimezone() })}`;
 
   const html = buildStatusHtml(results, totalMs, runTime);
   const textLines = results.map(
@@ -1385,7 +1386,7 @@ function formatCalendarForAI(events: any[]): CalEvent[] {
   if (!events.length) return [];
   return events.map(e => {
     if (e.allDay) return { time: "All day", event: e.summary, allDay: true };
-    const st = new Date(e.start).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Los_Angeles" });
+    const st = new Date(e.start).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: getEstateTimezone() });
     return { time: st, event: e.summary };
   });
 }
@@ -1401,7 +1402,7 @@ async function generateEmailData(
   momEvents: any[],
 ): Promise<EmailData> {
   const today = new Date().toLocaleDateString("en-US", {
-    weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "America/Los_Angeles",
+    weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: getEstateTimezone(),
   });
 
   const childCal = formatCalendarForAI(childEvents);
@@ -1456,7 +1457,7 @@ async function generateEmailData(
     })(),
     asOf: weatherRaw?.current?.observedAt
       ? new Date(weatherRaw.current.observedAt).toLocaleTimeString("en-US", {
-          timeZone: "America/Los_Angeles",
+          timeZone: getEstateTimezone(),
           hour: "numeric",
           minute: "2-digit",
           timeZoneName: "short",
@@ -1740,7 +1741,7 @@ function buildEmailHtml(childName: string, data: EmailData, today: string): stri
 router.post("/morning-weather", requireAuth, async (_req: Request, res: Response) => {
   try {
     const { query: dbQuery } = await import('../lib/db.js');
-    const mwDate = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+    const mwDate = new Date().toLocaleDateString("en-CA", { timeZone: getEstateTimezone() });
 
     // Vacation mode: when the "Morning Brief Email" automation is toggled off
     // (is_active=false), pause the daily brief. Mirrors the school broadcast /
@@ -1809,7 +1810,6 @@ router.post("/morning-weather", requireAuth, async (_req: Request, res: Response
 
     const saKey = getSaKey();
 
-    const { getEstateTimezone } = await import("../lib/estateConfig.js");
     const estateTz = getEstateTimezone();
 
     const today = new Date().toLocaleDateString("en-US", {
@@ -1842,7 +1842,7 @@ router.post("/morning-weather", requireAuth, async (_req: Request, res: Response
         );
         const now = new Date();
         const laDate = new Date(
-          now.toLocaleString("en-US", { timeZone: "America/Los_Angeles" }),
+          now.toLocaleString("en-US", { timeZone: getEstateTimezone() }),
         );
         const startOfDay = new Date(laDate);
         startOfDay.setHours(0, 0, 0, 0);
@@ -1980,7 +1980,7 @@ router.post("/morning-weather", requireAuth, async (_req: Request, res: Response
     const childStatusMap: Record<string, string> = {};
 
     for (const { child, data } of emailDataResults) {
-      const todayDateLA = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+      const todayDateLA = new Date().toLocaleDateString("en-CA", { timeZone: getEstateTimezone() });
       const dedupCheck = await dbQuery(
         `SELECT id FROM email_logs
          WHERE email_type = 'morning_brief'
@@ -2110,7 +2110,7 @@ router.post("/morning-weather", requireAuth, async (_req: Request, res: Response
       );
     }
 
-    const ccTodayDateLA = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+    const ccTodayDateLA = new Date().toLocaleDateString("en-CA", { timeZone: getEstateTimezone() });
     for (const ccEmailResult of emailDataResults) {
       const ccChildName = ccEmailResult.child.name;
       const ccMetaKey = `cc-${ccChildName}`;

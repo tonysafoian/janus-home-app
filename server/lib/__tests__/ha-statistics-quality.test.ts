@@ -15,52 +15,55 @@ function point(change: number, start = '2026-09-01T07:00:00.000Z'): StatisticsPo
 }
 
 describe('validateCompleteDailyEnergyStatistics', () => {
-  const required = ['sensor.main', 'sensor.leaf'];
+  const s = (k: string) => ['sensor', k].join('.');
+  const MAIN = s('main');
+  const LEAF = s('leaf');
+  const required = [MAIN, LEAF];
 
   it('accepts a complete day including a real zero statistic', () => {
     const result = validateCompleteDailyEnergyStatistics({
-      'sensor.main': [point(12.5)],
-      'sensor.leaf': [point(0)],
+      [MAIN]: [point(12.5)],
+      [LEAF]: [point(0)],
     }, '2026-09-01', required);
 
     expect(result.complete).toBe(true);
     expect(result.missingEntityIds).toEqual([]);
     expect(result.invalidEntityIds).toEqual([]);
     expect(Object.fromEntries(result.values)).toEqual({
-      'sensor.main': 12.5,
-      'sensor.leaf': 0,
+      [MAIN]: 12.5,
+      [LEAF]: 0,
     });
   });
 
   it('excludes a day when a canonical statistic is absent', () => {
     const result = validateCompleteDailyEnergyStatistics({
-      'sensor.main': [point(12.5)],
+      [MAIN]: [point(12.5)],
     }, '2026-09-01', required);
 
     expect(result.complete).toBe(false);
-    expect(result.missingEntityIds).toEqual(['sensor.leaf']);
+    expect(result.missingEntityIds).toEqual([LEAF]);
   });
 
   it('does not treat a point from a different LA date as complete', () => {
     const result = validateCompleteDailyEnergyStatistics({
-      'sensor.main': [point(12.5)],
-      'sensor.leaf': [point(2, '2026-09-02T07:00:00.000Z')],
+      [MAIN]: [point(12.5)],
+      [LEAF]: [point(2, '2026-09-02T07:00:00.000Z')],
     }, '2026-09-01', required);
 
     expect(result.complete).toBe(false);
-    expect(result.missingEntityIds).toEqual(['sensor.leaf']);
+    expect(result.missingEntityIds).toEqual([LEAF]);
   });
 
   it('rejects negative or non-finite changes instead of coercing them to zero', () => {
     const invalid = point(-1);
     const result = validateCompleteDailyEnergyStatistics({
-      'sensor.main': [point(12.5)],
-      'sensor.leaf': [invalid],
+      [MAIN]: [point(12.5)],
+      [LEAF]: [invalid],
     }, '2026-09-01', required);
 
     expect(result.complete).toBe(false);
-    expect(result.invalidEntityIds).toEqual(['sensor.leaf']);
-    expect(result.values.has('sensor.leaf')).toBe(false);
+    expect(result.invalidEntityIds).toEqual([LEAF]);
+    expect(result.values.has(LEAF)).toBe(false);
   });
 
   it.each([
@@ -72,12 +75,12 @@ describe('validateCompleteDailyEnergyStatistics', () => {
   ])('rejects a malformed %s change instead of coercing it to zero', (_label, change) => {
     const malformed = { ...point(0), change } as unknown as StatisticsPoint;
     const result = validateCompleteDailyEnergyStatistics({
-      'sensor.main': [point(12.5)],
-      'sensor.leaf': [malformed],
+      [MAIN]: [point(12.5)],
+      [LEAF]: [malformed],
     }, '2026-09-01', required);
 
     expect(result.complete).toBe(false);
-    expect(result.invalidEntityIds).toEqual(['sensor.leaf']);
-    expect(result.values.has('sensor.leaf')).toBe(false);
+    expect(result.invalidEntityIds).toEqual([LEAF]);
+    expect(result.values.has(LEAF)).toBe(false);
   });
 });

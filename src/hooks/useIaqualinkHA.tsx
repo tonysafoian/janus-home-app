@@ -2,27 +2,33 @@ import { useMemo } from 'react';
 import { HAEntity } from '@/lib/api/homeAssistant';
 import { useSharedHAAllEntities } from '@/hooks/useHAEntitiesContext';
 
-const ENTITY_IDS = {
-  poolTemp: 'sensor.pool_temp',
-  spaTemp: 'sensor.spa_temp',
-  airTemp: 'sensor.air_temp',
-  poolClimate: 'climate.pool',
-  spaClimate: 'climate.spa',
-  poolLight: 'light.pool_light',
-  spaLight: 'light.spa_light',
-  laminarLed: 'light.laminar_led_lt',
-  poolPump: 'switch.pool_pump',
-  spaPump: 'switch.spa_pump',
-  boosterPump: 'switch.booster_pump',
-  poolHeater: 'switch.pool_heater',
-  spaHeater: 'switch.spa_heater',
-  solarHeater: 'switch.solar_heater',
-  laminarJets: 'switch.laminar_jets',
-  bubbler: 'switch.bubbler',
-  freezeProtection: 'binary_sensor.freeze_protection',
-} as const;
+export interface PoolEntityMap {
+  poolTemp: string;
+  spaTemp: string;
+  airTemp: string;
+  poolClimate: string;
+  spaClimate: string;
+  poolLight: string;
+  spaLight: string;
+  laminarLed: string;
+  poolPump: string;
+  spaPump: string;
+  boosterPump: string;
+  poolHeater: string;
+  spaHeater: string;
+  solarHeater: string;
+  laminarJets: string;
+  bubbler: string;
+  freezeProtection: string;
+}
 
-const ALL_IDS = new Set<string>(Object.values(ENTITY_IDS));
+function findPoolEntity(allEntities: HAEntity[], domain: string, keywords: string[]): string {
+  const match = allEntities.find(e =>
+    e.entity_id.startsWith(`${domain}.`) &&
+    keywords.every(kw => e.entity_id.toLowerCase().includes(kw))
+  );
+  return match?.entity_id || '';
+}
 
 export const LIGHT_EFFECTS = [
   'Alpine White', 'Sky Blue', 'Cobalt Blue', 'Caribbean Blue',
@@ -87,6 +93,7 @@ export interface IaqualinkHA {
   loading: boolean;
   connected: boolean;
   entities: Map<string, HAEntity>;
+  entityIds: PoolEntityMap;
   temperatures: {
     pool: string | null;
     spa: string | null;
@@ -105,37 +112,60 @@ export interface IaqualinkHA {
 export function useIaqualinkHA(_refreshInterval = 30000): IaqualinkHA {
   const { allEntities, loading, refetch } = useSharedHAAllEntities();
 
+  const entityIds: PoolEntityMap = useMemo(() => ({
+    poolTemp: findPoolEntity(allEntities, 'sensor', ['pool', 'temp']),
+    spaTemp: findPoolEntity(allEntities, 'sensor', ['spa', 'temp']),
+    airTemp: findPoolEntity(allEntities, 'sensor', ['air', 'temp']),
+    poolClimate: findPoolEntity(allEntities, 'climate', ['pool']),
+    spaClimate: findPoolEntity(allEntities, 'climate', ['spa']),
+    poolLight: findPoolEntity(allEntities, 'light', ['pool']),
+    spaLight: findPoolEntity(allEntities, 'light', ['spa']),
+    laminarLed: findPoolEntity(allEntities, 'light', ['laminar']),
+    poolPump: findPoolEntity(allEntities, 'switch', ['pool', 'pump']),
+    spaPump: findPoolEntity(allEntities, 'switch', ['spa', 'pump']),
+    boosterPump: findPoolEntity(allEntities, 'switch', ['booster']),
+    poolHeater: findPoolEntity(allEntities, 'switch', ['pool', 'heater']),
+    spaHeater: findPoolEntity(allEntities, 'switch', ['spa', 'heater']),
+    solarHeater: findPoolEntity(allEntities, 'switch', ['solar', 'heater']),
+    laminarJets: findPoolEntity(allEntities, 'switch', ['laminar']),
+    bubbler: findPoolEntity(allEntities, 'switch', ['bubbler']),
+    freezeProtection: findPoolEntity(allEntities, 'binary_sensor', ['freeze']),
+  }), [allEntities]);
+
+  const activeIds = useMemo(() => new Set(Object.values(entityIds).filter(Boolean)), [entityIds]);
+
   const entities = useMemo(() => {
     const map = new Map<string, HAEntity>();
     for (const e of allEntities) {
-      if (ALL_IDS.has(e.entity_id)) {
+      if (activeIds.has(e.entity_id)) {
         map.set(e.entity_id, e);
       }
     }
     return map;
-  }, [allEntities]);
+  }, [allEntities, activeIds]);
 
   const connected = !loading && entities.size > 0;
 
   const temperatures = useMemo(() => ({
-    pool: getTempInFahrenheit(entities.get(ENTITY_IDS.poolTemp)),
-    spa: getTempInFahrenheit(entities.get(ENTITY_IDS.spaTemp)),
-    air: getTempInFahrenheit(entities.get(ENTITY_IDS.airTemp)),
-    poolSetPoint: getSetPointInFahrenheit(entities.get(ENTITY_IDS.poolClimate)),
-    spaSetPoint: getSetPointInFahrenheit(entities.get(ENTITY_IDS.spaClimate)),
-  }), [entities]);
+    pool: getTempInFahrenheit(entities.get(entityIds.poolTemp)),
+    spa: getTempInFahrenheit(entities.get(entityIds.spaTemp)),
+    air: getTempInFahrenheit(entities.get(entityIds.airTemp)),
+    poolSetPoint: getSetPointInFahrenheit(entities.get(entityIds.poolClimate)),
+    spaSetPoint: getSetPointInFahrenheit(entities.get(entityIds.spaClimate)),
+  }), [entities, entityIds]);
 
   const climateUnits = useMemo(() => ({
-    pool: getClimateUnit(entities.get(ENTITY_IDS.poolClimate)),
-    spa: getClimateUnit(entities.get(ENTITY_IDS.spaClimate)),
-  }), [entities]);
+    pool: getClimateUnit(entities.get(entityIds.poolClimate)),
+    spa: getClimateUnit(entities.get(entityIds.spaClimate)),
+  }), [entities, entityIds]);
 
-  const freezeProtection = entities.get(ENTITY_IDS.freezeProtection)?.state === 'on';
+  const freezeProtection = entities.get(entityIds.freezeProtection)?.state === 'on';
 
   return {
     loading,
     connected,
     entities,
+    entityIds,
     temperatures,
     climateUnits,
     freezeProtection,

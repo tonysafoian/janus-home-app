@@ -4,6 +4,7 @@ import { pool } from "../db.js";
 import { fetchT } from "../lib/fetchWithTimeout.js";
 import { logAudit } from "../lib/auditLog.js";
 import * as nodeIcal from 'node-ical';
+import { getEstateConfig } from "../lib/estateConfig.js";
 
 const router = Router();
 
@@ -110,8 +111,9 @@ async function syncConcerts(db: any) {
       startDateTime: startDate, endDateTime: endDate,
       size: '100', sort: 'date,asc',
     }));
-    const lat = process.env.HOME_LAT || '34.0522';
-    const lng = process.env.HOME_LNG || '-118.2437';
+    const estateConfig = await getEstateConfig();
+    const lat = String(estateConfig.latitude);
+    const lng = String(estateConfig.longitude);
     const geoQuery = {
       classificationName: 'music', latlong: `${lat},${lng}`,
       radius: '30', unit: 'miles',
@@ -150,8 +152,9 @@ async function syncConcerts(db: any) {
   }
 
   if (sgKey) {
-    const lat = process.env.HOME_LAT || '34.0522';
-    const lng = process.env.HOME_LNG || '-118.2437';
+    const estateConfig = await getEstateConfig();
+    const lat = String(estateConfig.latitude);
+    const lng = String(estateConfig.longitude);
     const sgQueries = [
       { 'taxonomies.name': 'concert', lat, lon: lng, range: '30mi', per_page: '200', 'datetime_utc.gte': now.toISOString().slice(0, 10), 'datetime_utc.lte': endDateSg, sort: 'datetime_utc.asc' },
       { 'taxonomies.name': 'concert', lat, lon: lng, range: '30mi', per_page: '200', 'datetime_utc.gte': now.toISOString().slice(0, 10), 'datetime_utc.lte': endDateSg, sort: 'score.desc' },
@@ -526,8 +529,9 @@ async function syncShows(db: any) {
   if (sgKey) {
     const sgShowTypes = ['theater', 'broadway_tickets_national', 'comedy', 'family'];
     const beforeSg = allShows.length;
-    const lat = process.env.HOME_LAT || '34.0522';
-    const lng = process.env.HOME_LNG || '-118.2437';
+    const estateConfig = await getEstateConfig();
+    const lat = String(estateConfig.latitude);
+    const lng = String(estateConfig.longitude);
     for (const taxo of sgShowTypes) {
       const events = await fetchSeatGeekEvents({
         'taxonomies.name': taxo, lat, lon: lng, range: '30mi',

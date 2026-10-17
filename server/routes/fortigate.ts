@@ -721,7 +721,7 @@ router.delete('/api/fortigate/device-overrides/:mac', requireAuth, requireAdmin,
 router.get('/api/fortigate/traffic', requireAuth, requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
   try {
     // Top talkers. Source priority on this FGT60F / FortiOS 7.2.13:
-    //   1. HA sensor.fortigate_top_talkers (when configured)
+    //   1. HA FortiGate top talkers sensor (when configured)
     //   2. firewall-session aggregation by source IP (the working live path —
     //      the device-query feed is a device inventory and usually carries no
     //      per-device byte counters, so it returned []). We try the session

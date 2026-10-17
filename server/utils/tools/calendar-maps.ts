@@ -1,3 +1,5 @@
+import { getEstateTimezone } from "../../lib/estateConfig.js";
+
 export async function callCalendarProxy(body: Record<string, unknown>): Promise<any> {
   const { getServiceAccountToken } = await import("../../routes/google.js");
   const CALENDAR_BASE = "https://www.googleapis.com/calendar/v3";
@@ -42,10 +44,10 @@ export async function callCalendarProxy(body: Record<string, unknown>): Promise<
       const event: Record<string, unknown> = {
         summary: body.title,
         start: (body.start as string)?.includes("T")
-          ? { dateTime: body.start, timeZone: "America/Los_Angeles" }
+          ? { dateTime: body.start, timeZone: getEstateTimezone() }
           : { date: body.start },
         end: (body.end as string)?.includes("T")
-          ? { dateTime: body.end, timeZone: "America/Los_Angeles" }
+          ? { dateTime: body.end, timeZone: getEstateTimezone() }
           : { date: body.end },
       };
       if (body.description) event.description = body.description;
@@ -84,12 +86,12 @@ export async function callCalendarProxy(body: Record<string, unknown>): Promise<
       if (typeof body.location === "string") patch.location = body.location;
       if (body.start) {
         patch.start = (body.start as string).includes("T")
-          ? { dateTime: body.start, timeZone: "America/Los_Angeles" }
+          ? { dateTime: body.start, timeZone: getEstateTimezone() }
           : { date: body.start };
       }
       if (body.end) {
         patch.end = (body.end as string).includes("T")
-          ? { dateTime: body.end, timeZone: "America/Los_Angeles" }
+          ? { dateTime: body.end, timeZone: getEstateTimezone() }
           : { date: body.end };
       }
       if (Array.isArray(body.attendees) && body.attendees.length) {
@@ -130,7 +132,8 @@ export async function callCalendarProxy(body: Record<string, unknown>): Promise<
 function normalizeToPacific(dt: string): string {
   if (!dt || !dt.includes("T")) return dt;
 
-  const laFormatter = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", timeZoneName: "shortOffset" });
+  const tz = getEstateTimezone();
+  const laFormatter = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "shortOffset" });
   const parts = laFormatter.formatToParts(new Date());
   const tzPart = parts.find(p => p.type === "timeZoneName");
   let pacificOffset = "-08:00";
@@ -145,7 +148,7 @@ function normalizeToPacific(dt: string): string {
   if (dt.endsWith("Z") || dt.endsWith("z")) {
     const utcDate = new Date(dt);
     if (!isNaN(utcDate.getTime())) {
-      const laTime = new Date(utcDate.toLocaleString("en-US", { timeZone: "America/Los_Angeles" }));
+      const laTime = new Date(utcDate.toLocaleString("en-US", { timeZone: tz }));
       const year = laTime.getFullYear();
       const month = String(laTime.getMonth() + 1).padStart(2, "0");
       const day = String(laTime.getDate()).padStart(2, "0");
@@ -153,7 +156,7 @@ function normalizeToPacific(dt: string): string {
       const minutes = String(laTime.getMinutes()).padStart(2, "0");
       const seconds = String(laTime.getSeconds()).padStart(2, "0");
       const result = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}${pacificOffset}`;
-      console.log(`[Time Normalize] UTC "${dt}" → Pacific "${result}"`);
+      console.log(`[Time Normalize] UTC "${dt}" → Local "${result}"`);
       return result;
     }
   }
@@ -473,8 +476,10 @@ export async function executeGetEnvironmentData(): Promise<string> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) return JSON.stringify({ error: "Google Maps API key not configured" });
 
-  const HOME_LAT = Number(process.env.HOME_LAT) || 34.0522;
-  const HOME_LNG = Number(process.env.HOME_LNG) || -118.2437;
+  const { getEstateConfig } = await import('../../lib/estateConfig.js');
+  const estateConfig = await getEstateConfig();
+  const HOME_LAT = estateConfig.latitude;
+  const HOME_LNG = estateConfig.longitude;
 
   try {
     const [aqRes, pollenRes] = await Promise.all([

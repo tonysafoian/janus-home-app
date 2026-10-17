@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.24
+
+- **Home Assistant Areas & Rooms Integration**: Dynamic discovery and grouping of all entities by Home Assistant Area (`config/area_registry/list`, `config/device_registry/list`, `config/entity_registry/list`). Added `/api/ha/areas` endpoint and `HAAreasCard.tsx` on the Systems dashboard, allowing users to browse and control devices organized by physical rooms with zero manual configuration.
+- **Zero Quoted Entity Literals**: Eliminated every single quoted hardcoded entity literal (`sensor.*`, `switch.*`, `light.*`, `climate.*`, `binary_sensor.*`) across `src/` and `server/`. All smart devices now resolve through dynamic discovery, area registry, and user-configurable entity mappings.
+- **Dynamic Location & Zero Hardcoded Geolocation**: Purged all remaining hardcoded `America/Los_Angeles` timezone literals and Downtown LA coordinates (`34.0522, -118.2437`). All services now query `getEstateConfig()` and `getEstateTimezone()` or the client browser timezone, enabling full geographic portability for any estate worldwide.
+- **Universal Utility Branding & LADWP Elimination**: Replaced all hardcoded utility branding and rate tables in UI cards (`EnergyInsightsCard.tsx`, `ElectricityCostCard.tsx`) with generic "Utility Rate Schedule", "Utility Tier", and "Billed" labels, fully matching user-configured utility rates.
+- **Automated CI Smoke Testing & Fresh-Install Validation**: Enhanced `.github/workflows/ci.yml` to run full TypeScript typechecking (`typecheck`), production Vite/esbuild bundle validation (`build`), and automated database migration execution on fresh Postgres instances, preventing runtime regressions on new installs.
+- **Multi-Arch Prebuilt Container Images**: Configured GitHub Container Registry (`ghcr.io/tonysafoian/janus-{arch}`) prebuilt images and publishing workflow (`.github/workflows/addon-builder.yml`) for `aarch64` and `amd64`, dramatically accelerating add-on installation and updates on Home Assistant Yellow, Green, Raspberry Pi, and x86 hardware.
+
 ## 1.0.23
 
 - **Dynamic Circuit & Panel Discovery**: `EmporiaEnergyCard.tsx` now dynamically discovers all available power sensors from Home Assistant (`_power_minute_average`, `device_class: power`, unit `W`/`kW`) and builds dynamic panel groups, eliminating static circuit lists and supporting any home energy setup.

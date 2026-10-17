@@ -10,7 +10,7 @@ import type { AutomationStatusRow } from '../../shared/dbRows.js';
 import { sendMonitorAlert } from '../utils/notifications.js';
 import { getAlertPhoneNumber } from '../utils/janus-tools.js';
 import { fetchGoogleHourlyForecast } from '../utils/google-weather.js';
-import { getEntityMappings } from '../lib/estateConfig.js';
+import { getEntityMappings, getEstateConfig } from '../lib/estateConfig.js';
 
 const router = Router();
 
@@ -203,11 +203,6 @@ router.post('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =
   }
 });
 
-const LAT = Number(process.env.HOME_LAT) || 34.0522;
-const LON = Number(process.env.HOME_LNG) || -118.2437;
-const POOL_HEATER_ENTITY = 'switch.pool_heater';
-const SPA_HEATER_ENTITY = 'switch.spa_heater';
-const POOL_CLIMATE_ENTITY = 'climate.pool';
 const TARGET_TEMP = 87;
 
 async function callHAProxy(body: Record<string, unknown>): Promise<{ status: number; data: any }> {
@@ -226,12 +221,8 @@ async function callHAProxy(body: Record<string, unknown>): Promise<{ status: num
 }
 
 async function fetchForecast(): Promise<number[]> {
-  // Migrated from Open-Meteo 48-h precipitation → TWO sequential Google
-  // forecast/hours:lookup calls (24 h each) using nextPageToken pagination.
-  // fetchGoogleHourlyForecast handles pagination internally; we request 48 h.
-  // Google returns precipitation in inches (IMPERIAL). The rain-guard logic
-  // only checks p > 0 so units don't affect the control decision.
-  const hours = await fetchGoogleHourlyForecast(LAT, LON, 48);
+  const estate = await getEstateConfig();
+  const hours = await fetchGoogleHourlyForecast(estate.latitude, estate.longitude, 48);
   return hours.map((h: any) => h.precipitation?.qpf?.quantity ?? 0);
 }
 
@@ -247,6 +238,15 @@ router.post('/rain-guard', requireAuth, async (req: AuthenticatedRequest, res: R
       automationId = automations[0].id;
     }
 
+    const mappings = await getEntityMappings();
+    const poolHeaterEntity = mappings.pool?.pool_heater;
+    const spaHeaterEntity = mappings.pool?.spa_heater;
+    const poolClimateEntity = mappings.pool?.pool_temp ? mappings.pool.pool_temp.replace('sensor.', 'climate.') : '';
+
+    if (!poolHeaterEntity && !spaHeaterEntity) {
+      return res.json({ skipped: true, reason: 'no_pool_heaters_mapped' });
+    }
+
     const precipitation = await fetchForecast();
     const hours0to24 = precipitation.slice(0, 24);
     const hours24to48 = precipitation.slice(24, 48);
@@ -259,23 +259,27 @@ router.post('/rain-guard', requireAuth, async (req: AuthenticatedRequest, res: R
 
     let action: string;
     const haResults: Record<string, unknown>[] = [];
-    const mappings = await getEntityMappings();
-    const poolHeaterEntity = mappings.pool?.pool_heater || POOL_HEATER_ENTITY;
-    const spaHeaterEntity = mappings.pool?.spa_heater || SPA_HEATER_ENTITY;
-    const poolClimateEntity = POOL_CLIMATE_ENTITY;
 
     if (rainIn24h) {
       action = 'heaters_off';
-      const r1 = await callHAProxy({ action: 'call-service', domain: 'switch', service: 'turn_off', service_data: { entity_id: poolHeaterEntity } });
-      haResults.push({ entity: poolHeaterEntity, service: 'turn_off', status: r1.status });
-      const r2 = await callHAProxy({ action: 'call-service', domain: 'switch', service: 'turn_off', service_data: { entity_id: spaHeaterEntity } });
-      haResults.push({ entity: spaHeaterEntity, service: 'turn_off', status: r2.status });
+      if (poolHeaterEntity) {
+        const r1 = await callHAProxy({ action: 'call-service', domain: 'switch', service: 'turn_off', service_data: { entity_id: poolHeaterEntity } });
+        haResults.push({ entity: poolHeaterEntity, service: 'turn_off', status: r1.status });
+      }
+      if (spaHeaterEntity) {
+        const r2 = await callHAProxy({ action: 'call-service', domain: 'switch', service: 'turn_off', service_data: { entity_id: spaHeaterEntity } });
+        haResults.push({ entity: spaHeaterEntity, service: 'turn_off', status: r2.status });
+      }
     } else if (!rainIn48h) {
       action = 'pool_heater_on_87';
-      const r1 = await callHAProxy({ action: 'call-service', domain: 'switch', service: 'turn_on', service_data: { entity_id: poolHeaterEntity } });
-      haResults.push({ entity: poolHeaterEntity, service: 'turn_on', status: r1.status });
-      const r2 = await callHAProxy({ action: 'call-service', domain: 'climate', service: 'set_temperature', service_data: { entity_id: poolClimateEntity, temperature: TARGET_TEMP } });
-      haResults.push({ entity: poolClimateEntity, service: 'set_temperature', status: r2.status });
+      if (poolHeaterEntity) {
+        const r1 = await callHAProxy({ action: 'call-service', domain: 'switch', service: 'turn_on', service_data: { entity_id: poolHeaterEntity } });
+        haResults.push({ entity: poolHeaterEntity, service: 'turn_on', status: r1.status });
+      }
+      if (poolClimateEntity) {
+        const r2 = await callHAProxy({ action: 'call-service', domain: 'climate', service: 'set_temperature', service_data: { entity_id: poolClimateEntity, temperature: TARGET_TEMP } });
+        haResults.push({ entity: poolClimateEntity, service: 'set_temperature', status: r2.status });
+      }
     } else {
       action = 'no_change';
     }
@@ -358,12 +362,15 @@ function aggregateToDailyAverages(historyPoints: any[]): { date: string; avg: nu
 router.get('/temp-history', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const mappings = await getEntityMappings();
-    const poolSensor = mappings.pool?.pool_temp || 'sensor.pool_temp';
-    const spaSensor = mappings.pool?.spa_temp || 'sensor.spa_temp';
+    const poolSensor = mappings.pool?.pool_temp;
+    const spaSensor = mappings.pool?.spa_temp;
+    if (!poolSensor && !spaSensor) {
+      return res.json({ success: true, data: [] });
+    }
     const hours = 30 * 24;
     const [poolHistory, spaHistory] = await Promise.all([
-      fetchHAHistory(poolSensor, hours),
-      fetchHAHistory(spaSensor, hours),
+      poolSensor ? fetchHAHistory(poolSensor, hours) : Promise.resolve([]),
+      spaSensor ? fetchHAHistory(spaSensor, hours) : Promise.resolve([]),
     ]);
 
     const poolDaily = aggregateToDailyAverages(poolHistory);
@@ -396,7 +403,8 @@ async function fetchCurrentPoolTemp(): Promise<number | null> {
 
   try {
     const mappings = await getEntityMappings();
-    const poolSensor = mappings.pool?.pool_temp || 'sensor.pool_temp';
+    const poolSensor = mappings.pool?.pool_temp;
+    if (!poolSensor) return null;
     const url = `${haUrl.replace(/\/$/, '')}/api/states/${poolSensor}`;
     const res = await fetchT(url, {
       method: 'GET',
@@ -518,7 +526,8 @@ async function fetchSpaPumpState(): Promise<{ state: string; last_changed: strin
 
   try {
     const mappings = await getEntityMappings();
-    const spaPumpEntity = mappings.pool?.spa_pump || 'switch.spa_pump';
+    const spaPumpEntity = mappings.pool?.spa_pump;
+    if (!spaPumpEntity) return null;
     const url = `${haUrl.replace(/\/$/, '')}/api/states/${spaPumpEntity}`;
     const res = await fetchT(url, {
       method: 'GET',

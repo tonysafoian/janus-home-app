@@ -40,17 +40,17 @@ interface WateringSession {
 
 function isRainBirdZone(entity: HAEntity) {
   const id = entity.entity_id;
-  return id.startsWith('switch.rain_bird') || id.startsWith('switch.rainbird');
+  return id.startsWith('switch.') && /rain_?bird/i.test(id);
 }
 
 function isRainSensor(entity: HAEntity) {
   const id = entity.entity_id;
-  return id.startsWith('binary_sensor.rain_bird') || id.startsWith('binary_sensor.rainbird');
+  return id.startsWith('binary_sensor.') && /rain_?bird/i.test(id);
 }
 
 function isRainDelay(entity: HAEntity) {
   const id = entity.entity_id;
-  return id.startsWith('number.rain_bird') || id.startsWith('number.rainbird');
+  return id.startsWith('number.') && /rain_?bird/i.test(id);
 }
 
 function isRainBirdCalendar(entity: HAEntity) {

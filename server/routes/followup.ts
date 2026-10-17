@@ -13,6 +13,7 @@ import {
   JANUS_EMAIL,
   type ServiceAccountKey,
 } from "../lib/helpers.js";
+import { getEstateTimezone } from "../lib/estateConfig.js";
 
 const router = Router();
 
@@ -44,10 +45,10 @@ async function fetchOverdueReminders(svc: any): Promise<FollowUpItem[]> {
 async function fetchDueTodayReminders(svc: any): Promise<FollowUpItem[]> {
   const now = new Date();
   const laDate = now.toLocaleDateString("en-CA", {
-    timeZone: "America/Los_Angeles",
+    timeZone: getEstateTimezone(),
   });
   const utcStr = now.toLocaleString("en-US", { timeZone: "UTC" });
-  const laStr = now.toLocaleString("en-US", { timeZone: "America/Los_Angeles" });
+  const laStr = now.toLocaleString("en-US", { timeZone: getEstateTimezone() });
   const diffMs = new Date(utcStr).getTime() - new Date(laStr).getTime();
   const diffHours = Math.round(diffMs / 3600000);
   const offsetSign = diffHours >= 0 ? "-" : "+";
@@ -193,7 +194,7 @@ router.post("/accountability", async (_req: Request, res: Response) => {
         weekday: "long",
         month: "long",
         day: "numeric",
-        timeZone: "America/Los_Angeles",
+        timeZone: getEstateTimezone(),
       });
 
       const sections: string[] = [
@@ -226,7 +227,7 @@ router.post("/accountability", async (_req: Request, res: Response) => {
             ? new Date(item.due).toLocaleTimeString("en-US", {
                 hour: "numeric",
                 minute: "2-digit",
-                timeZone: "America/Los_Angeles",
+                timeZone: getEstateTimezone(),
               })
             : "";
           sections.push(

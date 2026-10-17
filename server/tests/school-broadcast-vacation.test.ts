@@ -23,6 +23,7 @@
  * leaves the database exactly as it found it.
  */
 import { Pool } from "pg";
+import { getEstateTimezone } from "../lib/estateConfig.js";
 
 const PORT = process.env.PORT || 5000;
 const BASE = `http://localhost:${PORT}/api/broadcast`;
@@ -44,7 +45,7 @@ function recordSkip(test: string, detail: string) {
 // when a live broadcast could actually fire and avoid triggering it.
 function inLiveBroadcastWindow(): boolean {
   const la = new Date(
-    new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" }),
+    new Date().toLocaleString("en-US", { timeZone: getEstateTimezone() }),
   );
   const dow = la.getDay();
   if (dow === 0 || dow === 6) return false; // weekend -> weekend-skip, safe

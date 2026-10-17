@@ -9,6 +9,7 @@ import { webcrypto } from 'crypto';
 import { query } from '../lib/db.js';
 import { pool } from '../db.js';
 import { emitToAll } from '../socket.js';
+import { getEstateTimezone } from '../lib/estateConfig.js';
 
 const router = Router();
 
@@ -99,10 +100,11 @@ function toISO(ts: number | string | undefined, fallback?: number): string {
 
 
 function getTodayStartLA(): string {
-  const laDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const tz = getEstateTimezone();
+  const laDateStr = new Date().toLocaleDateString('en-CA', { timeZone: tz });
   const probe = new Date(`${laDateStr}T12:00:00Z`);
   const laHour = parseInt(
-    new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hour12: false }).format(probe)
+    new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', hour12: false }).format(probe)
   );
   const offsetMs = (laHour - 12) * 3600000;
   const midnightLA = new Date(`${laDateStr}T00:00:00Z`);
@@ -557,7 +559,7 @@ router.post('/poi-webhook', async (req: Request, res: Response) => {
       if (label && (now - lastNotified) > SIGHTING_COOLDOWN_MS) {
         sightingCooldown.set(cooldownKey, now);
         const timeStr = new Date(occurredAt).toLocaleString('en-US', {
-          timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit', hour12: true,
+          timeZone: getEstateTimezone(), hour: 'numeric', minute: '2-digit', hour12: true,
         });
         const whatsappUrl = process.env.WHATSAPP_WEBHOOK_URL;
         if (whatsappUrl) {
@@ -750,15 +752,8 @@ router.post('/poi-webhook', async (req: Request, res: Response) => {
 
 router.get('/activity-summary', requireAuth, async (_req: AuthenticatedRequest, res: Response) => {
   try {
-    const laDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-    const probe = new Date(`${laDateStr}T12:00:00Z`);
-    const laHour = parseInt(
-      new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hour12: false }).format(probe)
-    );
-    const offsetMs = (laHour - 12) * 3600000;
-    const midnightLA = new Date(`${laDateStr}T00:00:00Z`);
-    midnightLA.setTime(midnightLA.getTime() - offsetMs);
-    const todayStart = midnightLA.toISOString();
+    const todayStart = getTodayStartLA();
+    const tz = getEstateTimezone();
 
     const { rows: uniquePeopleRows } = await query(
       `SELECT COUNT(DISTINCT
@@ -788,7 +783,7 @@ router.get('/activity-summary', requireAuth, async (_req: AuthenticatedRequest, 
 
     const { rows: hourlyRows } = await query(
       `SELECT
-        EXTRACT(HOUR FROM occurred_at AT TIME ZONE 'America/Los_Angeles') as hour,
+        EXTRACT(HOUR FROM occurred_at AT TIME ZONE '${tz}') as hour,
         COUNT(DISTINCT CASE WHEN event_type = 'person_of_interest' AND person_id IS NOT NULL THEN
           CASE
             WHEN person_label IS NOT NULL AND person_label != '' THEN person_label
@@ -799,7 +794,7 @@ router.get('/activity-summary', requireAuth, async (_req: AuthenticatedRequest, 
         COUNT(DISTINCT CASE WHEN event_type = 'license_plate' AND vehicle_plate IS NOT NULL THEN vehicle_plate END) as unique_vehicles
       FROM verkada_events
       WHERE occurred_at >= $1
-      GROUP BY EXTRACT(HOUR FROM occurred_at AT TIME ZONE 'America/Los_Angeles')
+      GROUP BY EXTRACT(HOUR FROM occurred_at AT TIME ZONE '${tz}')
       ORDER BY hour`,
       [todayStart]
     );
@@ -891,7 +886,7 @@ router.get('/webhook-health', requireAuth, async (_req: AuthenticatedRequest, re
     const lastWebhookAt = lastWebhookReceivedAt;
 
     const nowLA = new Date();
-    const laHourStr = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hour12: false }).format(nowLA);
+    const laHourStr = new Intl.DateTimeFormat('en-US', { timeZone: getEstateTimezone(), hour: 'numeric', hour12: false }).format(nowLA);
     const laHour = parseInt(laHourStr);
     const isDaytime = laHour >= 7 && laHour < 22;
 
@@ -951,15 +946,7 @@ router.get('/connection-status', requireAuth, async (_req: AuthenticatedRequest,
 
 router.get('/sighting-health', requireAuth, async (_req: AuthenticatedRequest, res: Response) => {
   try {
-    const laDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-    const probe = new Date(`${laDateStr}T12:00:00Z`);
-    const laHour = parseInt(
-      new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hour12: false }).format(probe)
-    );
-    const offsetMs = (laHour - 12) * 3600000;
-    const midnightLA = new Date(`${laDateStr}T00:00:00Z`);
-    midnightLA.setTime(midnightLA.getTime() - offsetMs);
-    const todayStart = midnightLA.toISOString();
+    const todayStart = getTodayStartLA();
 
     const { rows: byCameraRows } = await query(
       `SELECT camera_name,
@@ -1134,15 +1121,7 @@ router.delete('/vehicle-profiles/:id', requireAuth, async (req: AuthenticatedReq
 
 router.get('/vehicle-sightings', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const laDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-    const probe = new Date(`${laDateStr}T12:00:00Z`);
-    const laHour = parseInt(
-      new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hour12: false }).format(probe)
-    );
-    const offsetMs = (laHour - 12) * 3600000;
-    const midnightLA = new Date(`${laDateStr}T00:00:00Z`);
-    midnightLA.setTime(midnightLA.getTime() - offsetMs);
-    const todayStart = midnightLA.toISOString();
+    const todayStart = getTodayStartLA();
 
     const filterPlate = typeof req.query.plate === 'string' && req.query.plate.trim()
       ? req.query.plate.trim().toUpperCase()

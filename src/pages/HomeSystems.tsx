@@ -39,6 +39,7 @@ import { VerkadaVehicleTracker } from '@/components/dashboard/systems/VerkadaVeh
 import { NetworkDashboard } from '@/components/dashboard/systems/NetworkDashboard';
 import { GoAccessLogCard } from '@/components/dashboard/systems/GoAccessLogCard';
 import { GoAccessVisitorChart } from '@/components/dashboard/systems/GoAccessVisitorChart';
+import { HAAreasCard } from '@/components/home-assistant/HAAreasCard';
 import { Waves, Flame, Car, Printer, Zap, Activity, Home, Lightbulb, Thermometer, Server, LayoutDashboard, Droplets, Shield, Users, Camera, Lock, DoorClosed, DoorOpen, Wifi, RefreshCw, DollarSign } from 'lucide-react';
 
 const SYSTEMS_GROUPS: SectionGroup[] = [
@@ -46,6 +47,12 @@ const SYSTEMS_GROUPS: SectionGroup[] = [
     group: 'Overview',
     items: [
       { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+    ],
+  },
+  {
+    group: 'Areas & Rooms',
+    items: [
+      { id: 'areas', label: 'Areas & Rooms', icon: Home },
     ],
   },
   {
@@ -165,6 +172,7 @@ export default function HomeSystems() {
 
   const SECTION_CONTENT: Record<string, React.ReactNode> = {
     'overview': <SystemsOverview onNavigate={setSection} />,
+    'areas': <ErrorBoundary name="ha-areas"><HAAreasCard /></ErrorBoundary>,
     'security-activity': <VerkadaDailyTracker />,
     'security-people': <VerkadaPeopleTracker />,
     'security-cars': <VerkadaVehicleTracker />,

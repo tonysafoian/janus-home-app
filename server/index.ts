@@ -1,7 +1,4 @@
-// Default to Pacific Time if TZ unset. The household automations run on local time
-// (cron windows, calendar events, morning briefings, etc.).
-// Opt-out by setting TZ in your environment (e.g. TZ=America/New_York).
-process.env.TZ = process.env.TZ || "America/Los_Angeles";
+process.env.TZ = process.env.TZ || process.env.TIME_ZONE || "UTC";
 
 import "dotenv/config";
 import fs from "fs";

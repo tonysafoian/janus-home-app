@@ -1,18 +1,17 @@
 import { logAudit } from "../../lib/auditLog.js";
+import { getEstateTimezone } from "../../lib/estateConfig.js";
 
 const DAILY_CAP = 30;
 const MIN_SPACING_MS = 30_000;
 const COST_USD_PER_CALL = 0.05;
 
-const laDateFormatter = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "America/Los_Angeles",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-
-function laDayKey(now = new Date()): string {
-  return laDateFormatter.format(now);
+function estateDayKey(now = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: getEstateTimezone(),
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
 }
 
 const state: {
@@ -20,13 +19,13 @@ const state: {
   count: number;
   lastAllowedAtMs: number;
 } = {
-  dayKey: laDayKey(),
+  dayKey: estateDayKey(),
   count: 0,
   lastAllowedAtMs: 0,
 };
 
 function rolloverIfNeeded(now: Date): void {
-  const today = laDayKey(now);
+  const today = estateDayKey(now);
   if (today !== state.dayKey) {
     state.dayKey = today;
     state.count = 0;
@@ -120,7 +119,7 @@ async function safeAudit(
 
 // Test-only — reset in-memory counters between unit tests.
 export function __resetBrowseWebsiteGuardForTests(): void {
-  state.dayKey = laDayKey();
+  state.dayKey = estateDayKey();
   state.count = 0;
   state.lastAllowedAtMs = 0;
 }
