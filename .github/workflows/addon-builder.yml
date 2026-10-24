@@ -21,15 +21,17 @@ permissions:
 jobs:
   build:
     name: Build & Push (${{ matrix.arch }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - arch: amd64
+            os: ubuntu-latest
             platform: linux/amd64
             base: ghcr.io/home-assistant/amd64-base:3.19
           - arch: aarch64
+            os: ubuntu-24.04-arm
             platform: linux/arm64
             base: ghcr.io/home-assistant/aarch64-base:3.19
 
@@ -61,6 +63,8 @@ jobs:
             BUILD_FROM=${{ matrix.base }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/janus-${{ matrix.arch }}:latest
-            ghcr.io/${{ github.repository_owner }}/janus-${{ matrix.arch }}:1.0.24
+            ghcr.io/${{ github.repository_owner }}/janus-${{ matrix.arch }}:1.0.25
+            ghcr.io/${{ github.repository_owner }}/janus-${{ matrix.arch }}:v1.0.25
             ghcr.io/${{ github.repository_owner }}/janus-home-app-${{ matrix.arch }}:latest
-            ghcr.io/${{ github.repository_owner }}/janus-home-app-${{ matrix.arch }}:1.0.24
+            ghcr.io/${{ github.repository_owner }}/janus-home-app-${{ matrix.arch }}:1.0.25
+            ghcr.io/${{ github.repository_owner }}/janus-home-app-${{ matrix.arch }}:v1.0.25
