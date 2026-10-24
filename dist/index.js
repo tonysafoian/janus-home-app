@@ -3066,6 +3066,7 @@ var init_supabase = __esm({
       constructor(bucket) {
         this.bucket = bucket;
       }
+      bucket;
       async upload(filePath, body, _options) {
         try {
           const buffer = Buffer.from(body);
@@ -6929,6 +6930,7 @@ var init_hnsw = __esm({
       constructor(before) {
         this.before = before;
       }
+      before;
       a = [];
       get size() {
         return this.a.length;
@@ -35611,6 +35613,7 @@ var GmailApiError = class extends Error {
     this.status = status;
     this.name = "GmailApiError";
   }
+  status;
 };
 async function searchMessages(token, query2, maxResults = 200) {
   const allMessages = [];

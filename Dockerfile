@@ -6,6 +6,8 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+RUN apk update && apk upgrade --no-cache
+
 # Install build dependencies
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -24,8 +26,8 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=5000
 
-# Install runtime utilities (curl for container healthcheck)
-RUN apk add --no-cache curl
+# Install runtime utilities (curl for container healthcheck) and apply latest OS security patches
+RUN apk update && apk upgrade --no-cache && apk add --no-cache curl
 
 # Install production dependencies only
 COPY package.json package-lock.json ./

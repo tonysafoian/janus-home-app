@@ -1,0 +1,1 @@
+import{o as e}from"./rolldown-runtime-BCiCTKAo.js";import{p as t}from"./vendor-charts-DoStmJWX.js";import{C as n}from"./vendor-query-BpSKZ4uP.js";var r=e(t(),1);n();var i=r.createContext(void 0);function a(e){let t=r.useContext(i);return e||t||`ltr`}export{a as t};
