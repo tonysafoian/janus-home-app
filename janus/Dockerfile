@@ -2,7 +2,7 @@ ARG BUILD_FROM=ghcr.io/home-assistant/alpine:3.19
 FROM ${BUILD_FROM}
 
 LABEL \
-    io.hass.version="1.0.18" \
+    io.hass.version="1.0.25" \
     io.hass.type="addon" \
     io.hass.arch="aarch64|amd64" \
     org.opencontainers.image.title="Janus" \
@@ -11,8 +11,10 @@ LABEL \
     org.opencontainers.image.licenses="Apache-2.0"
 
 # Install Node.js 20, PostgreSQL 16 server & client, git, and system dependencies
+# Runs apk upgrade to patch all base OS and C/C++ runtime libraries (musl, libstdc++, openssl, curl)
 RUN (grep -q community /etc/apk/repositories || echo "https://dl-cdn.alpinelinux.org/alpine/v3.19/community" >> /etc/apk/repositories) && \
     apk update && \
+    apk upgrade --no-cache && \
     apk add --no-cache \
     nodejs \
     npm \
@@ -30,7 +32,7 @@ WORKDIR /app
 
 # Home Assistant executes docker build with the add-on subdirectory (janus/) as context.
 # Build from the tagged release source with fallback to default branch.
-ARG BUILD_VERSION="1.0.18"
+ARG BUILD_VERSION="1.0.25"
 ARG REPO_URL="https://github.com/tonysafoian/janus-home-app.git"
 RUN (git clone --depth 1 --branch "v${BUILD_VERSION#v}" "${REPO_URL}" /tmp/repo 2>/dev/null || \
      git clone --depth 1 --branch "${BUILD_VERSION}" "${REPO_URL}" /tmp/repo 2>/dev/null || \

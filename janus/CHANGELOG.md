@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.25
+
+- **October 2026 Ecosystem Security Hardening**: Audited and patched open source dependencies against critical October 2026 vulnerability disclosures.
+- **PHP & C++ Ecosystem Assessment**: Verified Janus has zero exposure to the October 2026 "PHP2Shell" RCE flaws (CVE-2026-109618, CVE-2026-109619), containing 0% PHP runtime, 0% PHP-FPM/mod_php, and 0% native C/C++ compiled services.
+- **Container OS & C/C++ Runtime Library Upgrades**: Added `apk upgrade --no-cache` to both root `Dockerfile` and `janus/Dockerfile` ensuring all underlying Alpine base libraries (`musl`, `libstdc++`, `openssl`, `curl`) immediately pull latest vendor security patches during container build.
+- **npm Dependency Hardening**: Ran security vulnerability remediation (`npm audit fix`), resolving 24 package vulnerabilities across body-parser, undici, ws, tar, brace-expansion, xmldom, and vite without breaking changes.
+- **Dockerfile Release Alignment**: Updated `io.hass.version` and `BUILD_VERSION` to `1.0.25`.
+
 ## 1.0.24
 
 - **Home Assistant Areas & Rooms Integration**: Dynamic discovery and grouping of all entities by Home Assistant Area (`config/area_registry/list`, `config/device_registry/list`, `config/entity_registry/list`). Added `/api/ha/areas` endpoint and `HAAreasCard.tsx` on the Systems dashboard, allowing users to browse and control devices organized by physical rooms with zero manual configuration.
